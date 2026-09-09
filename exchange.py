@@ -5,6 +5,7 @@ import hmac
 import json
 import time
 import urllib.parse
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from core import Client, HOSTS, INSTRUMENT
@@ -20,7 +21,9 @@ class Exchange(Client):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.offset=0
-        self.opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
+        self.opener=urllib.request.build_opener(
+            urllib.request.ProxyHandler({}), NoRedirect(),
+            urllib.request.HTTPSHandler(context=self.ssl_context))
 
     def request(self, method, path, params=None, private=False):
         allowed={'/api/v5/trade/order','/api/v5/account/set-leverage'}
@@ -43,8 +46,15 @@ class Exchange(Client):
         try:
             with self.opener.open(req,timeout=10) as response:
                 result=json.load(response)
-        except Exception:
-            raise APIError('网络/HTTP/证书错误；若刚提交订单，结果可能未知，请勿重复提交') from None
+        except urllib.error.HTTPError as exc:
+            raise APIError(f'HTTP {exc.code}：OKX拒绝了请求；未重复提交订单') from None
+        except urllib.error.URLError as exc:
+            reason=str(exc.reason).replace('\n',' ')[:180]
+            raise APIError('HTTPS连接失败：'+reason+'；未提交订单') from None
+        except TimeoutError:
+            raise APIError('HTTPS连接超时；若刚提交订单，结果可能未知，请勿重复提交') from None
+        except Exception as exc:
+            raise APIError('HTTPS连接失败：'+type(exc).__name__+'；若刚提交订单，结果可能未知，请勿重复提交') from None
         if result.get('code')!='0':
             raise APIError('OKX错误码 '+str(result.get('code'))+'（核对环境、权限、地区与系统时间）')
         data=result.get('data')
