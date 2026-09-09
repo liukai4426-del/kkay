@@ -1,4 +1,7 @@
-# OKX Local · Intel Mac 测试安装包
+# OKX Local 1.1 · Intel Mac 测试安装包
+
+新增：RSI极值评分自动交易、只读重连、深色评分控制台、历史收益与胜率。详见随包 `RELEASE-1.1.md`。
+升级时退出旧App再替换。风险设置改用独立的 `settings-v1.1.json`，默认评分7、止损0.8×1H ATR、止盈1.5R；旧订单/故障锁/历史记录保留，不要删除它们。
 
 适用目标：Intel Mac、macOS 14 及更新版本。已打包 Python、Tk 和 HTTPS 根证书，不需要你另外安装 Python，不使用爬虫或云端交易服务器。
 
