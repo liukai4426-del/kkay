@@ -1,0 +1,321 @@
+"""Single-position, fail-closed automatic engine. Demo by default in GUI."""
+import hashlib
+import json
+import math
+import os
+import time
+import uuid
+from dataclasses import dataclass, asdict
+from datetime import datetime, timezone
+from decimal import Decimal, ROUND_DOWN, ROUND_UP
+from pathlib import Path
+from core import INSTRUMENT, signal
+
+class Halt(RuntimeError):
+    pass
+
+@dataclass(frozen=True)
+class Settings:
+    capital:float=100
+    max_notional:float=100
+    leverage:int=5
+    risk_usdt:float=1
+    risk_pct:float=1
+    daily_loss:float=3
+    consecutive_losses:int=3
+    cooldown_minutes:int=30
+    stop_atr:float=1
+    reward_r:float=2
+    fee_bps:float=10
+    slippage_bps:float=5
+
+    def validate(self):
+        for name,value in asdict(self).items():
+            if not isinstance(value,(int,float)) or not math.isfinite(value) or value<=0:
+                raise Halt(name+' 必须是有限正数')
+        if int(self.leverage)!=self.leverage or not 1<=self.leverage<=10:
+            raise Halt('首版杠杆范围1—10倍（整数）')
+        if int(self.consecutive_losses)!=self.consecutive_losses or self.consecutive_losses>20:
+            raise Halt('连续亏损上限必须是1—20的整数')
+        if self.risk_pct>5 or self.risk_usdt>self.capital*.05:
+            raise Halt('首版单笔风险不得超过配置资金的5%')
+        if self.daily_loss>self.capital or self.max_notional>self.capital*self.leverage:
+            raise Halt('日亏损/名义仓位超出资金与杠杆范围')
+        if not .6<=self.stop_atr<=3 or not 1<=self.reward_r<=5:
+            raise Halt('ATR倍数范围0.6—3；止盈R范围1—5')
+        if not 5<=self.fee_bps<=100 or not 1<=self.slippage_bps<=30:
+            raise Halt('单边手续费预算5—100bps；限价偏移1—30bps')
+        return self
+
+def rounded(value,tick,up=False):
+    v,t=Decimal(str(value)),Decimal(str(tick))
+    return format((v/t).to_integral_value(rounding=ROUND_UP if up else ROUND_DOWN)*t,'f')
+
+def make_plan(s,side,ticker,meta,atr,available,daily_remaining):
+    s.validate()
+    if side not in ('做多','做空') or not math.isfinite(atr) or atr<=0:
+        raise Halt('无效信号或ATR')
+    buy=side=='做多'; d=1 if buy else -1
+    ask,bid=float(ticker['askPx']),float(ticker['bidPx'])
+    if not 0<bid<=ask or (ask-bid)/bid>s.slippage_bps/10000:
+        raise Halt('买卖价差过大')
+    limit=float(rounded((ask if buy else bid)*(1+d*s.slippage_bps/10000),meta['tickSz'],buy))
+    dist=atr*s.stop_atr
+    sl=rounded(limit-d*dist,meta['tickSz'],not buy)
+    tp=rounded(limit+d*dist*s.reward_r,meta['tickSz'],buy)
+    if not (float(sl)<limit<float(tp) if buy else float(tp)<limit<float(sl)):
+        raise Halt('止盈止损价格非法')
+    unit=float(meta['ctVal'])*float(meta.get('ctMult') or 1)
+    if unit<=0 or float(meta['minSz'])<=0 or float(meta['lotSz'])<=0:
+        raise Halt('合约单位异常')
+    fee=s.fee_bps/10000
+    per_btc=abs(limit-float(sl))+(limit+float(sl))*fee+limit*s.slippage_bps/10000
+    risk=min(s.risk_usdt,s.capital*s.risk_pct/100,daily_remaining)
+    notional=min(s.max_notional,s.capital*s.leverage,available*.9*s.leverage)
+    quantity=rounded(min(risk/per_btc,notional/limit)/unit,meta['lotSz'])
+    if Decimal(quantity)<Decimal(meta['minSz']):
+        raise Halt('风险预算不足以满足最小下单量，跳过')
+    btc=float(quantity)*unit
+    if btc*per_btc>risk+1e-9 or btc*limit>notional+1e-9:
+        raise Halt('取整后风险超限')
+    return dict(side=side,posSide='long' if buy else 'short',exchange_side='buy' if buy else 'sell',
+        px=str(limit),sz=quantity,sl=sl,tp=tp,btc=btc,notional=btc*limit,estimated_loss=btc*per_btc)
+
+class Store:
+    def __init__(self,path):
+        self.path=Path(path)
+        self.data={'active':None,'last_bar':0,'last_close':0,'streak':0,'day':'','peak':0,'halt':''}
+        if self.path.exists():
+            try:
+                self.data.update(json.loads(self.path.read_text()))
+            except Exception:
+                raise Halt('本地状态损坏；禁止自动交易。保留文件并人工核对OKX') from None
+
+    def save(self):
+        self.path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+        temp=self.path.with_suffix('.tmp')
+        fd=os.open(temp,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
+        with os.fdopen(fd,'w') as f:
+            json.dump(self.data,f,ensure_ascii=False,indent=2)
+            f.flush(); os.fsync(f.fileno())
+        os.replace(temp,self.path)
+
+    def record(self,event,data):
+        path=self.path.with_suffix('.history.jsonl')
+        fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_APPEND,0o600)
+        with os.fdopen(fd,'a') as f:
+            f.write(json.dumps(dict(time=datetime.now(timezone.utc).isoformat(),event=event,data=data),ensure_ascii=False)+'\n')
+
+class Engine:
+    def __init__(self,exchange,folder,emit=lambda kind,data:None):
+        self.x=exchange; self.folder=Path(folder); self.emit=emit
+        self.enabled=False; self.stopped=False; self.settings=None; self.store=None
+        self.market=None; self.market_at=0; self.poll_at=0
+        self.connection_id=None
+
+    def connect(self):
+        self.x.sync_time()
+        a=self.x.account()
+        uid=a.get('uid')
+        if not uid:
+            raise Halt('账户标识缺失')
+        name=hashlib.sha256((self.x.host+str(self.x.demo)+uid).encode()).hexdigest()[:24]
+        self.store=Store(self.folder/(name+'.json'))
+        self.connection_id=uid
+        self.emit('account',{'environment':'OKX模拟盘' if self.x.demo else '真实账户','mode':a.get('posMode'),
+                             'equity':self.x.balance()[0],'positions':self.x.positions(),'orders':self.x.orders()})
+        self.emit('log','只读连接检查成功；未开仓')
+
+    def halt(self,reason):
+        self.enabled=False
+        if self.store:
+            self.store.data['halt']=reason; self.store.save()
+        self.emit('alarm',reason)
+
+    def arm(self,settings):
+        settings.validate()
+        if not self.store:
+            raise Halt('先测试连接')
+        if self.store.data['halt']:
+            raise Halt('已有故障锁：'+self.store.data['halt']+'。先人工核对并解除故障锁')
+        a=self.x.account()
+        if a.get('uid')!=self.connection_id or a.get('posMode')!='long_short_mode':
+            raise Halt('首版要求专用子账户、双向持仓模式；请在OKX手动设置')
+        perms=set(a.get('perm','').split(','))
+        if 'trade' not in perms or 'withdraw' in perms:
+            raise Halt('API需要交易权限，且不得有提币权限')
+        if not self.store.data['active'] and (self.x.positions() or self.x.orders() or self.x.algos()):
+            raise Halt('BTC存在非本程序管理的仓位或挂单，请先在OKX处理')
+        self.settings=settings
+        equity,_=self.x.balance(); self.daily(equity)
+        if self.store.data['streak']>=settings.consecutive_losses:
+            raise Halt('连续亏损已达上限')
+        self.enabled=True; self.stopped=False; self.poll_at=time.monotonic()
+        self.emit('log','自动交易启动；逐仓、单仓位、每单TP/SL、每根15m信号最多一次')
+
+    def stop(self):
+        self.enabled=False; self.stopped=True
+        self.emit('log','已停止新开仓；继续监控本程序仓位。交易所TP/SL不撤销；已发送请求无法撤回')
+
+    def daily(self,equity):
+        if not math.isfinite(equity) or equity<=0:
+            raise Halt('账户权益无效')
+        state=self.store.data
+        day=datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        if state['day']!=day:
+            state.update(day=day,peak=equity,streak=0)
+        state['peak']=max(equity,state['peak']); self.store.save()
+        remaining=self.settings.daily_loss-max(0,state['peak']-equity)
+        if remaining<=0:
+            raise Halt('达到UTC日内权益回撤上限；暂停开仓，原有TP/SL继续生效')
+        return remaining
+
+    def refresh_market(self):
+        h,m=self.x.candles('1H'),self.x.candles('15m')
+        value=signal(h,m)
+        self.market=dict(value,bar=m[-1]['t'],close=m[-1]['c'])
+        self.market_at=time.time()
+        self.emit('market',self.market)
+
+    def cycle(self):
+        now=time.monotonic()
+        if self.poll_at and now-self.poll_at>60 and self.enabled:
+            self.halt('检测到睡眠或长时间停顿，必须人工重新检查后启动')
+        self.poll_at=now
+        if not self.store:
+            return
+        # Reconciliation continues when the auto-entry switch is off.
+        if self.store.data['active']:
+            self.reconcile()
+            if self.store.data['active']:
+                if self.enabled:
+                    equity,_=self.x.balance()
+                    self.daily(equity)
+                return
+        if not self.enabled:
+            return
+        equity,available=self.x.balance()
+        remaining=self.daily(equity)
+        state=self.store.data; s=self.settings
+        if state['streak']>=s.consecutive_losses:
+            raise Halt('达到连续亏损次数上限')
+        if time.time()-state['last_close']<s.cooldown_minutes*60:
+            return
+        if self.x.positions() or self.x.orders() or self.x.algos():
+            raise Halt('出现非本程序仓位或挂单，停止自动开仓')
+        expected=int(time.time()//900)*900000-900000
+        if not self.market or self.market['bar']!=expected:
+            self.refresh_market()
+        market=self.market
+        if market['bar']!=expected or time.time()-self.market_at>900:
+            raise Halt('策略K线过期')
+        if market['side']=='观望' or state['last_bar']==market['bar']:
+            return
+        ticker=self.x.ticker(); self.emit('ticker',ticker)
+        if abs(float(ticker['last'])-market['close'])>.3*market['h']['atr']:
+            self.emit('log','价格偏离信号超过0.3 ATR，本轮不追价'); return
+        plan=make_plan(s,market['side'],ticker,self.x.instrument(),market['h']['atr'],available,remaining)
+        # Check settings explicitly; set only isolated leverage for this side, never account mode.
+        self.x.post('/api/v5/account/set-leverage',{'instId':INSTRUMENT,'lever':str(s.leverage),
+                    'mgnMode':'isolated','posSide':plan['posSide']})
+        infos=self.x.get('/api/v5/account/leverage-info',{'instId':INSTRUMENT,'mgnMode':'isolated'},True)
+        if not any(i.get('posSide')==plan['posSide'] and float(i['lever'])==s.leverage and i.get('mgnMode')=='isolated' for i in infos):
+            raise Halt('逐仓杠杆回读不一致')
+        if not self.enabled:
+            return
+        cid='mac'+uuid.uuid4().hex[:28]; aid='sl'+uuid.uuid4().hex[:28]
+        # Persist BEFORE sending so network ambiguity and crashes cannot cause duplicate orders.
+        state['last_bar']=market['bar']
+        state['active']=dict(plan,client_id=cid,algo_id=aid,submitted=time.time(),equity_before=equity,filled=False)
+        self.store.save()
+        body={'instId':INSTRUMENT,'tdMode':'isolated','side':plan['exchange_side'],'posSide':plan['posSide'],
+            'ordType':'fok','px':plan['px'],'sz':plan['sz'],'clOrdId':cid,
+            'attachAlgoOrds':[{'attachAlgoClOrdId':aid,'tpTriggerPx':plan['tp'],'tpOrdPx':'-1',
+                'slTriggerPx':plan['sl'],'slOrdPx':'-1','tpTriggerPxType':'last','slTriggerPxType':'last'}]}
+        self.x.post('/api/v5/trade/order',body)
+        self.store.record('提交开仓请求',state['active'])
+        self.emit('log','已提交逐仓FOK开仓请求，附带TP/SL；尚不代表成交或保护单生效')
+        self.emit('plan',state['active'])
+
+    def reconcile(self):
+        state=self.store.data; p=state['active']
+        if not p:
+            return
+        order=self.x.order(p['client_id'])
+        status=order.get('state')
+        positions=self.x.positions()
+        if any(r.get('mgnMode')!='isolated' or r.get('posSide')!=p['posSide'] or abs(float(r['pos']))>float(p['sz'])+1e-10 for r in positions):
+            raise Halt('仓位与程序记录不一致，请立即在OKX核对')
+        if status=='canceled' and float(order.get('accFillSz') or 0)==0:
+            if positions:
+                raise Halt('订单取消但仓位非空')
+            state['active']=None; state['last_close']=time.time(); self.store.save()
+            self.store.record('FOK未成交',p)
+            self.emit('log','FOK未成交，未产生仓位；该信号不再重试'); return
+        if status not in ('filled','canceled'):
+            if time.time()-p['submitted']>15:
+                raise Halt('订单状态长时间不确定，禁止重复开仓；请到OKX核对')
+            return
+        if float(order.get('accFillSz') or 0)<=0:
+            raise Halt('成交状态异常')
+        p['filled']=True; self.store.save()
+        if not positions:
+            if time.time()-p['submitted']<10:
+                return
+            equity,_=self.x.balance()
+            pnl=equity-p['equity_before']
+            state['streak']=state['streak']+1 if pnl<0 else 0
+            state['active']=None; state['last_close']=time.time(); self.store.save()
+            self.store.record('仓位归零',dict(client_id=p['client_id'],equity_change=pnl))
+            self.emit('log',f'仓位已归零；本轮USDT权益变化 {pnl:+.4f}（含费用/资金费及外部资金变化）')
+            return
+        qty=sum(abs(float(r['pos'])) for r in positions)
+        protection=[a for a in self.x.algos() if a.get('algoClOrdId')==p['algo_id'] and a.get('state')=='live'
+            and a.get('posSide')==p['posSide'] and a.get('side')!=p['exchange_side']
+            and a.get('tdMode')=='isolated' and a.get('slTriggerPx') and a.get('tpTriggerPx')
+            and a.get('slOrdPx')=='-1' and a.get('tpOrdPx')=='-1'
+            and float(a['slTriggerPx'])==float(p['sl']) and float(a['tpTriggerPx'])==float(p['tp'])
+            and float(a.get('sz') or 0)>=qty]
+        if protection:
+            if not p.get('protected'):
+                p['protected']=True; self.store.save(); self.emit('log','已核对交易所逐仓持仓及全仓数量TP/SL保护单')
+        elif time.time()-p['submitted']>15:
+            self.halt('止盈止损保护状态无法核实，已锁住新开仓；请立即到OKX核对/平仓')
+        self.emit('position',positions)
+
+    def flatten(self):
+        self.stop()
+        p=self.store.data['active'] if self.store else None
+        if not p:
+            raise Halt('没有可识别的本程序仓位')
+        if p.get('close_id'):
+            raise Halt('已有平仓请求，禁止重复发送；请到OKX核对结果')
+        pos=self.x.positions()
+        if len(pos)!=1 or pos[0].get('posSide')!=p['posSide'] or pos[0].get('mgnMode')!='isolated':
+            raise Halt('仓位不唯一或不匹配，请在OKX平仓')
+        size=abs(float(pos[0]['pos']))
+        if size>float(p['sz'])+1e-10:
+            raise Halt('仓位数量超出本程序记录')
+        p['close_id']='cl'+uuid.uuid4().hex[:28]; self.store.save()
+        # Hedge-mode opposite side + SAME posSide means close, not a reverse opening.
+        self.x.post('/api/v5/trade/order',{'instId':INSTRUMENT,'tdMode':'isolated','posSide':p['posSide'],
+            'side':'sell' if p['posSide']=='long' else 'buy','ordType':'market','sz':str(size),'clOrdId':p['close_id']})
+        self.emit('log','仅平本程序逐仓仓位的请求已发送；请等待仓位归零，不撤销原保护单')
+
+    def acknowledge(self):
+        if self.enabled:
+            raise Halt('先停止自动开仓')
+        if self.x.positions() or self.x.orders() or self.x.algos():
+            raise Halt('账户仍有BTC仓位/挂单；请先在OKX人工处理')
+        p=self.store.data['active']
+        if p:
+            order=self.x.order(p['client_id'])
+            if order.get('state') not in ('filled','canceled'):
+                raise Halt('原订单仍无法核实，不可解除故障锁')
+            if float(order.get('accFillSz') or 0)>0:
+                equity,_=self.x.balance()
+                pnl=equity-p['equity_before']
+                self.store.data['streak']=self.store.data['streak']+1 if pnl<0 else 0
+                self.store.record('人工核对平仓',dict(client_id=p['client_id'],equity_change=pnl))
+        self.store.data['active']=None; self.store.data['halt']=''; self.store.save()
+        self.emit('log','故障锁已解除；每日权益基准、连续亏损计数与信号去重仍保留')
