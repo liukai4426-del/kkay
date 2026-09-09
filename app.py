@@ -72,7 +72,7 @@ class App:
         book.bind('<<NotebookTabChanged>>',lambda event: root.nametowidget(book.select()).lift() if book.select() else None)
         connection=ttk.Frame(book,padding=16); risk=ttk.Frame(book,padding=16); dash=ttk.Frame(book,padding=16)
         book.add(connection,text='① 连接 OKX'); book.add(risk,text='② 风险设置'); book.add(dash,text='③ 行情与交易')
-        risk_body=ttk.Frame(risk)
+        risk_body=tk.Frame(risk,bg='#101820')
         risk_body.pack(fill='both',expand=True)
         risk=risk_body
         history_tab=ttk.Frame(book,padding=16); book.add(history_tab,text='④ 历史收益')
@@ -128,9 +128,9 @@ class App:
                 'score_threshold':'自动开仓评分阈值 7—10（整数）'}
         for i,(name,label) in enumerate(labels.items()):
             col=0 if i<7 else 2; row=i%7
-            ttk.Label(risk,text=label,wraplength=260).grid(row=row,column=col,sticky='w',padx=6,pady=12)
+            tk.Label(risk,text=label,wraplength=260,bg='#101820',fg='#e5eef5',font=('Helvetica',13)).grid(row=row,column=col,sticky='w',padx=6,pady=12)
             v=tk.StringVar(value=str(defaults[name])); self.fields[name]=v
-            ttk.Entry(risk,textvariable=v,width=12).grid(row=row,column=col+1,padx=8,pady=12)
+            tk.Entry(risk,textvariable=v,width=12,bg='#192832',fg='#e5eef5',insertbackground='white',font=('Helvetica',14),highlightthickness=1,highlightbackground='#49606c',relief='flat').grid(row=row,column=col+1,padx=8,pady=12,ipady=7)
         ttk.Label(risk,text='停止后修改，下次启动生效。运行时不更改已有止盈止损。\n日亏损包含浮动盈亏/资金费及资金出入影响；达到上限暂停新开仓，不保证按上限成交。\n同一时间仅一个BTC仓位；单个TP目标全平，无分批止盈。',wraplength=850).grid(row=7,column=0,columnspan=4,sticky='w',pady=18)
         ttk.Button(risk,text='校验并保存设置（不含密钥）',command=self.save_settings).grid(row=8,column=0,columnspan=4,sticky='w')
         self.price=tk.StringVar(value='最新成交价：等待连接')

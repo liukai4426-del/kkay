@@ -68,8 +68,9 @@ def smoke_test():
                         if name=='risk':
                             page=root.nametowidget(ui.book.select())
                             body=page.winfo_children()[0]
-                            entries=[w for w in body.winfo_children() if w.winfo_class()=='TEntry']
+                            entries=[w for w in body.winfo_children() if w.winfo_class() in ('Entry','TEntry')]
                             assert len(entries)==13 and all(w.winfo_ismapped() and w.winfo_width()>30 for w in entries), 'Risk inputs not visible'
+                            assert all(0<=w.winfo_x()<body.winfo_width() and 0<=w.winfo_y()<body.winfo_height() for w in entries), 'Risk inputs outside pane'
                         target=Path(sys.argv[2]).parent/f'ui-{name}.png'
                         subprocess.run(['/usr/sbin/screencapture','-x',str(target)],check=False,timeout=10)
                 ui.finished.set()
