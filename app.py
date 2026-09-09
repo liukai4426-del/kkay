@@ -1,0 +1,252 @@
+"""Native Tk desktop UI; no listener, web server, web secrets or third-party packages."""
+import fcntl
+import json
+import os
+import queue
+import threading
+import time
+import tkinter as tk
+from tkinter import ttk, messagebox, simpledialog
+from pathlib import Path
+from dataclasses import asdict
+from core import HOSTS, INSTRUMENT
+from exchange import Exchange
+from engine import Engine, Settings, Halt
+
+DATA=Path.home()/'Library'/'Application Support'/'OKXLocal'
+
+class App:
+    def __init__(self,root,folder=DATA):
+        self.root=root; self.folder=folder
+        folder.mkdir(parents=True,exist_ok=True,mode=0o700)
+        self.lock=(folder/'instance.lock').open('a')
+        try:
+            fcntl.flock(self.lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise Halt('本地程序已运行，请使用已有窗口')
+        self.tasks=queue.Queue(); self.events=queue.Queue(); self.engine=None
+        self.busy=False; self.finished=threading.Event(); self.public_at=0
+        self.root.title('OKX Local · BTC 自动交易'); self.root.geometry('1060x820'); self.root.minsize(880,650)
+        style=ttk.Style(); style.theme_use('clam')
+        style.configure('.',font=('Helvetica',13),background='#101820',foreground='#e5eef5')
+        style.configure('TEntry',fieldbackground='#ffffff',foreground='#15202b',padding=7)
+        style.configure('TCombobox',fieldbackground='#ffffff',foreground='#15202b',padding=5)
+        style.configure('TButton',padding=8,background='#224255',foreground='white')
+        style.configure('Title.TLabel',font=('Helvetica',23,'bold'),foreground='#41e5af')
+        style.configure('TNotebook.Tab',padding=(18,10))
+        self.root.configure(bg='#101820')
+        top=ttk.Frame(root,padding=15); top.pack(fill='x')
+        ttk.Label(top,text='OKX LOCAL / BTC-USDT',style='Title.TLabel').pack(side='left')
+        self.status=tk.StringVar(value='默认停止 · 未连接')
+        ttk.Label(top,textvariable=self.status).pack(side='right')
+        note='实盘功能为待验收版本｜只在本机运行｜每单逐仓 + TP/SL｜不承诺亏损上限能覆盖跳空/滑点'
+        ttk.Label(root,text=note,padding=(15,5)).pack(fill='x')
+        book=ttk.Notebook(root); book.pack(fill='both',expand=True,padx=15,pady=10)
+        connection=ttk.Frame(book,padding=16); risk=ttk.Frame(book,padding=16); dash=ttk.Frame(book,padding=16)
+        book.add(connection,text='① 连接 OKX'); book.add(risk,text='② 风险设置'); book.add(dash,text='③ 行情与交易')
+        self.host=tk.StringVar(value=HOSTS[0]); self.mode=tk.StringVar(value='OKX模拟盘')
+        self.key=tk.StringVar(); self.secret=tk.StringVar(); self.phrase=tk.StringVar()
+        self.connection_widgets=[]
+        rows=[('账户官方域名',self.host,HOSTS),('环境',self.mode,('OKX模拟盘','真实账户')),
+              ('API Key',self.key,None),('Secret Key',self.secret,None),('Passphrase',self.phrase,None)]
+        for i,(label,var,values) in enumerate(rows):
+            ttk.Label(connection,text=label).grid(row=i,column=0,sticky='w',pady=8)
+            widget=ttk.Combobox(connection,textvariable=var,values=values,state='readonly',width=48) if values else ttk.Entry(connection,textvariable=var,show='•',width=50)
+            widget.grid(row=i,column=1,sticky='ew',padx=12,pady=8); self.connection_widgets.append(widget)
+        connection.columnconfigure(1,weight=1)
+        text=('密钥仅保存在此次运行内存中，退出后需重新填写；不会发送给GPT/Gemini。\n'
+              '使用专用交易子账户，不要与手动交易/其他机器人共用BTC仓位。\n'
+              '先用读取权限测试连接；自动交易需读取+交易权限，禁止提币权限。\n'
+              '模拟与真实账户密钥不可混用。地区/产品不支持时停止，不绕过限制。\n'
+              '“测试连接”只读取账户与持仓，不下单。程序不接入原Sites网页。')
+        ttk.Label(connection,text=text,wraplength=800,justify='left').grid(row=6,column=0,columnspan=2,sticky='w',pady=20)
+        ttk.Button(connection,text='测试连接（只读）',command=self.connect).grid(row=7,column=1,sticky='w')
+        self.account_view=tk.Text(connection,height=9,wrap='word',bg='#0b1118',fg='#c8e5f5',font=('Menlo',12))
+        self.account_view.grid(row=8,column=0,columnspan=2,sticky='nsew',pady=16); connection.rowconfigure(8,weight=1)
+        defaults=asdict(Settings())
+        settings_path=folder/'settings.json'
+        if settings_path.exists():
+            try:
+                loaded=json.loads(settings_path.read_text())
+                defaults.update({k:v for k,v in loaded.items() if k in defaults})
+            except Exception:
+                pass
+        self.fields={}
+        labels={'capital':'策略资金预算 USDT','max_notional':'最大名义仓位 USDT（不是保证金）',
+                'leverage':'逐仓杠杆 1—10倍','risk_usdt':'单笔预估亏损上限 USDT',
+                'risk_pct':'单笔预估亏损上限 %（取较小值）','daily_loss':'UTC日内权益回撤上限 USDT',
+                'consecutive_losses':'连续亏损停机次数','cooldown_minutes':'平仓后冷却时间 分钟',
+                'stop_atr':'1小时ATR止损倍数 0.6—3','reward_r':'止盈距离 / 止损距离 1—5',
+                'fee_bps':'单边手续费预算 bps（10=0.1%）','slippage_bps':'FOK限价偏移 / SL滑点预算 bps'}
+        for i,(name,label) in enumerate(labels.items()):
+            col=0 if i<6 else 2; row=i%6
+            ttk.Label(risk,text=label,wraplength=260).grid(row=row,column=col,sticky='w',padx=6,pady=12)
+            v=tk.StringVar(value=str(defaults[name])); self.fields[name]=v
+            ttk.Entry(risk,textvariable=v,width=12).grid(row=row,column=col+1,padx=8,pady=12)
+        ttk.Label(risk,text='停止后修改，下次启动生效。运行时不更改已有止盈止损。\n日亏损包含浮动盈亏/资金费及资金出入影响；达到上限暂停新开仓，不保证按上限成交。\n同一时间仅一个BTC仓位；单个TP目标全平，无分批止盈。',wraplength=850).grid(row=7,column=0,columnspan=4,sticky='w',pady=18)
+        ttk.Button(risk,text='校验并保存设置（不含密钥）',command=self.save_settings).grid(row=8,column=0,columnspan=4,sticky='w')
+        self.price=tk.StringVar(value='最新成交价：等待连接')
+        ttk.Label(dash,textvariable=self.price,style='Title.TLabel').pack(anchor='w')
+        self.signal=tk.StringVar(value='趋势策略：等待已收盘1小时/15分钟K线')
+        ttk.Label(dash,textvariable=self.signal,wraplength=900).pack(anchor='w',pady=10)
+        self.matrix=ttk.Treeview(dash,columns=('h','m'),show='tree headings',height=9)
+        self.matrix.heading('#0',text='指标'); self.matrix.heading('h',text='1小时'); self.matrix.heading('m',text='15分钟')
+        self.matrix.column('#0',width=180); self.matrix.column('h',width=200); self.matrix.column('m',width=200)
+        self.matrix.pack(fill='x')
+        for field in ('ema20','ema50','ema200','rsi','atr','upper','middle','lower','k','d','j'):
+            self.matrix.insert('', 'end', iid=field,text=field.upper(),values=('—','—'))
+        self.position=tk.StringVar(value='本程序仓位：无 / 待核对')
+        ttk.Label(dash,textvariable=self.position,wraplength=900).pack(anchor='w',pady=12)
+        actions=ttk.Frame(dash); actions.pack(fill='x',pady=8)
+        ttk.Button(actions,text='启动全自动',command=self.arm).pack(side='left',padx=3)
+        ttk.Button(actions,text='停止新开仓',command=self.stop).pack(side='left',padx=3)
+        ttk.Button(actions,text='仅平本程序仓位',command=self.flatten).pack(side='left',padx=3)
+        ttk.Button(actions,text='核对后解除故障锁',command=self.ack).pack(side='left',padx=3)
+        ttk.Label(dash,text='规则引擎，不是真正调用GPT/Gemini。电脑断网/睡眠后不再开仓；已生效的OKX保护单仍由交易所执行。',wraplength=900).pack(anchor='w',pady=12)
+        self.log=tk.Text(root,height=7,bg='#0b1118',fg='#a9d8bf',font=('Menlo',11),wrap='word')
+        self.log.pack(fill='x',padx=15,pady=(0,12))
+        self.thread=threading.Thread(target=self.worker,daemon=True); self.thread.start()
+        root.after(150,self.drain); root.protocol('WM_DELETE_WINDOW',self.quit)
+
+    def emit(self,kind,data):
+        self.events.put((kind,data))
+
+    def submit(self,kind,data=None):
+        if self.busy:
+            messagebox.showinfo('处理中','请等待当前操作完成'); return
+        self.busy=True; self.tasks.put((kind,data))
+
+    def settings(self):
+        values={k:float(v.get()) for k,v in self.fields.items()}
+        for k in ('leverage','consecutive_losses','cooldown_minutes'):
+            if int(values[k])!=values[k]:
+                raise Halt(k+'必须是整数')
+            values[k]=int(values[k])
+        return Settings(**values).validate()
+
+    def save_settings(self):
+        try:
+            if self.engine and self.engine.enabled:
+                raise Halt('先停止自动开仓，再修改设置')
+            s=self.settings()
+            path=self.folder/'settings.json'
+            fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
+            with os.fdopen(fd,'w') as f:
+                json.dump(asdict(s),f,indent=2)
+            self.emit('log','设置校验并保存成功；不包含密钥')
+        except Exception as exc:
+            messagebox.showerror('设置错误',str(exc))
+
+    def connect(self):
+        if self.engine and (self.engine.enabled or (self.engine.store and self.engine.store.data['active'])):
+            messagebox.showerror('不可切换连接','先停止并处理现有本程序订单/仓位'); return
+        config=(self.host.get(),self.key.get().strip(),self.secret.get().strip(),self.phrase.get(),self.mode.get()=='OKX模拟盘')
+        self.submit('connect',config)
+
+    def arm(self):
+        if not self.engine:
+            messagebox.showerror('未连接','先测试连接'); return
+        try:
+            s=self.settings()
+        except Exception as exc:
+            messagebox.showerror('设置错误',str(exc)); return
+        env='OKX模拟盘' if self.engine.x.demo else '真实账户'
+        summary=f'{env} / BTC-USDT-SWAP / 逐仓{s.leverage}倍\n资金预算{s.capital} USDT，最大名义仓位{s.max_notional} USDT\n单笔风险≤{min(s.risk_usdt,s.capital*s.risk_pct/100)} USDT（估计）\nUTC日回撤{s.daily_loss} USDT，连亏{s.consecutive_losses}次停止新开仓\n止损{s.stop_atr}×ATR，止盈{s.reward_r}R\n每个信号可自动下单，无需逐笔确认。\n使用专用子账户；必须确认当地账户有合约/API资格。\n本版本未经过真实资金/真实Mac验收，不保证盈利或止损成交价。'
+        token='LIVE' if not self.engine.x.demo else 'DEMO'
+        typed=simpledialog.askstring('启动全自动授权',summary+'\n\n同意上述参数请输入 '+token,parent=self.root)
+        if typed==token:
+            self.submit('arm',s)
+
+    def stop(self):
+        if self.engine:
+            self.engine.enabled=False  # immediate flag, even while a read request is pending
+        self.tasks.put(('stop',None))
+
+    def flatten(self):
+        if messagebox.askyesno('真实平仓确认','立即停止新开仓，并以市价平掉本程序管理的BTC逐仓仓位？\n网络错误时不自动重复提交；可能产生滑点。'):
+            self.stop(); self.submit('flatten')
+
+    def ack(self):
+        if messagebox.askyesno('核对确认','你已在OKX核对所有BTC仓位和普通/策略挂单？\n程序会再次读取；无法核实则拒绝解除。亏损计数不会重置。'):
+            self.submit('ack')
+
+    def worker(self):
+        while not self.finished.is_set():
+            try:
+                kind,data=self.tasks.get(timeout=5)
+            except queue.Empty:
+                kind,data='tick',None
+            try:
+                if kind=='connect':
+                    x=Exchange(*data[:4],demo=data[4]); e=Engine(x,self.folder,self.emit)
+                    e.connect(); self.engine=e
+                    self.emit('log','开始加载指标历史K线，首次可能需数十秒')
+                    e.refresh_market()
+                elif kind=='arm':
+                    if not self.engine: raise Halt('先连接')
+                    self.engine.arm(data)
+                elif kind=='stop' and self.engine:
+                    self.engine.stop()
+                elif kind=='flatten' and self.engine:
+                    self.engine.flatten()
+                elif kind=='ack' and self.engine:
+                    self.engine.acknowledge()
+                if self.engine:
+                    self.engine.cycle()
+                    if time.monotonic()-self.public_at>5:
+                        self.emit('ticker',self.engine.x.ticker()); self.public_at=time.monotonic()
+                    self.emit('status','全自动运行 / '+('模拟盘' if self.engine.x.demo else '实盘') if self.engine.enabled else '已停止新开仓 / 继续核对持仓')
+            except Exception as exc:
+                if self.engine:
+                    self.engine.halt(str(exc))
+                else:
+                    self.emit('alarm',str(exc))
+            finally:
+                if kind!='tick': self.emit('done',None)
+
+    def drain(self):
+        try:
+            while True:
+                kind,data=self.events.get_nowait()
+                if kind=='done': self.busy=False
+                elif kind=='status': self.status.set(data)
+                elif kind=='ticker': self.price.set(f"BTC/USDT  {float(data['last']):,.2f}  ·  {time.strftime('%H:%M:%S')} 更新")
+                elif kind=='market':
+                    self.signal.set(data['side']+'｜'+data['why'])
+                    for k in self.matrix.get_children():
+                        self.matrix.item(k,values=(f"{data['h'][k]:,.2f}",f"{data['m'][k]:,.2f}"))
+                elif kind=='plan': self.position.set('本次计划：'+json.dumps(data,ensure_ascii=False))
+                elif kind=='position':
+                    self.position.set('交易所持仓：'+' / '.join(f"{p['posSide']} {p['pos']}张 · 浮盈亏 {p.get('upl','—')} USDT" for p in data))
+                elif kind=='account':
+                    self.account_view.delete('1.0','end'); self.account_view.insert('end',json.dumps(data,ensure_ascii=False,indent=2))
+                elif kind in ('log','alarm'):
+                    line=time.strftime('%Y-%m-%d %H:%M:%S')+' '+('警报：' if kind=='alarm' else '')+str(data)
+                    self.log.insert('end',line+'\n'); self.log.see('end')
+                    if int(self.log.index('end-1c').split('.')[0])>500:
+                        self.log.delete('1.0','101.0')
+                    with (self.folder/'events.log').open('a') as f:
+                        f.write(line+'\n')
+                    os.chmod(self.folder/'events.log',0o600)
+                    if kind=='alarm':
+                        self.status.set('故障锁定：停止新开仓'); self.root.bell()
+        except queue.Empty:
+            pass
+        self.root.after(150,self.drain)
+
+    def quit(self):
+        if not messagebox.askyesno('退出','退出后不再监控或开仓。已生效的交易所TP/SL继续保留。\n如有未确认请求或保护单异常，请先到OKX核对。确定退出？'):
+            return
+        if self.engine: self.engine.enabled=False
+        self.finished.set(); self.root.destroy()
+
+def main():
+    root=tk.Tk()
+    try:
+        app=App(root)
+    except Exception as exc:
+        messagebox.showerror('启动失败',str(exc)); root.destroy(); return
+    root.mainloop()
+
+if __name__=='__main__':
+    main()
