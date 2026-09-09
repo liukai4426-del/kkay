@@ -9,7 +9,8 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_DOWN, ROUND_UP
 from pathlib import Path
-from core import INSTRUMENT, signal
+from core import INSTRUMENT
+from strategy import signal
 
 class Halt(RuntimeError):
     pass
@@ -24,12 +25,15 @@ class Settings:
     daily_loss:float=3
     consecutive_losses:int=3
     cooldown_minutes:int=30
-    stop_atr:float=1
-    reward_r:float=2
+    stop_atr:float=.8
+    reward_r:float=1.5
+    score_threshold:float=7
     fee_bps:float=10
     slippage_bps:float=5
 
     def validate(self):
+        if int(self.score_threshold)!=self.score_threshold or not 7<=self.score_threshold<=10:
+            raise Halt('评分阈值必须是7—10的整数')
         for name,value in asdict(self).items():
             if not isinstance(value,(int,float)) or not math.isfinite(value) or value<=0:
                 raise Halt(name+' 必须是有限正数')
@@ -172,7 +176,7 @@ class Engine:
 
     def refresh_market(self):
         h,m=self.x.candles('1H'),self.x.candles('15m')
-        value=signal(h,m)
+        value=signal(h,m,self.settings.score_threshold if self.settings else 7)
         self.market=dict(value,bar=m[-1]['t'],close=m[-1]['c'])
         self.market_at=time.time()
         self.emit('market',self.market)
@@ -192,6 +196,9 @@ class Engine:
                     equity,_=self.x.balance()
                     self.daily(equity)
                 return
+        expected=int(time.time()//900)*900000-900000
+        if not self.market or self.market['bar']!=expected:
+            self.refresh_market()
         if not self.enabled:
             return
         equity,available=self.x.balance()
@@ -210,6 +217,10 @@ class Engine:
         if market['bar']!=expected or time.time()-self.market_at>900:
             raise Halt('策略K线过期')
         if market['side']=='观望' or state['last_bar']==market['bar']:
+            return
+        # Score and gate are independently rechecked at the execution boundary.
+        score=market.get('scores',{}).get(market['side'])
+        if not score or not score['gate'] or score['total']<s.score_threshold:
             return
         ticker=self.x.ticker(); self.emit('ticker',ticker)
         if abs(float(ticker['last'])-market['close'])>.3*market['h']['atr']:
@@ -266,7 +277,7 @@ class Engine:
             pnl=equity-p['equity_before']
             state['streak']=state['streak']+1 if pnl<0 else 0
             state['active']=None; state['last_close']=time.time(); self.store.save()
-            self.store.record('仓位归零',dict(client_id=p['client_id'],equity_change=pnl))
+            self.store.record('仓位归零',dict(client_id=p['client_id'],equity_change=pnl,side=p['side'],px=p['px'],sz=p['sz']))
             self.emit('log',f'仓位已归零；本轮USDT权益变化 {pnl:+.4f}（含费用/资金费及外部资金变化）')
             return
         qty=sum(abs(float(r['pos'])) for r in positions)
@@ -316,6 +327,6 @@ class Engine:
                 equity,_=self.x.balance()
                 pnl=equity-p['equity_before']
                 self.store.data['streak']=self.store.data['streak']+1 if pnl<0 else 0
-                self.store.record('人工核对平仓',dict(client_id=p['client_id'],equity_change=pnl))
+                self.store.record('人工核对平仓',dict(client_id=p['client_id'],equity_change=pnl,side=p['side'],px=p['px'],sz=p['sz']))
         self.store.data['active']=None; self.store.data['halt']=''; self.store.save()
         self.emit('log','故障锁已解除；每日权益基准、连续亏损计数与信号去重仍保留')
