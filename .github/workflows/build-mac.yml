@@ -1,4 +1,4 @@
-name: Build Intel Mac App 1.1
+name: Build Intel Mac App 1.2 Visual
 on:
   push:
     branches:
@@ -20,7 +20,9 @@ jobs:
           python-version: '3.12'
           architecture: x64
       - name: Install packaging dependencies
-        run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3'
+        run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0'
+      - name: Create application icon
+        run: python build_icon.py
       - name: Test order engine and V1.1 scoring/network with fake exchange
         run: python -m unittest -v test_engine test_v11
       - name: Build bundled Intel application
@@ -38,17 +40,16 @@ jobs:
         run: |
           mkdir -p installer
           ditto dist/OKXLocal.app installer/OKXLocal.app
-          cp INSTALL-中文.md installer/INSTALL-中文.md
-          cp RELEASE-1.1.md installer/RELEASE-1.1.md
+          cp RELEASE-1.2.md installer/RELEASE-1.2.md
           cp "$RUNNER_TEMP/okx-smoke.txt" installer/BUILD-TEST.txt
           ln -s /Applications installer/Applications
-          hdiutil create -volname OKXLocal-1.1 -srcfolder installer -ov -format UDZO OKXLocal-1.1-Intel-test.dmg
-          shasum -a 256 OKXLocal-1.1-Intel-test.dmg > SHA256.txt
+          hdiutil create -volname OKXLocal-1.2 -srcfolder installer -ov -format UDZO OKXLocal-1.2-Intel-test.dmg
+          shasum -a 256 OKXLocal-1.2-Intel-test.dmg > SHA256.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: OKXLocal-1.1-Intel-test
+          name: OKXLocal-1.2-Intel-test
           path: |
-            OKXLocal-1.1-Intel-test.dmg
+            OKXLocal-1.2-Intel-test.dmg
             SHA256.txt
             ui-*.png
           if-no-files-found: error

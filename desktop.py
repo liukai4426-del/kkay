@@ -25,6 +25,7 @@ def smoke_test():
                  patch.object(app.messagebox, 'showerror', side_effect=AssertionError):
                 ui = app.App(root, Path(folder))
                 root.update()
+                assert '1.2' in root.title()
                 assert ui.mode.get() == 'OKX模拟盘'
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
@@ -41,10 +42,15 @@ def smoke_test():
                 rows=[dict(t=i*900000,o=100,h=101,l=99,c=100) for i in range(1002)]
                 market=dict(signal(rows,rows),bar=rows[-1]['t'],close=100)
                 ui.emit('market',market); ui.emit('network','正常')
+                for last in ('79000','79020','78990','79045'):
+                    ui.emit('ticker',{'last':last})
                 ui.emit('alarm','测试警报：无网络、无订单')
                 ui.drain(); root.update()
                 assert len(ui.score_table.get_children()) == 7
                 assert ui.score_vars['做多'].get().endswith('/ 10')
+                assert ui.price.get()=='79,045.00 USDT'
+                assert len(ui.price_history)==4
+                assert 'Short' in str(ui.score_bars['做空']['style'])
                 from engine import Store
                 from history import summarize
                 ledger=Store(Path(folder)/'fake-account.json')
@@ -78,7 +84,7 @@ def smoke_test():
                 ui.lock.close()
         finally:
             root.destroy()
-    Path(sys.argv[2]).write_text('PASS: UI, demo default, stopped state, settings, bundled CA roots. No network or orders.\n')
+    Path(sys.argv[2]).write_text('PASS: V1.2 UI, red/green scores, ticker rendering, demo default, stopped state, settings, bundled CA roots. Screenshots use synthetic test data. No network or orders.\n')
 
 
 if __name__ == '__main__':
