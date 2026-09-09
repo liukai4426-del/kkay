@@ -67,6 +67,9 @@ class App:
         ttk.Label(root,text=note,padding=(15,5)).pack(fill='x')
         book=ttk.Notebook(root); book.pack(fill='both',expand=True,padx=15,pady=10)
         self.book=book
+        # Raise the selected pane explicitly: Aqua Tk can leave a newly mapped
+        # notebook pane behind its siblings even while inputs report mapped.
+        book.bind('<<NotebookTabChanged>>',lambda event: root.nametowidget(book.select()).lift() if book.select() else None)
         connection=ttk.Frame(book,padding=16); risk=ttk.Frame(book,padding=16); dash=ttk.Frame(book,padding=16)
         book.add(connection,text='① 连接 OKX'); book.add(risk,text='② 风险设置'); book.add(dash,text='③ 行情与交易')
         risk_body=ttk.Frame(risk)

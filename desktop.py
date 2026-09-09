@@ -60,9 +60,10 @@ def smoke_test():
                     import subprocess
                     import time
                     for index,name in [(0,'connect'),(1,'risk'),(2,'scores'),(3,'history')]:
-                        ui.book.select(index); root.update()
-                        for _ in range(10):
-                            root.update(); time.sleep(.05)
+                        ui.book.select(index)
+                        root.lift(); root.focus_force()
+                        root.after(1000,root.quit)
+                        root.mainloop()
                         assert ui.log.winfo_height()>40, 'Log panel clipped'
                         if name=='risk':
                             page=root.nametowidget(ui.book.select())
