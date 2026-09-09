@@ -36,7 +36,8 @@ class App:
         style.configure('TEntry',fieldbackground='#192832',foreground='#e5eef5',padding=7,insertcolor='white')
         style.configure('TCombobox',fieldbackground='#192832',foreground='#e5eef5',padding=5)
         style.map('TCombobox',fieldbackground=[('readonly','#192832')],foreground=[('readonly','#e5eef5')])
-        style.configure('Treeview',background='#15212b',fieldbackground='#15212b',foreground='#dce7ee',rowheight=27,borderwidth=0)
+        style.configure('Treeview',background='#15212b',fieldbackground='#15212b',foreground='#dce7ee',rowheight=23,borderwidth=0)
+        style.configure('Horizontal.TProgressbar',troughcolor='#0d1921',background='#18e7a4',bordercolor='#0d1921',lightcolor='#18e7a4',darkcolor='#18e7a4',thickness=7)
         style.configure('Treeview.Heading',background='#20303c',foreground='#95aab7',font=('Helvetica',11,'bold'))
         style.map('Treeview',background=[('selected','#254b53')],foreground=[('selected','#ffffff')])
         style.configure('TNotebook',background='#101820',borderwidth=0)
@@ -133,7 +134,7 @@ class App:
         cards=ttk.Frame(dash); cards.pack(fill='x',pady=(0,12))
         self.score_vars={}; self.gate_vars={}; self.score_bars={}
         for side in ('做多','做空'):
-            card=ttk.Frame(cards,style='Card.TFrame',padding=12); card.pack(side='left',fill='both',expand=True,padx=4)
+            card=ttk.Frame(cards,style='Card.TFrame',padding=8); card.pack(side='left',fill='both',expand=True,padx=4)
             ttk.Label(card,text=side+' / LONG' if side=='做多' else side+' / SHORT',style='Card.TLabel').pack(anchor='w')
             self.score_vars[side]=tk.StringVar(value='— / 10')
             self.gate_vars[side]=tk.StringVar(value='等待评分；不是胜率')
@@ -156,13 +157,13 @@ class App:
         for field in ('ema20','ema50','ema200','rsi','atr','upper','middle','lower','k','d','j'):
             self.matrix.insert('', 'end', iid=field,text=field.upper(),values=('—','—'))
         self.position=tk.StringVar(value='本程序仓位：无 / 待核对')
-        ttk.Label(dash,textvariable=self.position,wraplength=900).pack(anchor='w',pady=12)
+        ttk.Label(dash,textvariable=self.position,wraplength=900).pack(anchor='w',pady=6)
         actions=ttk.Frame(dash); actions.pack(fill='x',pady=8)
         ttk.Button(actions,text='启动全自动',command=self.arm,style='Accent.TButton').pack(side='left',padx=3)
         ttk.Button(actions,text='停止新开仓',command=self.stop).pack(side='left',padx=3)
         ttk.Button(actions,text='仅平本程序仓位',command=self.flatten,style='Danger.TButton').pack(side='left',padx=3)
         ttk.Button(actions,text='核对后解除故障锁',command=self.ack).pack(side='left',padx=3)
-        ttk.Label(dash,text='规则引擎，不是真正调用GPT/Gemini。电脑断网/睡眠后不再开仓；已生效的OKX保护单仍由交易所执行。',wraplength=900).pack(anchor='w',pady=12)
+        ttk.Label(dash,text='规则策略 · 未调用GPT/Gemini · 断网/睡眠后不开新仓，已生效的交易所保护单保留。',wraplength=900,font=('Helvetica',10)).pack(anchor='w',pady=4)
         filterbar=ttk.Frame(root,padding=(15,0)); filterbar.pack(fill='x')
         ttk.Label(filterbar,text='运行日志').pack(side='left')
         self.log_filter=tk.StringVar(value='全部')
@@ -171,6 +172,11 @@ class App:
         self.log=tk.Text(root,height=4,bg='#0b1118',fg='#a9d8bf',font=('Menlo',11),wrap='word',state='disabled')
         self.log.tag_configure('alarm',foreground='#ff9d96'); self.log.tag_configure('log',foreground='#9acbb9')
         self.log.pack(fill='x',padx=15,pady=(0,12))
+        # Reserve the footer before allocating the flexible content area.
+        book.pack_forget()
+        self.log.pack_configure(side='bottom',before=filterbar)
+        filterbar.pack_configure(side='bottom')
+        book.pack(fill='both',expand=True,padx=15,pady=10)
         self.thread=threading.Thread(target=self.worker,daemon=True); self.thread.start()
         root.after(150,self.drain); root.protocol('WM_DELETE_WINDOW',self.quit)
 

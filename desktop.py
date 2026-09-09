@@ -58,8 +58,12 @@ def smoke_test():
                 ui.stop(); assert ui.engine is None
                 if sys.platform=='darwin' and os.environ.get('CI'):
                     import subprocess
+                    import time
                     for index,name in [(0,'connect'),(1,'risk'),(2,'scores'),(3,'history')]:
                         ui.book.select(index); root.update()
+                        for _ in range(10):
+                            root.update(); time.sleep(.05)
+                        assert ui.log.winfo_height()>40, 'Log panel clipped'
                         target=Path(sys.argv[2]).parent/f'ui-{name}.png'
                         subprocess.run(['/usr/sbin/screencapture','-x',str(target)],check=False,timeout=10)
                 ui.finished.set()

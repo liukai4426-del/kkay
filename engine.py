@@ -195,6 +195,9 @@ class Engine:
                 if self.enabled:
                     equity,_=self.x.balance()
                     self.daily(equity)
+                expected=int(time.time()//900)*900000-900000
+                if not self.market or self.market['bar']!=expected:
+                    self.refresh_market()
                 return
         expected=int(time.time()//900)*900000-900000
         if not self.market or self.market['bar']!=expected:
