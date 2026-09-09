@@ -64,6 +64,11 @@ def smoke_test():
                         for _ in range(10):
                             root.update(); time.sleep(.05)
                         assert ui.log.winfo_height()>40, 'Log panel clipped'
+                        if name=='risk':
+                            page=root.nametowidget(ui.book.select())
+                            body=page.winfo_children()[0]
+                            entries=[w for w in body.winfo_children() if w.winfo_class()=='TEntry']
+                            assert len(entries)==13 and all(w.winfo_ismapped() and w.winfo_width()>30 for w in entries), 'Risk inputs not visible'
                         target=Path(sys.argv[2]).parent/f'ui-{name}.png'
                         subprocess.run(['/usr/sbin/screencapture','-x',str(target)],check=False,timeout=10)
                 ui.finished.set()

@@ -69,6 +69,9 @@ class App:
         self.book=book
         connection=ttk.Frame(book,padding=16); risk=ttk.Frame(book,padding=16); dash=ttk.Frame(book,padding=16)
         book.add(connection,text='① 连接 OKX'); book.add(risk,text='② 风险设置'); book.add(dash,text='③ 行情与交易')
+        risk_body=ttk.Frame(risk)
+        risk_body.pack(fill='both',expand=True)
+        risk=risk_body
         history_tab=ttk.Frame(book,padding=16); book.add(history_tab,text='④ 历史收益')
         ttk.Label(history_tab,text='收益与胜率 / 本程序已平仓轮次',style='Title.TLabel').pack(anchor='w')
         self.performance=tk.StringVar(value='等待连接账户 · 暂无记录')
