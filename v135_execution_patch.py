@@ -600,6 +600,7 @@ def apply():
     engine.Engine._lookup_parent_order = _lookup_parent_order
     engine.Engine._cancel_pending_entry = _cancel_pending_entry
     engine.Engine._submit_position_close = _submit_position_close
+    engine.Engine._record_flat_trade_if_proven = _record_flat_trade_if_proven
     engine.Engine.reconcile = _reconcile
     engine.Engine.flatten = _flatten
     engine.Engine.acknowledge = _acknowledge
