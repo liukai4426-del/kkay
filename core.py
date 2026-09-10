@@ -80,14 +80,17 @@ class Client:
                     values = [float(v) for v in row[1:5]]
                     if not all(math.isfinite(v) and v > 0 for v in values):
                         raise ValueError('行情包含非法价格')
-                    rows[int(row[0])] = dict(zip(('o','h','l','c'), values))
+                    volume=float(row[5])
+                    if not math.isfinite(volume) or volume < 0:
+                        raise ValueError('行情包含非法成交量')
+                    rows[int(row[0])] = dict(zip(('o','h','l','c'), values)); rows[int(row[0])]['v']=volume
             if not batch:
                 break
             after = str(min(int(r[0]) for r in batch))
             time.sleep(.12)
         data = [dict(t=t, **rows[t]) for t in sorted(rows)]
-        step = 3600000 if bar == '1H' else 900000
-        if len(data) < 1000 or any(b['t']-a['t'] != step for a,b in zip(data, data[1:])):
+        step = 3600000 if bar == '1H' else 900000 if bar == '15m' else 300000 if bar == '5m' else 0
+        if not step or len(data) < 1000 or any(b['t']-a['t'] != step for a,b in zip(data, data[1:])):
             raise ValueError('K线不足1000根或存在缺口，暂停策略判断')
         if time.time()*1000 - (data[-1]['t']+step) > step:
             raise ValueError('K线已过期，暂停策略判断')

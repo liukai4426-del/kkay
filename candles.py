@@ -44,10 +44,10 @@ class CandleCache:
             for row in batch:
                 if len(row)<9:raise CandleStale('K线响应字段缺失，暂停判断')
                 if str(row[8])!='1':continue
-                t=int(row[0]); values=[float(v) for v in row[1:5]]
-                if t%step or not all(math.isfinite(v) and v>0 for v in values):
-                    raise CandleStale('K线时间或价格异常，暂停判断')
-                rows[t]=dict(zip(('o','h','l','c'),values))
+                t=int(row[0]); values=[float(v) for v in row[1:5]]; volume=float(row[5])
+                if t%step or not all(math.isfinite(v) and v>0 for v in values) or not math.isfinite(volume) or volume<0:
+                    raise CandleStale('K线时间、价格或成交量异常，暂停判断')
+                rows[t]=dict(zip(('o','h','l','c'),values)); rows[t]['v']=volume
 
         newest=self.api.get('/api/v5/market/candles',{'instId':INSTRUMENT,'bar':bar,'limit':'300'})
         merge(newest)

@@ -70,7 +70,7 @@ class EngineTests(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory(); self.x=FakeExchange(); self.events=[]
         self.e=Engine(self.x,self.tmp.name,lambda k,d:self.events.append((k,d))); self.e.connect()
         self.e.arm(Settings())
-        self.e.market={'side':'做多','bar':int(time.time()//300)*300000-300000,'close':60000,'h':{'atr':200},'scores':{'做多':{'gate':True,'total':7}}}
+        self.e.market={'side':'做多','bar':int(time.time()//300)*300000-300000,'close':60000,'h':{'atr':2000},'m':{'atr':200},'scores':{'做多':{'gate':True,'total':7}}}
         self.e.market_at=time.time()
     def tearDown(self): self.tmp.cleanup()
     def active(self):
@@ -88,6 +88,9 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(b['tdMode'],'isolated'); self.assertEqual(b['ordType'],'fok')
         self.assertTrue(b['attachAlgoOrds'][0]['slTriggerPx']); self.assertTrue(b['attachAlgoOrds'][0]['tpTriggerPx'])
         self.assertEqual(b['clOrdId'],p['client_id'])
+    def test_execution_uses_15m_atr(self):
+        p=self.active()
+        self.assertAlmostEqual(abs(float(p['px'])-float(p['sl'])),200,delta=.2)
     def test_pending_survives_network_error(self):
         self.x.fail=True
         with self.assertRaises(APIError): self.e.cycle()

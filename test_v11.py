@@ -35,9 +35,11 @@ class Scores(unittest.TestCase):
         false_feature=dict(kdj=False,ema=False,reversal=False,confirmed=False)
         if buy:
             periods=[true_feature,true_feature,true_feature,false_feature,false_feature,false_feature]
+            volumes=[(full,1.4),(False,.8)]
         else:
             periods=[false_feature,false_feature,false_feature,true_feature,true_feature,true_feature]
-        with patch('strategy.indicators',side_effect=indicators), patch('strategy._period',side_effect=periods):
+            volumes=[(False,.8),(full,1.4)]
+        with patch('strategy.indicators',side_effect=indicators), patch('strategy._period',side_effect=periods), patch('strategy._volume_boll_return',side_effect=volumes):
             return signal(hour,quarter,quarter,threshold)
 
     def test_full_long_scores_ten(self):
@@ -47,28 +49,33 @@ class Scores(unittest.TestCase):
     def test_rsi_is_points_not_gate(self):
         r=self.score(full=False,rsi_extreme=False)
         self.assertTrue(r['scores']['做多']['gate']); self.assertEqual(r['scores']['做多']['items'][0][1],0)
+    def test_volume_boll_return_adds_two(self):
+        r=self.score(full=True)
+        items=dict((name,pts) for name,pts,_ in r['scores']['做多']['items'])
+        self.assertEqual(items['15m BOLL外破回归 + 成交量≥20均量×1.3'],2)
     def test_exact_seven_is_eligible(self):
-        buy=True
         h=dict(rsi=24,ema200=90,ema20=100,ema50=95,down=False,up=False)
         m=dict(rsi=19,lower=90,upper=110); f=dict(rsi=50); p={}
         rows=[dict(o=100,h=101,l=99,c=100),dict(o=95,h=100,l=89,c=96)]
-        generic=dict(kdj=False,ema=False,reversal=False,confirmed=True)
-        false=dict(kdj=False,ema=False,reversal=False,confirmed=False)
-        with patch('strategy.indicators',side_effect=[h,m,f,p,p,p]), patch('strategy._period',side_effect=[generic,generic,generic,false,false,false]):
+        hfeat=dict(kdj=False,ema=False,reversal=False,confirmed=False)
+        mfeat=dict(kdj=True,ema=False,reversal=False,confirmed=True)
+        ffeat=dict(kdj=False,ema=True,reversal=False,confirmed=True)
+        off=dict(kdj=False,ema=False,reversal=False,confirmed=False)
+        with patch('strategy.indicators',side_effect=[h,m,f,p,p,p]), patch('strategy._period',side_effect=[hfeat,mfeat,ffeat,off,off,off]), patch('strategy._volume_boll_return',side_effect=[(False,1.0),(False,1.0)]):
             r=signal(rows,rows,rows,7)
         self.assertEqual(r['scores']['做多']['total'],7); self.assertTrue(r['scores']['做多']['eligible'])
     def test_strong_opposite_penalty_is_minus_two(self):
         r=self.score(full=True,strong_opposite=True)
         items=dict((name,pts) for name,pts,_ in r['scores']['做多']['items'])
         self.assertEqual(items['1H 强逆势惩罚'],-2)
-        self.assertLess(r['scores']['做多']['total'],10)
+        self.assertEqual(r['scores']['做多']['total'],8)
     def test_integer_points_and_bounds(self):
         for buy in (True,False):
             row=self.score(buy=buy,full=True)['scores']['做多' if buy else '做空']
             self.assertGreaterEqual(row['total'],0); self.assertLessEqual(row['total'],10)
             self.assertTrue(all(isinstance(i[1],int) for i in row['items']))
     def test_defaults(self):
-        s=Settings(); self.assertEqual((s.score_threshold,s.stop_atr,s.reward_r),(7,.8,1.5))
+        s=Settings(); self.assertEqual((s.score_threshold,s.stop_atr,s.reward_r),(7,1.0,1.5))
     def test_threshold_validation(self):
         for n in (0,6,7.5,11):
             with self.assertRaises(Halt): replace(Settings(),score_threshold=n).validate()

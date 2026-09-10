@@ -40,7 +40,7 @@ class Settings:
     daily_loss:float=3
     consecutive_losses:int=3
     cooldown_minutes:int=30
-    stop_atr:float=.8
+    stop_atr:float=1.0
     reward_r:float=1.5
     score_threshold:float=7
     fee_bps:float=10
@@ -184,7 +184,7 @@ class Engine:
             raise Halt('连续亏损已达上限')
         self.enabled=True; self.stopped=False; self.poll_at=time.monotonic()
         self.candle_lag_count=0; self.candle_paused=False
-        self.emit('log','自动交易启动；5m入场、15m结构、1H环境；最终评分达阈值才允许进入风控；每根5m信号最多一次')
+        self.emit('log','自动交易启动；5m入场、15m结构、1H环境；SL/TP使用15m ATR；最终评分达阈值才允许进入风控；每根5m信号最多一次')
 
     def stop(self):
         self.enabled=False; self.stopped=True
@@ -295,7 +295,7 @@ class Engine:
         ticker=self.x.ticker(); self.emit('ticker',ticker)
         if abs(float(ticker['last'])-market['close'])>.3*market['h']['atr']:
             self.emit('log','价格偏离信号超过0.3 ATR，本轮不追价'); return
-        plan=make_plan(s,market['side'],ticker,self.x.instrument(),market['h']['atr'],available,remaining)
+        plan=make_plan(s,market['side'],ticker,self.x.instrument(),market['m']['atr'],available,remaining)
         # Check settings explicitly; set only isolated leverage for this side, never account mode.
         self.x.post('/api/v5/account/set-leverage',{'instId':INSTRUMENT,'lever':str(s.leverage),
                     'mgnMode':'isolated','posSide':plan['posSide']})

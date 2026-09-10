@@ -35,7 +35,7 @@ def smoke_test():
                 saved = json.loads((Path(folder) / 'settings-v1.1.json').read_text())
                 assert saved['capital'] == 2000
                 assert not {'key', 'secret', 'phrase'} & saved.keys()
-                assert ui.fields['stop_atr'].get() == '0.8'
+                assert ui.fields['stop_atr'].get() == '1.0'
                 assert ui.fields['reward_r'].get() == '1.5'
                 assert ui.fields['score_threshold'].get() == '7'
                 # Render both score cards, details, network status and filtered alarms.

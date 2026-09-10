@@ -129,7 +129,7 @@ class App:
                 'leverage':'逐仓杠杆 1—10倍','risk_usdt':'单笔预估亏损上限 USDT',
                 'risk_pct':'单笔预估亏损上限 %（取较小值）','daily_loss':'UTC日内权益回撤上限 USDT',
                 'consecutive_losses':'连续亏损停机次数','cooldown_minutes':'平仓后冷却时间 分钟',
-                'stop_atr':'1小时ATR止损倍数 0.6—3','reward_r':'止盈距离 / 止损距离 1—5',
+                'stop_atr':'15分钟ATR止损倍数 0.6—3','reward_r':'止盈距离 / 止损距离 1—5',
                 'fee_bps':'单边手续费预算 bps（10=0.1%）','slippage_bps':'FOK限价偏移 / SL滑点预算 bps',
                 'score_threshold':'自动开仓评分阈值 7—10（整数）'}
         for i,(name,label) in enumerate(labels.items()):
@@ -285,7 +285,7 @@ class App:
         except Exception as exc:
             messagebox.showerror('设置错误',str(exc)); return
         env='OKX模拟盘' if self.engine.x.demo else '真实账户'
-        summary=f'{env} / BTC-USDT-SWAP / 逐仓{s.leverage}倍\n资金预算{s.capital} USDT，最大名义仓位{s.max_notional} USDT\n单笔风险≤{min(s.risk_usdt,s.capital*s.risk_pct/100)} USDT（估计）\nUTC日回撤{s.daily_loss} USDT，连亏{s.consecutive_losses}次停止新开仓\n止损{s.stop_atr}×ATR，止盈{s.reward_r}R\n每个信号可自动下单，无需逐笔确认。\n使用专用子账户；必须确认当地账户有合约/API资格。\n本版本未经过真实资金/真实Mac验收，不保证盈利或止损成交价。'
+        summary=f'{env} / BTC-USDT-SWAP / 逐仓{s.leverage}倍\n资金预算{s.capital} USDT，最大名义仓位{s.max_notional} USDT\n单笔风险≤{min(s.risk_usdt,s.capital*s.risk_pct/100)} USDT（估计）\nUTC日回撤{s.daily_loss} USDT，连亏{s.consecutive_losses}次停止新开仓\n止损{s.stop_atr}×15m ATR，止盈{s.reward_r}R（同一15m ATR风险距离）\n每个信号可自动下单，无需逐笔确认。\n使用专用子账户；必须确认当地账户有合约/API资格。\n本版本未经过真实资金/真实Mac验收，不保证盈利或止损成交价。'
         token='LIVE' if not self.engine.x.demo else 'DEMO'
         typed=simpledialog.askstring('启动全自动授权',summary+f'\n10分制最终评分 ≥ {s.score_threshold:g}/10；RSI不再是硬门槛，1H强逆势会扣分。\n\n同意上述参数请输入 '+token,parent=self.root)
         if typed==token:

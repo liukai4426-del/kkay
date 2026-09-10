@@ -21,7 +21,7 @@ class API:
 class Candles(unittest.TestCase):
     def test_warmup_then_no_redundant_fetch(self):
         a=API(); c=CandleCache(a)
-        self.assertGreaterEqual(len(c.read('15m')),1000)
+        data=c.read('15m'); self.assertGreaterEqual(len(data),1000); self.assertEqual(data[-1]['v'],1.0)
         count=len(a.calls); c.read('15m'); self.assertEqual(len(a.calls),count)
 
     def test_5m_supported_and_cached(self):
