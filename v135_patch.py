@@ -1,13 +1,20 @@
-"""KAYTRADE V1.3.5 runtime refinements: threshold/startup safety, explicit 50123 handling, and relaxed 15m setup gate."""
+"""KAYTRADE V1.3.5 runtime refinements and safety hotfixes."""
 import json
 import math
 import time
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 STARTUP_BUFFER_SECONDS = 5.0
 OLD_THRESHOLD_LABEL = '自动开仓评分阈值 3.5—10（0.5步进）'
 NEW_THRESHOLD_LABEL = '自动开仓评分阈值 1—10（0.5步进）'
+DAILY_STOP_TEXT = '达到中国时间日内权益回撤上限'
+
+
+class DailyRiskStop(RuntimeError):
+    """Daily drawdown is a trading stop, not a system/integrity fault."""
 
 
 def _validate_settings(self):
@@ -70,8 +77,6 @@ def _remove_15m_setup_gate(original_signal, strategy_module):
             score['eligible'] = eligible
             score['position_multiplier'] = strategy_module._position_multiplier(total) if eligible else 0.0
 
-            # 15m Setup is informational/scoring only in this refinement. It must
-            # never appear as a hard-stop reason, even when its score is zero.
             if blocked:
                 score['reason'] = f'前方强结构距离 {structure.get("front_r", 0):.2f}R < 1R，禁止开仓'
             elif not hard_trigger:
@@ -103,9 +108,65 @@ def _remove_15m_setup_gate(original_signal, strategy_module):
     return signal
 
 
+def _china_day():
+    return datetime.now(ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d')
+
+
+def _daily(self, equity):
+    """Latch a daily new-entry stop without turning it into a permanent fault lock."""
+    import engine
+
+    if not math.isfinite(equity) or equity <= 0:
+        raise engine.Halt('账户权益无效')
+    state = self.store.data
+    day = _china_day()
+    if state.get('day') != day:
+        state.update(day=day, peak=equity, daily_stop_day='', daily_notice_day='')
+    peak = float(state.get('peak') or equity)
+    state['peak'] = max(equity, peak)
+    self.store.save()
+
+    if state.get('daily_stop_day') == day:
+        raise DailyRiskStop('中国时间本日已达到权益回撤上限；停止新开仓，原有TP/SL继续生效，次日自动恢复')
+
+    remaining = self.settings.daily_loss - max(0.0, state['peak'] - equity)
+    if remaining <= 0:
+        state['daily_stop_day'] = day
+        self.store.save()
+        raise DailyRiskStop('中国时间本日已达到权益回撤上限；停止新开仓，原有TP/SL继续生效，次日自动恢复')
+    return remaining
+
+
+def _check_latest(bar, timestamp, now, step):
+    """Use OKX candle start timestamps; distinguish normal close settlement from true lag."""
+    import candles
+
+    expected = candles.expected_bar(now, step)
+    if timestamp == expected:
+        return
+
+    latest_close = datetime.fromtimestamp((timestamp + step) / 1000, timezone.utc).strftime('%H:%M:%S UTC')
+    expected_close = datetime.fromtimestamp((expected + step) / 1000, timezone.utc).strftime('%H:%M:%S UTC')
+    current = datetime.fromtimestamp(now, timezone.utc).strftime('%H:%M:%S UTC')
+    boundary = expected + step
+
+    if timestamp == expected - step and 0 <= now * 1000 - boundary <= 45000:
+        raise candles.CandlePending(
+            f'{bar} 刚收盘，等待OKX确认最新K线：上一根已确认收盘 {latest_close}，'
+            f'本应确认收盘 {expected_close}，交易所时间 {current}；最多等待45秒，不使用未确认K线'
+        )
+
+    lag = max(0.0, (expected - timestamp) / 1000)
+    raise candles.CandleLag(
+        f'{bar} K线持续过期/时间异常：上一根已确认收盘 {latest_close}，'
+        f'本应确认收盘 {expected_close}，交易所时间 {current}，落后 {lag:.0f}秒；不使用旧信号'
+    )
+
+
 def apply():
     """Apply the V1.3.5 refinements once, before the desktop UI is instantiated."""
     import app
+    import candles
     import engine
     import strategy
 
@@ -115,20 +176,20 @@ def apply():
     # 1) Execution threshold can be selected from 1 to 10, preserving 0.5-point steps.
     engine.Settings.validate = _validate_settings
 
-    # 2) 15m Setup remains part of the score, but it is no longer a hard entry
-    # gate. 5m Trigger and the forward-structure safety block remain hard gates.
+    # 2) 15m Setup remains part of score but no longer vetoes an entry.
     original_strategy_signal = strategy.signal
     relaxed_signal = _remove_15m_setup_gate(original_strategy_signal, strategy)
     strategy.signal = relaxed_signal
     engine.signal = relaxed_signal
 
+    # 3) Preserve confirmed-candle safety but distinguish normal <=45s settlement from real lag.
+    candles.check_latest = _check_latest
+    engine.check_latest = _check_latest
+
     original_app_init = app.App.__init__
 
     def app_init(self, *args, **kwargs):
         original_app_init(self, *args, **kwargs)
-
-        # app.py V1.3.5 originally clamps persisted values to >=3.5. Restore the
-        # newly supported 1-10 value after the original UI has been constructed.
         try:
             path = Path(self.settings_path)
             if path.exists():
@@ -139,8 +200,6 @@ def apply():
                     self.fields['score_threshold'].set(f'{value:g}')
         except Exception:
             pass
-
-        # Keep the visible execution-parameter description aligned with validation.
         for widget in _widgets(self.root):
             try:
                 if widget.cget('text') == OLD_THRESHOLD_LABEL:
@@ -150,10 +209,11 @@ def apply():
 
     app.App.__init__ = app_init
 
-    # 3) Every manual enable of automatic trading gets a hard 5-second no-entry
-    # buffer in the engine layer. Reconciliation and market refresh may continue,
-    # but cycle() is run with entry permission temporarily disabled during buffer.
+    # 4) Daily drawdown is a day-level stop, not a permanent fault lock.
+    engine.Engine.daily = _daily
+
     original_engine_init = engine.Engine.__init__
+    original_connect = engine.Engine.connect
     original_arm = engine.Engine.arm
     original_cycle = engine.Engine.cycle
     original_stop = engine.Engine.stop
@@ -162,22 +222,51 @@ def apply():
         original_engine_init(self, *args, **kwargs)
         self.startup_buffer_until = 0.0
 
+    def connect(self):
+        result = original_connect(self)
+        if self.store:
+            reason = str(self.store.data.get('halt') or '')
+            if DAILY_STOP_TEXT in reason:
+                self.store.data['halt'] = ''
+                if self.store.data.get('day') == _china_day():
+                    self.store.data['daily_stop_day'] = _china_day()
+                self.store.save()
+                self.emit('log', '旧版日内回撤故障锁已迁移为“当日停止新开仓”；权益峰值基准保留，次日自动恢复')
+        return result
+
     def arm(self, settings):
-        result = original_arm(self, settings)
+        try:
+            result = original_arm(self, settings)
+        except DailyRiskStop as exc:
+            self.enabled = False
+            self.startup_buffer_until = 0.0
+            day = _china_day()
+            if self.store and self.store.data.get('daily_notice_day') != day:
+                self.store.data['daily_notice_day'] = day
+                self.store.save()
+                self.emit('log', str(exc))
+            return None
         self.startup_buffer_until = time.monotonic() + STARTUP_BUFFER_SECONDS
         self.emit('log', '自动交易已开启；启动缓冲5秒，期间只更新行情/核对仓位，不允许自动开仓')
         return result
 
+    def _handle_daily_stop(self, exc):
+        day = _china_day()
+        if self.store and self.store.data.get('daily_notice_day') != day:
+            self.store.data['daily_notice_day'] = day
+            self.store.save()
+            self.emit('log', str(exc))
+        return None
+
     def run_original_cycle(self):
         try:
             return original_cycle(self)
+        except DailyRiskStop as exc:
+            return _handle_daily_stop(self, exc)
         except Exception as exc:
             if not _is_okx_50123(exc):
                 raise
 
-            # OKX 50123 is a deterministic authorization rejection. The parent
-            # order was not accepted, so keeping the pre-POST local "active"
-            # placeholder would only cause pointless 51603 reconciliation loops.
             p = self.store.data.get('active') if self.store else None
             cleared = False
             if isinstance(p, dict) and not p.get('order_id') and not p.get('filled'):
@@ -210,8 +299,6 @@ def apply():
                 try:
                     return run_original_cycle(self)
                 finally:
-                    # Do not revive trading if the user stopped it or a permanent
-                    # safety lock was written while reconciliation was running.
                     if not self.stopped and self.store and not self.store.data.get('halt'):
                         self.enabled = True
             self.startup_buffer_until = 0.0
@@ -223,6 +310,7 @@ def apply():
         return original_stop(self)
 
     engine.Engine.__init__ = engine_init
+    engine.Engine.connect = connect
     engine.Engine.arm = arm
     engine.Engine.cycle = cycle
     engine.Engine.stop = stop
