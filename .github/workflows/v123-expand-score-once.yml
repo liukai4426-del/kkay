@@ -26,7 +26,6 @@ jobs:
                   raise SystemExit(f'expected text not found in {path}: {old[:120]!r}')
               p.write_text(text.replace(old,new))
 
-          # Strategy: restore the previously compressed +1 reversal candle and +3 1H confluence.
           replace('strategy.py',
                   '"""V1.2.3 closed-candle reversal score: 10 points, no RSI hard gate."""',
                   '"""V1.2.3 closed-candle reversal score: natural 12-point maximum, no RSI hard gate."""')
@@ -43,13 +42,11 @@ jobs:
           replace('strategy.py', "f'评分 {total}/10 达标；仍需执行风控检查'", "f'评分 {total}/12 达标；仍需执行风控检查'")
           replace('strategy.py', "f'评分 {total}/10，未达 {threshold:g}'", "f'评分 {total}/12，未达 {threshold:g}'")
 
-          # Engine: threshold stays 7 by default, but the configurable ceiling follows the 12-point scale.
           replace('engine.py', 'not 7<=self.score_threshold<=10', 'not 7<=self.score_threshold<=12')
           replace('engine.py', "raise Halt('评分阈值必须是7—10的整数')", "raise Halt('评分阈值必须是7—12的整数')")
           replace('engine.py', "f\"已提交逐仓FOK开仓请求（评分 {score['total']}/10），附带TP/SL；尚不代表成交或保护单生效\"",
                   "f\"已提交逐仓FOK开仓请求（评分 {score['total']}/12），附带TP/SL；尚不代表成交或保护单生效\"")
 
-          # UI: display the expanded natural maximum while preserving default entry threshold 7.
           replace('app.py', "'score_threshold':'自动开仓评分阈值 7—10（整数）'", "'score_threshold':'自动开仓评分阈值 7—12（默认7）'")
           replace('app.py', "self.signal=tk.StringVar(value='V1.2.3 10分制 · 等待已收盘1小时/15分钟/5分钟K线')",
                   "self.signal=tk.StringVar(value='V1.2.3 自然累计最高12分 · ≥7开仓 · 等待已收盘1小时/15分钟/5分钟K线')")
@@ -61,7 +58,6 @@ jobs:
                   "typed=simpledialog.askstring('启动全自动授权',summary+f'\\n自然累计最高12分；最终评分 ≥ {s.score_threshold:g}/12 即进入开仓风控；RSI不再是硬门槛，1H强逆势会扣分。")
           replace('app.py', "self.score_vars[side].set(f\"{score['total']} / 10\")", "self.score_vars[side].set(f\"{score['total']} / 12\")")
 
-          # Smoke and score tests.
           replace('desktop.py', "assert len(ui.score_table.get_children()) == 7", "assert len(ui.score_table.get_children()) == 8")
           replace('desktop.py', "assert ui.score_vars['做多'].get().endswith('/ 10')", "assert ui.score_vars['做多'].get().endswith('/ 12')")
 
@@ -76,12 +72,8 @@ jobs:
           replace('test_v11.py', "self.assertLessEqual(row['total'],10)", "self.assertLessEqual(row['total'],12)")
           replace('test_v11.py', 'for n in (0,6,7.5,11):', 'for n in (0,6,7.5,13):')
 
-          # Release notes and CI labels.
           Path('RELEASE-1.2.3.md').write_text('''# OKX Local V1.2.3\n\n## Expanded natural scoring\n\nV1.2.3 no longer compresses the score back to 10. The positive signal weights are kept at their natural values, for a theoretical maximum of 12 points. The default automatic-entry threshold remains exactly 7 points.\n\n- 15m + 1H RSI extreme combination: +2.\n- 15m Bollinger touch + RSI oversold/overbought: +2.\n- 15m Bollinger rejection back inside the band + current volume >= 1.3x the prior 20-bar average: +2.\n- 15m KDJ J-value + K/D cross: +1.\n- 5m EMA20 reclaim/break: +1.\n- 15m reversal candle: +1.\n- Multi-timeframe confirmation, counted once: 5m = +1; 5m + 15m = +2; 5m + 15m + 1H environment = +3.\n- Strong opposite 1H trend: -2.\n- Final score is clamped to 0-12. Exactly 7 remains eligible for the separate safety/risk checks.\n\nThe volume rule only scores a rejection that returns inside the Bollinger band. A high-volume candle that keeps closing outside the band is not treated as a reversal.\n\n## ATR risk revision\n\n- Opening SL distance uses the latest closed 15m ATR.\n- Default stop distance is 1.0 x 15m ATR for new/default settings.\n- TP remains reward-R based (default 1.5R), derived from the same 15m ATR stop distance.\n- Existing saved user risk settings are preserved.\n\n## Safety behavior retained\n\nClosed-candle checks, exchange-clock calibration, CandlePending/CandleLag/CandleStale behavior, unknown-order/position/protection fail-closed locks, isolated margin checks, FOK entry behavior and attached exchange TP/SL remain unchanged. A high score never overrides those safety checks.\n\n## Validation limits\n\nCI uses fake exchange/synthetic market data and packaged UI smoke tests. It does not validate profitability and is not a real-account end-to-end trading test. The app is unsigned/not notarized.\n''')
-          replace('.github/workflows/build-mac.yml', 'name: Build Intel Mac App 1.2.3 Volume + 15m ATR', 'name: Build Intel Mac App 1.2.3 Expanded 12-Point Scoring')
-          replace('.github/workflows/build-mac.yml', 'Test order engine, V1.2.3 volume scoring, 15m ATR, network and stability guards', 'Test order engine, V1.2.3 12-point scoring, 15m ATR, network and stability guards')
 
-          # Self-remove; the resulting commit triggers the normal Intel build workflow.
           Path('.github/workflows/v123-expand-score-once.yml').unlink()
           PY
       - name: Run core tests before commit
