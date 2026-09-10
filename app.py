@@ -14,7 +14,7 @@ from exchange import Exchange, NetworkError
 from engine import Engine, Settings, Halt
 from history import summarize
 from candles import CandlePending
-from visual import theme, Card, Tabs, mark, RoundedButton, label as card_label, BG, PANEL, PANEL_ALT, FIELD, MUTED, GREEN, RED
+from visual import theme, Card, Tabs, mark, RoundedButton, RoundedEntry, RoundedCombobox, AnimatedScoreBar, ScoreTable, label as card_label, BG, PANEL, PANEL_ALT, FIELD, MUTED, GREEN, RED
 
 DATA=Path.home()/'Library'/'Application Support'/'OKXLocal'
 
@@ -33,13 +33,13 @@ class App:
         self.candle_wait_log=0
         self.log_lines=[]
         self.history_key=None; self.history_curve=[]
-        self.root.title('KAYTRADE 1.3 · BTC 策略控制台'); self.root.geometry('1200x920'); self.root.minsize(1040,840)
+        self.root.title('KAYTRADE 1.3.1 · BTC 策略控制台'); self.root.geometry('1200x920'); self.root.minsize(1040,840)
         theme(root)
         top=ttk.Frame(root,padding=15); top.pack(fill='x')
         mark(top).pack(side='left',padx=(0,12))
         brand=ttk.Frame(top); brand.pack(side='left')
         ttk.Label(brand,text='KAYTRADE',style='Title.TLabel').pack(anchor='w')
-        ttk.Label(brand,text='BTC / USDT   ·   V1.3 分层结构策略版',style='Muted.TLabel').pack(anchor='w')
+        ttk.Label(brand,text='BTC / USDT   ·   V1.3.1 视觉优化 · V1.3 分层结构策略',style='Muted.TLabel').pack(anchor='w')
         self.status=tk.StringVar(value='默认停止 · 未连接')
         ttk.Label(top,textvariable=self.status,style='Muted.TLabel').pack(side='right')
         badges=ttk.Frame(root,padding=(15,0)); badges.pack(fill='x')
@@ -90,7 +90,7 @@ class App:
               ('API Key',self.key,None),('Secret Key',self.secret,None),('Passphrase',self.phrase,None)]
         for i,(label,var,values) in enumerate(rows):
             ttk.Label(connection,text=label,style='Card.TLabel').grid(row=i+1,column=0,sticky='w',pady=8)
-            widget=ttk.Combobox(connection,textvariable=var,values=values,state='readonly',width=48) if values else ttk.Entry(connection,textvariable=var,show='•',width=50)
+            widget=RoundedCombobox(connection,textvariable=var,values=values,width=48) if values else RoundedEntry(connection,textvariable=var,show='•',width=50)
             widget.grid(row=i+1,column=1,sticky='ew',padx=12,pady=8); self.connection_widgets.append(widget)
         connection.columnconfigure(1,weight=1)
         text=('密钥仅保存在此次运行内存中，退出后需重新填写；不会发送给GPT/Gemini。\n'
@@ -129,7 +129,7 @@ class App:
             col=0 if i<7 else 2; row=i%7+1
             tk.Label(risk,text=label,wraplength=260,bg=PANEL,fg='#dbe6eb',font=('Helvetica',13),bd=0,highlightthickness=0).grid(row=row,column=col,sticky='w',padx=6,pady=10)
             v=tk.StringVar(value=str(defaults[name])); self.fields[name]=v
-            tk.Entry(risk,textvariable=v,width=12,bg=FIELD,fg='#e5eef5',insertbackground='#e5eef5',font=('Helvetica',14),highlightthickness=0,bd=0,relief='flat').grid(row=row,column=col+1,padx=8,pady=10,ipady=8)
+            RoundedEntry(risk,textvariable=v,width=12,height=38,font=('Helvetica',14)).grid(row=row,column=col+1,padx=8,pady=10)
         ttk.Label(risk,text='停止后修改，下次启动生效。运行时不更改已有止盈止损。\n日亏损包含浮动盈亏/资金费及资金出入影响；达到上限暂停新开仓，不保证按上限成交。\n同一时间仅一个BTC仓位；单个TP目标全平，无分批止盈。',wraplength=850,style='Card.TLabel').grid(row=8,column=0,columnspan=4,sticky='w',pady=16)
         RoundedButton(risk,text='校验并保存设置',command=self.save_settings,variant='accent',width=170).grid(row=9,column=0,columnspan=4,sticky='w')
         self.price=tk.StringVar(value='等待行情')
@@ -155,12 +155,12 @@ class App:
             self.score_vars[side]=tk.StringVar(value='— / 18')
             self.gate_vars[side]=tk.StringVar(value='等待评分；不是胜率')
             card_label(card,variable=self.score_vars[side],size=28,color=color,bold=True).pack(anchor='w')
-            self.score_bars[side]=ttk.Progressbar(card,maximum=18,style=('Long' if side=='做多' else 'Short')+'.Horizontal.TProgressbar'); self.score_bars[side].pack(fill='x',pady=5)
+            self.score_bars[side]=AnimatedScoreBar(card,maximum=18,color=color,height=9); self.score_bars[side].pack(fill='x',pady=7)
             card_label(card,variable=self.gate_vars[side],color=MUTED,size=10).pack(anchor='w')
         detail=Tabs(dash); detail.pack(fill='both',expand=True)
         score_tab=ttk.Frame(detail); indicator_tab=ttk.Frame(detail)
         detail.add(score_tab,text='评分明细'); detail.add(indicator_tab,text='指标数值')
-        self.score_table=ttk.Treeview(score_tab,columns=('long','short','max'),show='tree headings',height=8)
+        self.score_table=ScoreTable(score_tab,columns=('long','short','max'),show='tree headings',height=8)
         for key,title in (('#0','已收盘K线 · 评分条件'),('long','做多得分'),('short','做空得分'),('max','最高分')):
             self.score_table.heading(key,text=title,anchor='w'); self.score_table.column(key,width=300 if key=='#0' else 130,anchor='w')
         score_scroll=ttk.Scrollbar(score_tab,orient='vertical',command=self.score_table.yview)
@@ -184,7 +184,7 @@ class App:
         filterbar=ttk.Frame(root,padding=(15,0)); filterbar.pack(fill='x')
         ttk.Label(filterbar,text='运行日志').pack(side='left')
         self.log_filter=tk.StringVar(value='全部')
-        selector=ttk.Combobox(filterbar,textvariable=self.log_filter,values=('全部','警报'),state='readonly',width=10)
+        selector=RoundedCombobox(filterbar,textvariable=self.log_filter,values=('全部','警报'),width=10,height=34)
         selector.pack(side='right'); selector.bind('<<ComboboxSelected>>',lambda event:self.render_logs())
         self.log=tk.Text(root,height=3,bg=PANEL,fg='#a9d8bf',font=('Menlo',11),wrap='word',state='disabled',relief='flat',highlightthickness=0,bd=0,padx=12,pady=8)
         self.log.tag_configure('alarm',foreground='#ff9d96'); self.log.tag_configure('log',foreground='#9acbb9')
