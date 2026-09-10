@@ -6,6 +6,7 @@ on:
     paths:
       - analysis_v134_1m_100u_10x.py
       - analysis_v134_1m_100u_10x_fast.py
+      - analysis_v134_1m_100u_10x_corrected.py
       - .github/workflows/v134-1m-100u-10x-backtest.yml
   workflow_dispatch:
 permissions:
@@ -21,7 +22,7 @@ jobs:
           python-version: '3.13'
       - name: Verify V1.3.4 backtest wiring
         run: |
-          python -m py_compile strategy.py core.py engine.py analysis_v134_1m_100u_10x.py analysis_v134_1m_100u_10x_fast.py
+          python -m py_compile strategy.py core.py engine.py analysis_v134_1m_100u_10x.py analysis_v134_1m_100u_10x_fast.py analysis_v134_1m_100u_10x_corrected.py
           python - <<'PY'
           import strategy
           import analysis_v134_1m_100u_10x as b
@@ -30,14 +31,14 @@ jobs:
           assert b.S.capital == 100.0 and b.S.leverage == 10 and b.S.max_notional == 1000.0
           assert b.S.reward_r == 2.0
           assert b.S.fee_bps == 2.0 and b.S.taker_fee_bps == 5.0 and b.S.slippage_bps == 5.0
-          print('V1.3.4 one-month runner verified')
+          print('V1.3.4 corrected one-month runner verified')
           PY
       - name: Run BTC one-month backtest
-        run: python analysis_v134_1m_100u_10x_fast.py | tee v134_1m_100u_10x_console.txt
+        run: python analysis_v134_1m_100u_10x_corrected.py | tee v134_1m_100u_10x_console.txt
       - name: Upload report and trades
         uses: actions/upload-artifact@v4
         with:
-          name: KAYTRADE-V1.3.4-1M-100U-10x-Backtest
+          name: KAYTRADE-V1.3.4-1M-100U-10x-Backtest-Corrected
           path: |
             v134_1m_100u_10x_report.json
             v134_1m_100u_10x_trades.csv
