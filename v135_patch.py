@@ -1,4 +1,4 @@
-"""KAYTRADE V1.3.5 runtime refinements: 1-10 score threshold, 5s startup buffer, and explicit OKX 50123 handling."""
+"""KAYTRADE V1.3.5 runtime refinements: threshold/startup safety, explicit 50123 handling, and relaxed 15m setup gate."""
 import json
 import math
 import time
@@ -52,16 +52,75 @@ def _is_okx_50123(exc):
     return code == '50123' or 'OKX 50123' in text or '错误码 50123' in text
 
 
+def _remove_15m_setup_gate(original_signal, strategy_module):
+    """Return a signal wrapper where 15m Setup remains scored but never vetoes an entry."""
+    def signal(*args, **kwargs):
+        result = original_signal(*args, **kwargs)
+        scores = result.get('scores', {})
+        for side, score in scores.items():
+            structure = score.get('structure', {}) or {}
+            trigger = float((score.get('layers', {}) or {}).get('trigger', 0.0) or 0.0)
+            hard_trigger = trigger >= .5
+            blocked = bool(structure.get('blocked'))
+            gate = hard_trigger and not blocked
+            total = float(score.get('total', 0.0) or 0.0)
+            required = float(score.get('required', result.get('threshold', 3.5)) or 0.0)
+            eligible = gate and total >= required
+            score['gate'] = gate
+            score['eligible'] = eligible
+            score['position_multiplier'] = strategy_module._position_multiplier(total) if eligible else 0.0
+
+            # 15m Setup is informational/scoring only in this refinement. It must
+            # never appear as a hard-stop reason, even when its score is zero.
+            if blocked:
+                score['reason'] = f'前方强结构距离 {structure.get("front_r", 0):.2f}R < 1R，禁止开仓'
+            elif not hard_trigger:
+                score['reason'] = f'5m Trigger {trigger:g}/1.0 < 0.5，等待入场触发'
+            elif eligible:
+                score['reason'] = (
+                    f"{score.get('level', '信号')} · {total:g}/{result.get('score_max', 10):g} 达标；"
+                    f"按 {score['position_multiplier']:g}× 仓位进入执行与风险检查"
+                )
+            else:
+                score['reason'] = (
+                    f"{score.get('level', '信号')} · {total:g}/{result.get('score_max', 10):g}，"
+                    f"未达开仓阈值 {required:g}"
+                )
+
+        qualified = [side for side, score in scores.items() if score.get('eligible')]
+        if len(qualified) == 1:
+            selected = qualified[0]
+        elif len(qualified) == 2 and scores[qualified[0]].get('total') != scores[qualified[1]].get('total'):
+            selected = max(qualified, key=lambda side: scores[side].get('total', 0))
+        else:
+            selected = '观望'
+        result['side'] = selected
+        result['why'] = scores[selected]['reason'] if selected != '观望' else ' / '.join(
+            side + ': ' + score.get('reason', '') for side, score in scores.items()
+        )
+        return result
+
+    return signal
+
+
 def apply():
     """Apply the V1.3.5 refinements once, before the desktop UI is instantiated."""
     import app
     import engine
+    import strategy
 
     if getattr(engine.Engine, '_kaytrade_v135_patch_applied', False):
         return
 
     # 1) Execution threshold can be selected from 1 to 10, preserving 0.5-point steps.
     engine.Settings.validate = _validate_settings
+
+    # 2) 15m Setup remains part of the score, but it is no longer a hard entry
+    # gate. 5m Trigger and the forward-structure safety block remain hard gates.
+    original_strategy_signal = strategy.signal
+    relaxed_signal = _remove_15m_setup_gate(original_strategy_signal, strategy)
+    strategy.signal = relaxed_signal
+    engine.signal = relaxed_signal
 
     original_app_init = app.App.__init__
 
@@ -91,7 +150,7 @@ def apply():
 
     app.App.__init__ = app_init
 
-    # 2) Every manual enable of automatic trading gets a hard 5-second no-entry
+    # 3) Every manual enable of automatic trading gets a hard 5-second no-entry
     # buffer in the engine layer. Reconciliation and market refresh may continue,
     # but cycle() is run with entry permission temporarily disabled during buffer.
     original_engine_init = engine.Engine.__init__
