@@ -486,9 +486,16 @@ class ScoreTable(tk.Frame):
         return iid
 
     def _positions(self):
+        base=[(key,max(1,self.widths.get(key,130))) for key in self.columns]
+        base_total=sum(width for _,width in base) or 1
+        viewport=max(self.header.winfo_width(),self.canvas.winfo_width(),base_total)
+        scale=max(1.0,viewport/base_total)
         x=0; out=[]
-        for key in self.columns:
-            width=self.widths.get(key,130); out.append((key,x,width)); x+=width
+        for index,(key,width) in enumerate(base):
+            scaled=int(round(width*scale))
+            if index==len(base)-1:
+                scaled=max(1,viewport-x)
+            out.append((key,x,scaled)); x+=scaled
         return out,x
 
     def _redraw_header(self):

@@ -125,6 +125,8 @@ class App:
                 pass
         # V1.3.3 fixed execution economics are not user-editable.
         defaults['fee_bps']=2.0; defaults['taker_fee_bps']=5.0; defaults['slippage_bps']=5.0; defaults['reward_r']=2.0
+        # Consecutive-loss stop is the only fixed risk control in the Risk page.
+        defaults['consecutive_losses']=3
         self.fields={}
         def add_fields(parent,title,items):
             tk.Label(parent,text=title,bg=PANEL,fg='#eef5f7',font=('Helvetica',20,'bold'),anchor='w',bd=0).grid(row=0,column=0,columnspan=2,sticky='ew',pady=(0,14))
@@ -136,8 +138,13 @@ class App:
         add_fields(risk,'风险设置',[
             ('capital','策略资金预算 USDT'),('max_notional','最大名义仓位 USDT（不是保证金）'),
             ('risk_usdt','单笔预估亏损上限 USDT'),('risk_pct','单笔风险上限 %（与USDT上限取较小值）'),
-            ('daily_loss','中国时间日内权益回撤上限 USDT'),('consecutive_losses','中国时间连续亏损停开次数（默认3）')])
-        tk.Label(risk,text='这里只保留资金与亏损边界。达到日回撤或连亏限制时只停止新开仓，已有保护继续生效。',
+            ('daily_loss','中国时间日内权益回撤上限 USDT')])
+        self.fields['consecutive_losses']=tk.StringVar(value='3')
+        tk.Label(risk,text='中国时间连续亏损停开次数',wraplength=340,bg=PANEL,fg='#dbe6eb',
+                 font=('Helvetica',12),anchor='w',bd=0).grid(row=6,column=0,sticky='w',padx=6,pady=11)
+        tk.Label(risk,text='3（固定）',bg=PANEL,fg=MUTED,font=('Helvetica',13,'bold'),anchor='e',bd=0,
+                 padx=8,pady=8).grid(row=6,column=1,sticky='e',padx=8,pady=11)
+        tk.Label(risk,text='除连续亏损停开次数外，其余风险数值均可修改并保存；保存时仍执行基本合法性与风险边界校验。',
                  wraplength=760,bg=PANEL,fg=MUTED,font=('Helvetica',10),anchor='w',justify='left').grid(row=7,column=0,columnspan=2,sticky='w',pady=(16,8))
         RoundedButton(risk,text='校验并保存风险设置',command=self.save_settings,variant='accent',width=190).grid(row=8,column=0,columnspan=2,sticky='w')
         add_fields(execution,'交易执行参数',[
@@ -176,18 +183,25 @@ class App:
         self.plan_vars={k:tk.StringVar(value='—') for k in ('capital','risk','entry','sl','tp1','tp2','qty','loss')}
         self.plan_vars['capital'].set(f"{float(self.fields['capital'].get()):,.2f} USDT")
         self.plan_vars['risk'].set(f"{float(self.fields['risk_pct'].get()):g}%")
-        plan_surface=Card(dash,height=286); plan_surface.pack(fill='x',pady=(0,12))
+        plan_surface=Card(dash,height=360); plan_surface.pack(fill='x',pady=(0,12))
         card_label(plan_surface.body,text='交易计划',size=18,bold=True).pack(anchor='w')
         card_label(plan_surface.body,text='按账户风险与15m ATR动态计算 · TP1后自动移保本',color=MUTED,size=9).pack(anchor='w',pady=(2,10))
+        def plan_tile(parent,title,variable,accent='#eef5f7',height=74):
+            # Plain Frame avoids the Canvas background gutter that looked like a black border.
+            tile=tk.Frame(parent,bg=PANEL_ALT,bd=0,highlightthickness=0,height=height)
+            tile.pack_propagate(False)
+            card_label(tile,text=title,color=MUTED,size=9,bg=PANEL_ALT).pack(anchor='w',padx=14,pady=(11,0))
+            card_label(tile,variable=variable,color=accent,size=16,bold=True,bg=PANEL_ALT).pack(anchor='w',padx=14,pady=(5,8))
+            return tile
         top_plan=tk.Frame(plan_surface.body,bg=PANEL); top_plan.pack(fill='x',pady=(0,8))
-        MetricTile(top_plan,'账户资金',self.plan_vars['capital']).pack(side='left',fill='x',expand=True,padx=(0,5))
-        MetricTile(top_plan,'单笔风险',self.plan_vars['risk']).pack(side='left',fill='x',expand=True,padx=(5,0))
+        plan_tile(top_plan,'账户资金',self.plan_vars['capital'],height=78).pack(side='left',fill='x',expand=True,padx=(0,5))
+        plan_tile(top_plan,'单笔风险',self.plan_vars['risk'],height=78).pack(side='left',fill='x',expand=True,padx=(5,0))
         grid=tk.Frame(plan_surface.body,bg=PANEL); grid.pack(fill='x')
         tiles=[('entry','计划入场'),('sl','止损 SL'),('tp1','止盈 TP1 · 50%'),('tp2','止盈 TP2 · 余下50%'),('qty','理论数量'),('loss','最大亏损')]
         for idx,(key,title) in enumerate(tiles):
-            tile=MetricTile(grid,title,self.plan_vars[key],accent=GREEN if key in ('tp1','tp2') else RED if key=='sl' else '#eef5f7',height=72)
+            tile=plan_tile(grid,title,self.plan_vars[key],accent=GREEN if key in ('tp1','tp2') else RED if key=='sl' else '#eef5f7',height=78)
             tile.grid(row=idx//3,column=idx%3,sticky='ew',padx=4,pady=4)
-        for c in range(3):grid.columnconfigure(c,weight=1)
+        for c in range(3):grid.columnconfigure(c,weight=1,uniform='plan')
         detail=Tabs(dash); detail.pack(fill='both',expand=True)
         score_tab=ttk.Frame(detail); indicator_tab=ttk.Frame(detail)
         detail.add(score_tab,text='评分明细'); detail.add(indicator_tab,text='指标数值')
