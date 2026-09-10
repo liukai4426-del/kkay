@@ -1,0 +1,29 @@
+name: V1.2.3 Three-Month BTC Backtest
+on:
+  push:
+    branches:
+      - analysis/v123-3m-backtest-20260910
+    paths:
+      - analysis_v123_backtest.py
+      - .github/workflows/v123-3m-backtest.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run historical replay
+        run: python analysis_v123_backtest.py
+      - name: Upload backtest outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: V1.2.3-3M-Backtest
+          path: |
+            backtest_report.json
+            backtest_trades.csv
+            backtest_equity_5x.csv
+          if-no-files-found: error
+          retention-days: 14
