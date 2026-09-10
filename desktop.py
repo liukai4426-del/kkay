@@ -26,7 +26,7 @@ def smoke_test():
                  patch.object(app.messagebox, 'showerror', side_effect=AssertionError):
                 ui = app.App(root, Path(folder))
                 root.update()
-                assert '1.2' in root.title()
+                assert '1.3' in root.title()
                 assert ui.mode.get() == 'OKX模拟盘'
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
@@ -47,8 +47,8 @@ def smoke_test():
                     ui.emit('ticker',{'last':last})
                 ui.emit('alarm','测试警报：无网络、无订单')
                 ui.drain(); root.update()
-                assert len(ui.score_table.get_children()) == 8
-                assert ui.score_vars['做多'].get().endswith('/ 19')
+                assert len(ui.score_table.get_children()) == 13
+                assert ui.score_vars['做多'].get().endswith('/ 18')
                 assert ui.price.get()=='79,045.00 USDT'
                 assert len(ui.price_history)==4
                 assert 'Short' in str(ui.score_bars['做空']['style'])
@@ -99,7 +99,7 @@ def smoke_test():
                 ui.lock.close()
         finally:
             root.destroy()
-    Path(sys.argv[2]).write_text('PASS: V1.2 UI, red/green scores, ticker rendering, demo default, stopped state, settings, bundled CA roots. Screenshots use synthetic test data. No network or orders.\n')
+    Path(sys.argv[2]).write_text('PASS: V1.3 UI, layered 18-point red/green scores, ticker rendering, demo default, stopped state, settings, bundled CA roots. Screenshots use synthetic test data. No network or orders.\n')
 
 
 if __name__ == '__main__':

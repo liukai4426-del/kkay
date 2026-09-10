@@ -289,7 +289,7 @@ class App:
         except Exception as exc:
             messagebox.showerror('设置错误',str(exc)); return
         env='OKX模拟盘' if self.engine.x.demo else '真实账户'
-        summary=f'{env} / BTC-USDT-SWAP / 逐仓{s.leverage}倍\n资金预算{s.capital} USDT，最大名义仓位{s.max_notional} USDT\n单笔风险≤{min(s.risk_usdt,s.capital*s.risk_pct/100)} USDT（估计）\nUTC日回撤{s.daily_loss} USDT，连亏{s.consecutive_losses}次停止新开仓\n止损{s.stop_atr}×15m ATR，止盈{s.reward_r}R（同一15m ATR风险距离）\n每个信号可自动下单，无需逐笔确认。\n使用专用子账户；必须确认当地账户有合约/API资格。\n本版本未经过真实资金/真实Mac验收，不保证盈利或止损成交价。'
+        summary=f'{env} / BTC-USDT-SWAP / 逐仓{s.leverage}倍\n资金预算{s.capital} USDT，最大名义仓位{s.max_notional} USDT\n单笔风险≤{min(s.risk_usdt,s.capital*s.risk_pct/100)} USDT（估计）\n中国时间日回撤{s.daily_loss} USDT，连亏{s.consecutive_losses}次停止新开仓\n止损{s.stop_atr}×15m ATR，止盈{s.reward_r}R（同一15m ATR风险距离）\n每个信号可自动下单，无需逐笔确认。\n使用专用子账户；必须确认当地账户有合约/API资格。\n本版本未经过真实资金/真实Mac验收，不保证盈利或止损成交价。'
         token='LIVE' if not self.engine.x.demo else 'DEMO'
         typed=simpledialog.askstring('启动全自动授权',summary+f'\n最高18分；最终评分 ≥ {s.score_threshold:g}/18 才进入开仓风控。8–10普通 / 11–13强 / 14+高共振；1H强逆势 -3分且最终需≥11。15m Setup≥2、5m Trigger≥1；前方结构<1R禁止开仓。\n\n同意上述参数请输入 '+token,parent=self.root)
         if typed==token:
@@ -409,7 +409,7 @@ class App:
                 elif kind=='market':
                     self.signal.set(time.strftime('%m-%d %H:%M',time.localtime((data['bar']+300000)/1000))+' 5m已收盘｜'+data['side']+'｜'+data['why'])
                     for side,score in data.get('scores',{}).items():
-                        self.score_vars[side].set(f"{score['total']} / 19")
+                        self.score_vars[side].set(f"{score['total']} / {data.get('score_max',18)}")
                         self.score_bars[side]['value']=score['total']
                         self.gate_vars[side].set(score['reason'])
                     for item in self.score_table.get_children(): self.score_table.delete(item)
