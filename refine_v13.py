@@ -6,6 +6,12 @@ s=s.replace("ZoneInfo('Asia/Tokyo')","ZoneInfo('Asia/Shanghai')")
 s=s.replace('日本时间','中国时间')
 s=s.replace("day=datetime.now(timezone.utc).strftime('%Y-%m-%d')","day=datetime.now(ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d')")
 s=s.replace('达到UTC日内权益回撤上限','达到中国时间日内权益回撤上限')
+# Stopping new entries must not cancel an order that already has a live position.
+old="if p and not p.get('filled') and not p.get('cancel_requested'):\n            self._cancel_pending_entry(p,'手动停止自动交易')"
+new="if p and not p.get('filled') and not p.get('cancel_requested') and not self.x.positions():\n            self._cancel_pending_entry(p,'手动停止自动交易')"
+if s.count(old)!=1:
+    raise RuntimeError(f'stop pending-entry refinement expected once, got {s.count(old)}')
+s=s.replace(old,new,1)
 p.write_text(s)
 
 p=Path('app.py'); s=p.read_text()
