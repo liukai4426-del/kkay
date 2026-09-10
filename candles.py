@@ -7,7 +7,10 @@ class CandlePending(RuntimeError):
     """Latest closed candle is still settling within the 45-second window."""
 
 class CandleStale(RuntimeError):
-    pass
+    """Candle data is structurally unsafe and requires fail-closed handling."""
+
+class CandleLag(CandleStale):
+    """Expected closed candle is late; callers may retry before requiring manual action."""
 
 def expected_bar(now, step):
     return int(now*1000)//step*step-step
@@ -22,7 +25,7 @@ def check_latest(bar, timestamp, now, step):
     boundary=expected+step
     if timestamp==expected-step and 0<=now*1000-boundary<=45000:
         raise CandlePending(message)
-    raise CandleStale(message.replace('等待更新','持续过期/时间异常，已暂停'))
+    raise CandleLag(message.replace('等待更新','持续过期/时间异常，已暂停本轮判断'))
 
 class CandleCache:
     def __init__(self,api):
