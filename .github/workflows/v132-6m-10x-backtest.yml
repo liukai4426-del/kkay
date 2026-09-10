@@ -1,0 +1,48 @@
+name: KAYTRADE V1.3.2 Six-Month BTC 10x Backtest
+on:
+  push:
+    branches:
+      - analysis/v132-6m-10x-backtest-20260910
+    paths:
+      - analysis_v132_6m_10x.py
+      - strategy.py
+      - core.py
+      - .github/workflows/v132-6m-10x-backtest.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backtest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Verify strategy and parameters
+        run: |
+          python -m py_compile strategy.py core.py analysis_v132_6m_10x.py
+          python - <<'PY'
+          import strategy
+          import analysis_v132_6m_10x as b
+          assert strategy.SCORE_MAX == 10.0
+          assert strategy.NORMAL_THRESHOLD == 4.0
+          assert b.START_EQUITY == 1000.0
+          assert b.MAX_LEVERAGE == 10.0
+          assert b.ENTRY_MAKER_BPS == 2.0
+          assert b.EXIT_TAKER_BPS == 5.0
+          print('V1.3.2 six-month 10x parameters verified')
+          PY
+      - name: Run six-month BTC backtest
+        run: python analysis_v132_6m_10x.py | tee v132_6m_10x_console.txt
+      - name: Upload report and trades
+        uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.3.2-6M-10x-Backtest
+          path: |
+            v132_6m_10x_report.json
+            v132_6m_10x_trades.csv
+            v132_6m_10x_console.txt
+          if-no-files-found: error
+          retention-days: 14
