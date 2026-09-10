@@ -54,18 +54,9 @@ def _widgets(root):
     return out
 
 
-def _is_okx_50123(exc):
-    code = str(getattr(exc, 'code', '') or '')
-    text = str(exc or '')
-    return code == '50123' or 'OKX 50123' in text or '错误码 50123' in text
-
-
 def _is_explicit_rejection(exc):
-    """True only when OKX returned a parsed rejection, never for uncertain writes."""
-    code = str(getattr(exc, 'code', '') or '')
-    if code == '51603':
-        return False
-    return bool(getattr(exc, 'deterministic', False))
+    """Only a parsed POST rejection may prove that an exchange write was not accepted."""
+    return bool(getattr(exc, 'write_rejected', False))
 
 
 def _remove_15m_setup_gate(original_signal, strategy_module):
@@ -173,7 +164,7 @@ def _check_latest(bar, timestamp, now, step):
 
 
 def _market_split_tp_post(original_post):
-    """Force split TP exits to market as required by V1.3.5 and OKX split-TP rules."""
+    """Force split TP to market and validate every successful trade-order acknowledgement."""
     def post(self, path, body):
         payload = body
         if path == '/api/v5/trade/order' and isinstance(body, dict) and body.get('attachAlgoOrds'):
@@ -183,7 +174,32 @@ def _market_split_tp_post(original_post):
                 for item in tps:
                     item['tpOrdKind'] = 'condition'
                     item['tpOrdPx'] = '-1'
-        return original_post(self, path, payload)
+
+        reply = original_post(self, path, payload)
+        if path != '/api/v5/trade/order':
+            return reply
+
+        # A HTTP/OKX success without a usable ordId is not proof of failure.
+        # Treat response-integrity problems as UNKNOWN, preserving the caller's
+        # pre-write idempotency marker and forbidding an automatic retry.
+        import exchange
+        row = reply[0] if isinstance(reply, list) and reply else None
+        if not isinstance(row, dict):
+            raise exchange.APIError(
+                'OKX交易请求响应为空/结构异常；写入结果需核对，禁止重复提交',
+                method='POST', path=path)
+        order_id = str(row.get('ordId') or '')
+        if not order_id:
+            raise exchange.APIError(
+                'OKX交易请求响应缺少ordId；写入结果需核对，禁止重复提交',
+                method='POST', path=path)
+        sent_client = str(payload.get('clOrdId') or '') if isinstance(payload, dict) else ''
+        returned_client = str(row.get('clOrdId') or '')
+        if sent_client and returned_client and sent_client != returned_client:
+            raise exchange.APIError(
+                'OKX交易请求返回的clOrdId与本地请求不一致；写入结果需核对，禁止重复提交',
+                method='POST', path=path)
+        return reply
     return post
 
 
@@ -212,7 +228,8 @@ def apply():
     engine.check_latest = _check_latest
 
     # 4) V1.3.5 requires market exits. In OKX split-TP mode, both condition TP
-    # legs use tpOrdPx=-1 while the SL already uses slOrdPx=-1.
+    # legs use tpOrdPx=-1 while the SL already uses slOrdPx=-1. The wrapper also
+    # validates ordId/clOrdId for parent, partial-close and manual-close orders.
     original_exchange_post = exchange.Exchange.post
     exchange.Exchange.post = _market_split_tp_post(original_exchange_post)
 
@@ -248,6 +265,7 @@ def apply():
     original_cycle = engine.Engine.cycle
     original_stop = engine.Engine.stop
     original_reconcile = engine.Engine.reconcile
+    original_flatten = engine.Engine.flatten
 
     def engine_init(self, *args, **kwargs):
         original_engine_init(self, *args, **kwargs)
@@ -313,8 +331,8 @@ def apply():
         self.startup_buffer_until = 0.0
         code = str(getattr(exc, 'code', '') or '')
         detail = '；已清理本地未成交占位，不进入51603订单核对' if cleared else '；本地活动状态保留，禁止重复提交'
-        if code == '50123' or _is_okx_50123(exc):
-            message = 'OKX 50123：API Key没有BTC/对应交易市场的下单权限；本次请求被OKX明确拒绝，订单未创建'
+        if code == '50123':
+            message = 'OKX 50123：API Key没有BTC/对应交易市场的下单权限；本次写入请求被OKX明确拒绝，没有产生本次新开仓订单'
         else:
             message = 'OKX明确拒绝交易请求'+(f'（错误码 {code}）' if code else '')+'：'+str(exc)
         raise engine.Halt(message + detail + '；已停止新开仓，请核对原因后重新测试连接/启动') from None
@@ -325,7 +343,7 @@ def apply():
         except DailyRiskStop as exc:
             return _handle_daily_stop(self, exc)
         except Exception as exc:
-            if _is_explicit_rejection(exc) or _is_okx_50123(exc):
+            if _is_explicit_rejection(exc):
                 return _handle_explicit_rejection(self, exc)
             raise
 
@@ -363,6 +381,31 @@ def apply():
             self.emit('log', '已核对TP1/TP2均为触发后市价止盈（tpOrdPx=-1），SL为市价止损；分批保护结构有效')
         return result
 
+    def flatten(self):
+        try:
+            return original_flatten(self)
+        except Exception as exc:
+            # Manual close persists close_id before POST to prevent duplicates.
+            # If OKX explicitly rejects that POST, the close order definitely was
+            # not created, so release only close_id and let the user retry after
+            # fixing the cause. Unknown network/write outcomes keep close_id.
+            if _is_explicit_rejection(exc) and self.store:
+                p = self.store.data.get('active')
+                if isinstance(p, dict) and p.get('close_id'):
+                    rejected_id = p.get('close_id')
+                    p.pop('close_id', None)
+                    p.pop('close_requested', None)
+                    p['last_close_rejection'] = {
+                        'time': time.time(),
+                        'code': str(getattr(exc, 'code', '') or ''),
+                        'message': str(exc),
+                        'client_id': rejected_id,
+                    }
+                    self.store.save()
+                    self.store.record('手动平仓被OKX明确拒绝', p['last_close_rejection'])
+                    self.emit('log', '手动市价平仓被OKX明确拒绝；未创建平仓单，已释放本地close_id，可在修正原因后再次手动提交')
+            raise
+
     def stop(self):
         self.startup_buffer_until = 0.0
         return original_stop(self)
@@ -372,5 +415,6 @@ def apply():
     engine.Engine.arm = arm
     engine.Engine.cycle = cycle
     engine.Engine.reconcile = reconcile
+    engine.Engine.flatten = flatten
     engine.Engine.stop = stop
     engine.Engine._kaytrade_v135_patch_applied = True
