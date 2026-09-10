@@ -58,6 +58,30 @@ def _position_size(self, p, positions):
     return format(normalized, 'f'), rows[0]
 
 
+def _matching_fills(self, p):
+    """Return fills belonging to this parent by immutable UUID client/order IDs."""
+    import engine
+    if not hasattr(self.x, 'fills'):
+        return [], Decimal('0')
+    rows = self.x.fills()
+    cid = str(p.get('client_id') or '')
+    oid = str(p.get('order_id') or '')
+    matched = [r for r in rows if isinstance(r, dict) and (
+        (oid and str(r.get('ordId') or '') == oid) or
+        (cid and str(r.get('clOrdId') or '') == cid)
+    )]
+    total = sum((Decimal(str(r.get('fillSz') or '0')).copy_abs() for r in matched), Decimal('0'))
+    planned = Decimal(str(p.get('sz') or '0')).copy_abs()
+    if total > planned:
+        raise engine.Halt('成交明细数量超过本程序计划数量；禁止自动处理，请立即核对OKX')
+    if matched and not p.get('order_id'):
+        first_id = next((str(r.get('ordId') or '') for r in matched if r.get('ordId')), '')
+        if first_id:
+            p['order_id'] = first_id
+            self.store.save()
+    return matched, total
+
+
 def _lookup_parent_order(self, p):
     """Reconcile a parent order without ever auto-releasing a genuinely ambiguous write."""
     import engine
@@ -73,7 +97,7 @@ def _lookup_parent_order(self, p):
     last_log = float(p.get('order_missing_log_at') or 0)
     if now - last_log >= ORDER_MISSING_LOG_INTERVAL:
         p['order_missing_log_at'] = now
-        self.emit('log', '51603：父订单暂不可查询；正在交叉核对当前委托、历史订单与BTC仓位，不会重复下单')
+        self.emit('log', '51603：父订单暂不可查询；正在交叉核对当前委托、历史订单、成交明细与BTC仓位，不会重复下单')
     self.store.save()
 
     pending = self.x.orders()
@@ -81,7 +105,7 @@ def _lookup_parent_order(self, p):
     if found:
         if not p.get('order_id') and found.get('ordId'):
             p['order_id'] = str(found['ordId'])
-        _set_phase(self, p, 'SUBMITTED')
+        _set_phase(self, p, 'PARTIAL' if str(found.get('state') or '') == 'partially_filled' else 'SUBMITTED')
         return found
 
     history = self.x.recent_orders() if hasattr(self.x, 'recent_orders') else []
@@ -93,15 +117,27 @@ def _lookup_parent_order(self, p):
         _set_phase(self, p, 'FILLED' if state == 'filled' else 'CANCELED' if state in ('canceled', 'mmp_canceled') else 'SUBMITTED')
         return found
 
+    fill_rows, fill_total = _matching_fills(self, p)
+    if fill_total > 0:
+        planned = Decimal(str(p['sz'])).copy_abs()
+        synthetic_state = 'filled' if fill_total == planned else 'partially_filled'
+        _set_phase(self, p, 'FILLED' if synthetic_state == 'filled' else 'PARTIAL_EVIDENCE')
+        self.emit('log', f'订单详情/历史暂未匹配，但fills确认已成交 {fill_total}/{planned} 张；按成交证据继续管理，不重复开仓')
+        return {'state': synthetic_state, 'accFillSz': format(fill_total, 'f'),
+                'ordId': str(p.get('order_id') or ''), 'clOrdId': p.get('client_id', '')}
+
     positions = self.x.positions()
     same = [r for r in positions if r.get('mgnMode') == 'isolated' and r.get('posSide') == p.get('posSide')
             and Decimal(str(r.get('pos') or '0')).copy_abs() > 0]
     if same:
-        if len(same) != 1 or Decimal(str(same[0].get('pos') or '0')).copy_abs() > Decimal(str(p['sz'])):
+        pos_size = Decimal(str(same[0].get('pos') or '0')).copy_abs() if len(same) == 1 else Decimal('0')
+        planned = Decimal(str(p['sz'])).copy_abs()
+        if len(same) != 1 or pos_size > planned:
             raise engine.Halt('51603：订单查询不到且BTC仓位与本地记录不一致；已停止新开仓，请立即核对OKX')
-        _set_phase(self, p, 'FILLED')
-        self.emit('log', '51603交叉核对发现本程序方向BTC逐仓仓位：按已成交继续管理保护单，不重复开仓')
-        return {'state': 'filled', 'accFillSz': str(Decimal(str(same[0]['pos'])).copy_abs()),
+        synthetic_state = 'filled' if pos_size == planned else 'partially_filled'
+        _set_phase(self, p, 'FILLED' if synthetic_state == 'filled' else 'PARTIAL_EVIDENCE')
+        self.emit('log', f'51603交叉核对发现本程序方向BTC逐仓仓位 {pos_size}/{planned} 张：按{"全部" if synthetic_state == "filled" else "部分"}成交继续管理，不重复开仓')
+        return {'state': synthetic_state, 'accFillSz': format(pos_size, 'f'),
                 'ordId': str(p.get('order_id') or ''), 'clOrdId': p.get('client_id', '')}
 
     age = now - float(p.get('submitted', now))
@@ -112,12 +148,12 @@ def _lookup_parent_order(self, p):
 
     if has_ordid:
         raise engine.Halt(
-            f'父订单已有ordId，但持续{int(timeout)}秒无法在当前委托、历史订单或BTC仓位中匹配；'
+            f'父订单已有ordId，但持续{int(timeout)}秒无法在当前委托、历史订单、成交明细或BTC仓位中匹配；'
             '禁止重复开仓，请核对OKX')
 
     _set_phase(self, p, 'SUBMIT_UNKNOWN')
     raise engine.Halt(
-        f'开仓POST结果持续{int(timeout)}秒无法确认：无ordId，且当前委托、历史订单、BTC仓位均未匹配；'
+        f'开仓POST结果持续{int(timeout)}秒无法确认：无ordId，且当前委托、历史订单、成交明细、BTC仓位均未匹配；'
         '本地占位继续保留，禁止重复提交。请在OKX核对后再解除故障锁')
 
 
@@ -425,7 +461,7 @@ def _flatten(self):
 
 
 def _record_flat_trade_if_proven(self, p, order):
-    """Record PnL only when an exchange order proves the parent actually filled."""
+    """Record PnL only when exchange evidence proves the parent actually filled."""
     if not order or Decimal(str(order.get('accFillSz') or '0')).copy_abs() <= 0:
         return
     equity, _ = self.x.balance()
@@ -437,7 +473,7 @@ def _record_flat_trade_if_proven(self, p, order):
 
 
 def _acknowledge(self):
-    """Unlock only after current, historical and position/algo evidence all reconcile."""
+    """Unlock only after current, historical, fill and position/algo evidence reconcile."""
     import engine
     if self.enabled:
         raise engine.Halt('先停止自动开仓')
@@ -460,6 +496,13 @@ def _acknowledge(self):
         history = self.x.recent_orders() if hasattr(self.x, 'recent_orders') else []
         historical = next((row for row in history if self._same_parent_order(row, p)), None)
         evidence = direct or historical
+        if not evidence:
+            fill_rows, fill_total = _matching_fills(self, p)
+            if fill_total > 0:
+                evidence = {'state':'canceled' if fill_total < Decimal(str(p['sz'])).copy_abs() else 'filled',
+                            'accFillSz':format(fill_total,'f'), 'ordId':str(p.get('order_id') or ''),
+                            'clOrdId':p.get('client_id','')}
+
         if evidence:
             status = str(evidence.get('state') or '')
             if status not in ('filled','canceled','mmp_canceled'):
@@ -474,13 +517,13 @@ def _acknowledge(self):
             self.store.record('人工确认无交易所订单', {
                 'client_id': p.get('client_id',''), 'order_id': p.get('order_id',''),
                 'phase': p.get('phase',''), 'age_seconds': age,
-                'checked': ['orders-pending','orders-history','order-detail','positions','algo-pending'],
+                'checked': ['orders-pending','orders-history','fills','order-detail','positions','algo-pending'],
             })
 
     self.store.data['active'] = None
     self.store.data['halt'] = ''
     self.store.save()
-    self.emit('log', '故障锁已解除：已交叉核对当前委托、历史订单、BTC仓位与全部策略委托；每日权益基准、连续亏损计数与信号去重仍保留')
+    self.emit('log', '故障锁已解除：已交叉核对当前委托、历史订单、成交明细、BTC仓位与全部策略委托；每日权益基准、连续亏损计数与信号去重仍保留')
 
 
 def apply():
