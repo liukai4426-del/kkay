@@ -11,6 +11,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 STARTUP_BUFFER_SECONDS = 5.0
+CANDLE_SETTLEMENT_GRACE_SECONDS = 60.0
 OLD_THRESHOLD_LABEL = '自动开仓评分阈值 3.5—10（0.5步进）'
 NEW_THRESHOLD_LABEL = '自动开仓评分阈值 1—10（0.5步进）'
 DAILY_STOP_TEXT = '达到中国时间日内权益回撤上限'
@@ -141,15 +142,26 @@ def _china_day():
 
 def _daily(self,equity):
     import engine
-    if not math.isfinite(equity) or equity<=0:raise engine.Halt('账户权益无效')
+    if not math.isfinite(equity) or equity<=0:
+        raise engine.Halt('账户权益无效')
     state=self.store.data; day=_china_day()
-    if state.get('day')!=day:state.update(day=day,peak=equity,daily_stop_day='',daily_notice_day='')
-    peak=float(state.get('peak') or equity); state['peak']=max(equity,peak); self.store.save()
-    if state.get('daily_stop_day')==day:raise DailyRiskStop('中国时间本日已达到权益回撤上限；停止新开仓，原有TP/SL继续生效，次日自动恢复')
-    remaining=self.settings.daily_loss-max(0.0,state['peak']-equity)
+    if state.get('day')!=day:
+        state.update(day=day,peak=equity,daily_stop_day='',daily_notice_day='')
+    peak=float(state.get('peak') or equity)
+    state['peak']=max(equity,peak)
+    drawdown=max(0.0,state['peak']-equity)
+    remaining=self.settings.daily_loss-drawdown
+    detail=(f'峰值权益 {state["peak"]:.4f} USDT，当前权益 {equity:.4f} USDT，'
+            f'已回撤 {drawdown:.4f} / 上限 {self.settings.daily_loss:.4f} USDT')
+    self.store.save()
+    # Once hit, the daily stop remains latched for the current China day even if
+    # equity later rebounds. It is not a permanent integrity fault and must not
+    # be cleared by the generic fault-lock acknowledgement button.
+    if state.get('daily_stop_day')==day:
+        raise DailyRiskStop('中国时间本日已达到权益回撤上限；'+detail+'；停止新开仓，原有TP/SL继续生效，次日自动恢复')
     if remaining<=0:
         state['daily_stop_day']=day; self.store.save()
-        raise DailyRiskStop('中国时间本日已达到权益回撤上限；停止新开仓，原有TP/SL继续生效，次日自动恢复')
+        raise DailyRiskStop('中国时间本日已达到权益回撤上限；'+detail+'；停止新开仓，原有TP/SL继续生效，次日自动恢复')
     return remaining
 
 
@@ -160,8 +172,8 @@ def _check_latest(bar,timestamp,now,step):
     latest_close=datetime.fromtimestamp((timestamp+step)/1000,timezone.utc).strftime('%H:%M:%S UTC')
     expected_close=datetime.fromtimestamp((expected+step)/1000,timezone.utc).strftime('%H:%M:%S UTC')
     current=datetime.fromtimestamp(now,timezone.utc).strftime('%H:%M:%S UTC'); boundary=expected+step
-    if timestamp==expected-step and 0<=now*1000-boundary<=45000:
-        raise candles.CandlePending(f'{bar} 刚收盘，等待OKX确认最新K线：上一根已确认收盘 {latest_close}，本应确认收盘 {expected_close}，交易所时间 {current}；最多等待45秒，不使用未确认K线')
+    if timestamp==expected-step and 0<=now*1000-boundary<=CANDLE_SETTLEMENT_GRACE_SECONDS*1000:
+        raise candles.CandlePending(f'{bar} 刚收盘，等待OKX确认最新K线：上一根已确认收盘 {latest_close}，本应确认收盘 {expected_close}，交易所时间 {current}；正常结算窗口最多60秒，不使用未确认K线')
     lag=max(0.0,(expected-timestamp)/1000)
     raise candles.CandleLag(f'{bar} K线持续过期/时间异常：上一根已确认收盘 {latest_close}，本应确认收盘 {expected_close}，交易所时间 {current}，落后 {lag:.0f}秒；不使用旧信号')
 
@@ -249,9 +261,13 @@ def apply():
             snapshot={'client_id':p.get('client_id',''),'side':p.get('side',''),'score':p.get('score'),'submitted':p.get('submitted'),'code':str(getattr(exc,'code','') or ''),'reason':str(exc)}
             self.store.data['active']=None; self.store.save(); self.store.record('OKX明确拒绝开仓',snapshot); cleared=True
         self.enabled=False; self.startup_buffer_until=0.0; code=str(getattr(exc,'code','') or '')
+        path=str(getattr(exc,'path','') or '未知接口'); method=str(getattr(exc,'method','') or 'POST')
         detail='；已清理本地未成交占位，不进入51603订单核对' if cleared else '；本地活动状态保留，禁止重复提交'
-        message='OKX 50123：API Key没有BTC/对应交易市场的下单权限；本次写入请求被OKX明确拒绝，没有产生本次新开仓订单' if code=='50123' else 'OKX明确拒绝交易请求'+(f'（错误码 {code}）' if code else '')+'：'+str(exc)
-        raise engine.Halt(message+detail+'；已停止新开仓，请核对原因后重新测试连接/启动') from None
+        if code=='50123':
+            message=f'OKX 50123明确拒绝 {method} {path}；本次请求没有产生新开仓订单'
+        else:
+            message=f'OKX明确拒绝 {method} {path}'+(f'（错误码 {code}）' if code else '')+'：'+str(exc)
+        raise engine.Halt(message+detail+'；已停止新开仓，请核对API权限、账户环境及OKX返回信息后重新测试连接/启动') from None
     def run_original_cycle(self):
         try:return original_cycle(self)
         except DailyRiskStop as exc:return _handle_daily_stop(self,exc)
