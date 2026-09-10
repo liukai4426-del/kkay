@@ -32,7 +32,7 @@ def smoke_test():
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
                 ui.fields['capital'].set('2000')
                 ui.save_settings()
-                saved = json.loads((Path(folder) / 'settings-v1.1.json').read_text())
+                saved = json.loads((Path(folder) / 'settings-v1.3.2.json').read_text())
                 assert saved['capital'] == 2000
                 assert not {'key', 'secret', 'phrase'} & saved.keys()
                 assert ui.fields['stop_atr'].get() == '1.0'
@@ -47,8 +47,8 @@ def smoke_test():
                     ui.emit('ticker',{'last':last})
                 ui.emit('alarm','测试警报：无网络、无订单')
                 ui.drain(); root.update()
-                assert len(ui.score_table.get_children()) == 13
-                assert ui.score_vars['做多'].get().endswith('/ 18')
+                assert len(ui.score_table.get_children()) == 15
+                assert ui.score_vars['做多'].get().endswith('/ 10')
                 assert ui.price.get()=='79,045.00 USDT'
                 assert len(ui.price_history)==4
                 assert ui.score_bars['做多'].color == app.GREEN
