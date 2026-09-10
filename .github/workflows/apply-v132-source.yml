@@ -1,10 +1,10 @@
-name: Apply KAYTRADE V1.3.2 Source Migration
+name: Apply KAYTRADE V1.3.2 UI Patch
 on:
   push:
     branches:
       - codex/v1-3-2-strategy
     paths:
-      - v132_source_patch.py
+      - v132_scrollbar_patch.py
       - .github/workflows/apply-v132-source.yml
 permissions:
   contents: write
@@ -16,14 +16,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Apply V1.3.2 source migration
-        run: python v132_source_patch.py
+      - name: Apply wider scrollbar UI patch
+        run: python v132_scrollbar_patch.py
       - name: Syntax check
-        run: python -m py_compile strategy.py engine.py candles.py app.py desktop.py
-      - name: Commit migrated V1.3.2 source
+        run: python -m py_compile visual.py app.py desktop.py
+      - name: Commit V1.3.2 scrollbar UI fix
         run: |
           git config user.name "liukai4426-del"
           git config user.email "liukai4426@gmail.com"
-          git add engine.py app.py desktop.py
-          git commit -m "strategy: wire V1.3.2 10-point scoring into app"
+          git add visual.py
+          git commit -m "ui: widen V1.3.2 detail scrollbars"
           git push origin HEAD:codex/v1-3-2-strategy
