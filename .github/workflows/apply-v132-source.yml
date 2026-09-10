@@ -16,14 +16,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Apply wider scrollbar UI patch
+      - name: Apply functional wide-scrollbar patch
         run: python v132_scrollbar_patch.py
       - name: Syntax check
         run: python -m py_compile visual.py app.py desktop.py
-      - name: Commit V1.3.2 scrollbar UI fix
+      - name: Commit V1.3.2 scrolling fix
         run: |
           git config user.name "liukai4426-del"
           git config user.email "liukai4426@gmail.com"
-          git add visual.py
-          git commit -m "ui: widen V1.3.2 detail scrollbars"
+          git add visual.py app.py desktop.py
+          git commit -m "ui: fix V1.3.2 detail scrolling"
           git push origin HEAD:codex/v1-3-2-strategy
