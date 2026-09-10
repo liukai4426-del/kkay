@@ -11,7 +11,7 @@ exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='OKXLocal',
 collection = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name='OKXLocal')
 bundle = BUNDLE(collection, name='OKXLocal.app',icon=str(root / 'OKXLocal.icns'),
                 bundle_identifier='design.kkay.okxlocal',
-                info_plist={'CFBundleShortVersionString': '1.2.2',
-                            'CFBundleVersion': '122',
+                info_plist={'CFBundleShortVersionString': '1.2.3',
+                            'CFBundleVersion': '123',
                             'LSMinimumSystemVersion': '14.0',
                             'NSHighResolutionCapable': True})
