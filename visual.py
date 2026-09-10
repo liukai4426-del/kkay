@@ -93,3 +93,8 @@ class Tabs(tk.Frame):
         for i,b in enumerate(self.buttons):
             b.configure(bg='#15382e' if i==index else BG,fg=GREEN if i==index else MUTED)
         self.event_generate('<<NotebookTabChanged>>')
+        self.after_idle(lambda:self.repaint(self.pages[index]))
+
+    def repaint(self,widget):
+        widget.event_generate('<Expose>',when='tail')
+        for child in widget.winfo_children():self.repaint(child)

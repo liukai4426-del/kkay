@@ -11,6 +11,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from core import Client, HOSTS, INSTRUMENT
+from candles import CandleCache
 
 class APIError(RuntimeError):
     pass
@@ -26,6 +27,8 @@ class Exchange(Client):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.offset=0
+        self.clock_anchor=None
+        self.candle_cache=CandleCache(self)
         self.network_event=lambda text: None
         self.opener=urllib.request.build_opener(
             urllib.request.ProxyHandler({}), NoRedirect(),
@@ -59,7 +62,7 @@ class Exchange(Client):
         if private:
             if not all((self.key,self.secret,self.phrase)):
                 raise APIError('请填写API Key、Secret、Passphrase')
-            timestamp=datetime.fromtimestamp(time.time()+self.offset,timezone.utc).isoformat(timespec='milliseconds').replace('+00:00','Z')
+            timestamp=datetime.fromtimestamp(self.server_now(),timezone.utc).isoformat(timespec='milliseconds').replace('+00:00','Z')
             signature=base64.b64encode(hmac.new(self.secret.encode(),(timestamp+method+target+raw).encode(),hashlib.sha256).digest()).decode()
             headers.update({'OK-ACCESS-KEY':self.key,'OK-ACCESS-SIGN':signature,
                 'OK-ACCESS-TIMESTAMP':timestamp,'OK-ACCESS-PASSPHRASE':self.phrase,
@@ -112,6 +115,17 @@ class Exchange(Client):
         if end-start>3:
             raise APIError('时钟同步延迟过高')
         self.offset=server-(start+end)/2
+        self.clock_anchor=(server+(end-start)/2,time.monotonic())
+
+    def server_now(self):
+        if self.clock_anchor is None:return time.time()+self.offset
+        server,mono=self.clock_anchor
+        return server+time.monotonic()-mono
+
+    def candles(self,bar):
+        if self.clock_anchor is None or time.monotonic()-self.clock_anchor[1]>300:
+            self.sync_time()
+        return self.candle_cache.read(bar)
 
     def account(self):
         return self.get('/api/v5/account/config',private=True)[0]
@@ -137,7 +151,7 @@ class Exchange(Client):
 
     def ticker(self):
         r=self.get('/api/v5/market/ticker',{'instId':INSTRUMENT})[0]
-        if abs(time.time()+self.offset-float(r['ts'])/1000)>15:
+        if abs(self.server_now()-float(r['ts'])/1000)>15:
             raise APIError('行情过期，禁止开仓')
         return r
 

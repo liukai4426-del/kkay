@@ -13,6 +13,7 @@ from core import HOSTS, INSTRUMENT
 from exchange import Exchange, NetworkError
 from engine import Engine, Settings, Halt
 from history import summarize
+from candles import CandlePending
 from visual import theme, Card, Tabs, mark, BG, PANEL, MUTED, GREEN, RED
 
 DATA=Path.home()/'Library'/'Application Support'/'OKXLocal'
@@ -29,9 +30,10 @@ class App:
         self.tasks=queue.Queue(); self.events=queue.Queue(); self.engine=None
         self.busy=False; self.finished=threading.Event(); self.public_at=0
         self.network_paused=False; self.recovery_count=0; self.probe_at=0
+        self.candle_wait_log=0
         self.log_lines=[]
         self.history_key=None; self.history_curve=[]
-        self.root.title('OKX Local 1.2 · BTC 策略控制台'); self.root.geometry('1200x920'); self.root.minsize(1040,840)
+        self.root.title('OKX Local 1.2.1 · BTC 策略控制台'); self.root.geometry('1200x920'); self.root.minsize(1040,840)
         style=ttk.Style(); style.theme_use('clam')
         style.configure('.',font=('Helvetica',13),background='#101820',foreground='#e5eef5')
         style.configure('TEntry',fieldbackground='#192832',foreground='#e5eef5',padding=7,insertcolor='white')
@@ -56,7 +58,7 @@ class App:
         mark(top).pack(side='left',padx=(0,12))
         brand=ttk.Frame(top); brand.pack(side='left')
         ttk.Label(brand,text='OKX Local',style='Title.TLabel').pack(anchor='w')
-        ttk.Label(brand,text='BTC / USDT   ·   V1.2 视觉版',style='Muted.TLabel').pack(anchor='w')
+        ttk.Label(brand,text='BTC / USDT   ·   V1.2.1 K线修复版',style='Muted.TLabel').pack(anchor='w')
         self.status=tk.StringVar(value='默认停止 · 未连接')
         ttk.Label(top,textvariable=self.status,style='Muted.TLabel').pack(side='right')
         badges=ttk.Frame(root,padding=(15,0)); badges.pack(fill='x')
@@ -320,7 +322,7 @@ class App:
                     self.emit('network',f'恢复核对 {self.recovery_count}/2 · 不开仓')
                     if self.recovery_count<2: continue
                     if self.engine.store.data['active']: self.engine.reconcile()
-                    self.engine.store.data['last_bar']=int(time.time()//900)*900000-900000
+                    self.engine.store.data['last_bar']=int(self.engine.market_now()//900)*900000-900000
                     self.engine.store.save()
                     self.network_paused=False
                     self.emit('log','网络已恢复并核对账户，仅恢复观察；请核对解除故障锁后重新授权，不补发错过的订单')
@@ -355,6 +357,11 @@ class App:
                     if time.monotonic()-self.public_at>5:
                         self.emit('ticker',self.engine.x.ticker()); self.public_at=time.monotonic()
                     self.emit('status','全自动运行 / '+('模拟盘' if self.engine.x.demo else '实盘') if self.engine.enabled else '故障暂停 · 需核对' if self.engine.store.data['halt'] else '已停止新开仓 / 继续核对持仓')
+            except CandlePending as exc:
+                self.emit('status','等待最新收盘K线 · 暂不新开仓')
+                self.emit('candle_wait',str(exc))
+                if time.monotonic()-self.candle_wait_log>=15:
+                    self.emit('log',str(exc)); self.candle_wait_log=time.monotonic()
             except NetworkError as exc:
                 self.network_paused=True; self.recovery_count=0; self.probe_at=time.monotonic()
                 if self.engine: self.engine.halt(str(exc))
@@ -382,6 +389,7 @@ class App:
                     if data['skipped']: self.emit('log',f"历史记录有 {data['skipped']} 行损坏，已跳过；统计可能不完整")
                 elif kind=='network': self.network.set('网络：'+data)
                 elif kind=='status': self.status.set(data)
+                elif kind=='candle_wait': self.signal.set(str(data))
                 elif kind=='ticker':
                     self.price.set(f"{float(data['last']):,.2f} USDT")
                     self.updated.set('最近更新 '+time.strftime('%Y-%m-%d %H:%M:%S'))

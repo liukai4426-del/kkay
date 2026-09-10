@@ -11,6 +11,7 @@ from decimal import Decimal, ROUND_DOWN, ROUND_UP
 from pathlib import Path
 from core import INSTRUMENT
 from strategy import signal
+from candles import check_latest
 
 class Halt(RuntimeError):
     pass
@@ -176,10 +177,16 @@ class Engine:
 
     def refresh_market(self):
         h,m=self.x.candles('1H'),self.x.candles('15m')
+        check_latest('1H',h[-1]['t'],self.market_now(),3600000)
+        check_latest('15m',m[-1]['t'],self.market_now(),900000)
         value=signal(h,m,self.settings.score_threshold if self.settings else 7)
         self.market=dict(value,bar=m[-1]['t'],close=m[-1]['c'])
         self.market_at=time.time()
+        self.market_monotonic=time.monotonic()
         self.emit('market',self.market)
+
+    def market_now(self):
+        return getattr(self.x,'server_now',time.time)()
 
     def cycle(self):
         now=time.monotonic()
@@ -195,11 +202,11 @@ class Engine:
                 if self.enabled:
                     equity,_=self.x.balance()
                     self.daily(equity)
-                expected=int(time.time()//900)*900000-900000
+                expected=int(self.market_now()//900)*900000-900000
                 if not self.market or self.market['bar']!=expected:
                     self.refresh_market()
                 return
-        expected=int(time.time()//900)*900000-900000
+        expected=int(self.market_now()//900)*900000-900000
         if not self.market or self.market['bar']!=expected:
             self.refresh_market()
         if not self.enabled:
@@ -213,11 +220,13 @@ class Engine:
             return
         if self.x.positions() or self.x.orders() or self.x.algos():
             raise Halt('出现非本程序仓位或挂单，停止自动开仓')
-        expected=int(time.time()//900)*900000-900000
+        expected=int(self.market_now()//900)*900000-900000
         if not self.market or self.market['bar']!=expected:
             self.refresh_market()
         market=self.market
-        if market['bar']!=expected or time.time()-self.market_at>900:
+        check_latest('15m',market['bar'],self.market_now(),900000)
+        age=time.monotonic()-self.market_monotonic if hasattr(self,'market_monotonic') else time.time()-self.market_at
+        if age>900:
             raise Halt('策略K线过期')
         if market['side']=='观望' or state['last_bar']==market['bar']:
             return
@@ -237,6 +246,7 @@ class Engine:
             raise Halt('逐仓杠杆回读不一致')
         if not self.enabled:
             return
+        check_latest('15m',market['bar'],self.market_now(),900000)
         cid='mac'+uuid.uuid4().hex[:28]; aid='sl'+uuid.uuid4().hex[:28]
         # Persist BEFORE sending so network ambiguity and crashes cannot cause duplicate orders.
         state['last_bar']=market['bar']

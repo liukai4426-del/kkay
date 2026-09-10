@@ -1,4 +1,4 @@
-name: Build Intel Mac App 1.2 Visual
+name: Build Intel Mac App 1.2.1 Candle Fix
 on:
   push:
     branches:
@@ -24,7 +24,7 @@ jobs:
       - name: Create application icon
         run: python build_icon.py
       - name: Test order engine and V1.1 scoring/network with fake exchange
-        run: python -m unittest -v test_engine test_v11
+        run: python -m unittest -v test_engine test_v11 test_candles
       - name: Build bundled Intel application
         run: python -m PyInstaller --noconfirm OKXLocal.spec
       - name: Check macOS compatibility metadata
@@ -41,15 +41,16 @@ jobs:
           mkdir -p installer
           ditto dist/OKXLocal.app installer/OKXLocal.app
           cp RELEASE-1.2.md installer/RELEASE-1.2.md
+          cp RELEASE-1.2.1.md installer/RELEASE-1.2.1.md
           cp "$RUNNER_TEMP/okx-smoke.txt" installer/BUILD-TEST.txt
           ln -s /Applications installer/Applications
-          hdiutil create -volname OKXLocal-1.2 -srcfolder installer -ov -format UDZO OKXLocal-1.2-Intel-test.dmg
-          shasum -a 256 OKXLocal-1.2-Intel-test.dmg > SHA256.txt
+          hdiutil create -volname OKXLocal-1.2.1 -srcfolder installer -ov -format UDZO OKXLocal-1.2.1-Intel-test.dmg
+          shasum -a 256 OKXLocal-1.2.1-Intel-test.dmg > SHA256.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: OKXLocal-1.2-Intel-test
+          name: OKXLocal-1.2.1-Intel-test
           path: |
-            OKXLocal-1.2-Intel-test.dmg
+            OKXLocal-1.2.1-Intel-test.dmg
             SHA256.txt
             ui-*.png
           if-no-files-found: error
