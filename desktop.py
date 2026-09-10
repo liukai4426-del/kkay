@@ -11,6 +11,8 @@ os.environ['SSL_CERT_FILE'] = certifi.where()
 
 from v135_patch import apply as apply_v135_patch
 apply_v135_patch()
+from v135_execution_patch import apply as apply_v135_execution_patch
+apply_v135_execution_patch()
 
 
 def smoke_test():
@@ -156,9 +158,10 @@ def smoke_test():
         finally:
             root.destroy()
     Path(sys.argv[2]).write_text(
-        'PASS: KAYTRADE V1.3.5 UI + 1D EMA indicators + selectable 1-10 threshold range + 5s startup no-entry buffer + tiered 1x/1.5x/2x sizing + split TP execution; '
-        'functional detail scrollbars, score wheel/trackpad + thumb dragging, 10-point scoring, direction-aware colors, demo default, '
-        'settings and bundled CA roots. Screenshots use synthetic test data. No network or orders.\n')
+        'PASS: KAYTRADE V1.3.5 UI + selectable 1-10 threshold + 5s startup buffer + hardened order lifecycle; '
+        '15m Setup is scoring-only, split TP1/TP2 are market-on-trigger, ambiguous writes remain fail-closed, '
+        'manual flatten cancels unfinished parent entries first, all pending algo families are preflight-checked, '
+        'functional scrollbars, direction colors, demo default, settings and bundled CA roots. No network or orders.\n')
 
 
 if __name__ == '__main__':
