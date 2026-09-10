@@ -127,9 +127,9 @@ class ExecutionStateTests(unittest.TestCase):
 
     def test_manual_flatten_cancels_live_parent_before_any_close(self):
         p=self.submit()
-        half=str(float(p['sz'])/2)
-        self.x.ord={'state':'partially_filled','accFillSz':half}
-        self.x.pos=[self.position(p,half)]
+        partial=p['tp1_sz']
+        self.x.ord={'state':'partially_filled','accFillSz':partial}
+        self.x.pos=[self.position(p,partial)]
         before=len(self.x.writes)
         self.e.flatten()
         new=self.x.writes[before:]
@@ -139,9 +139,9 @@ class ExecutionStateTests(unittest.TestCase):
 
     def test_ambiguous_partial_safety_close_blocks_second_manual_close(self):
         p=self.submit()
-        half=str(float(p['sz'])/2)
-        self.x.ord={'state':'canceled','accFillSz':half}
-        self.x.pos=[self.position(p,half)]
+        partial=p['tp1_sz']
+        self.x.ord={'state':'canceled','accFillSz':partial}
+        self.x.pos=[self.position(p,partial)]
         original=self.x.post
         def post(path,body):
             if path=='/api/v5/trade/order' and body.get('ordType')=='market':
@@ -173,6 +173,28 @@ class ExecutionStateTests(unittest.TestCase):
         self.e.reconcile()
         self.assertTrue(p.get('protected'))
         self.assertEqual(p.get('phase'),'PROTECTED')
+
+    def test_missing_protection_sends_only_one_emergency_close_and_blocks_manual_close(self):
+        p=self.submit()
+        self.x.ord={'state':'filled','accFillSz':p['sz']}
+        self.x.pos=[self.position(p)]
+        self.x.protections=[]
+        self.e.reconcile()
+        p['filled_at']=time.time()-v135_execution_patch.PROTECTION_CONFIRM_TIMEOUT-1
+        self.e.store.save()
+        market_before=len([1 for path,body in self.x.writes if path=='/api/v5/trade/order' and body.get('ordType')=='market'])
+        self.e.reconcile()
+        self.assertTrue(p.get('emergency_close_id'))
+        self.assertEqual(p.get('phase'),'CLOSING_EMERGENCY')
+        market_after=len([1 for path,body in self.x.writes if path=='/api/v5/trade/order' and body.get('ordType')=='market'])
+        self.assertEqual(market_after,market_before+1)
+        self.e.reconcile()
+        market_final=len([1 for path,body in self.x.writes if path=='/api/v5/trade/order' and body.get('ordType')=='market'])
+        self.assertEqual(market_final,market_after)
+        writes_before=len(self.x.writes)
+        with self.assertRaises(engine.Halt):
+            self.e.flatten()
+        self.assertEqual(len(self.x.writes),writes_before)
 
 
 if __name__=='__main__':
