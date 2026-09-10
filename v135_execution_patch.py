@@ -115,9 +115,6 @@ def _lookup_parent_order(self, p):
             f'父订单已有ordId，但持续{int(timeout)}秒无法在当前委托、历史订单或BTC仓位中匹配；'
             '禁止重复开仓，请核对OKX')
 
-    # No ordId after a write attempt is UNKNOWN, not proof of rejection. Explicit
-    # HTTP/application rejections are cleared earlier by v135_patch; everything
-    # else remains fail-closed and requires human confirmation.
     _set_phase(self, p, 'SUBMIT_UNKNOWN')
     raise engine.Halt(
         f'开仓POST结果持续{int(timeout)}秒无法确认：无ordId，且当前委托、历史订单、BTC仓位均未匹配；'
@@ -152,26 +149,30 @@ def _cancel_pending_entry(self, p, reason):
     self.emit('log', '[ORDER] CANCEL_SENT：已发送限价开仓撤单；等待OKX确认终态，不会重复发送')
 
 
-def _submit_position_close(self, p, positions, partial=False, reason='手动平仓'):
+def _submit_position_close(self, p, positions, mode='manual', reason='手动平仓'):
     """Submit exactly one market close after parent entry is terminal."""
     import engine
-    id_key = 'partial_close_id' if partial else 'close_id'
-    requested_key = 'partial_close_requested' if partial else 'close_requested'
-    unknown_key = 'partial_close_unknown' if partial else 'close_unknown'
+    config = {
+        'manual': ('close_id', 'close_requested', 'close_unknown', 'cl', 'CLOSING_MANUAL'),
+        'partial': ('partial_close_id', 'partial_close_requested', 'partial_close_unknown', 'pc', 'CLOSING_PARTIAL'),
+        'emergency': ('emergency_close_id', 'emergency_close_requested', 'emergency_close_unknown', 'ec', 'CLOSING_EMERGENCY'),
+    }
+    if mode not in config:
+        raise engine.Halt('未知平仓模式')
+    id_key, requested_key, unknown_key, prefix, phase = config[mode]
     if p.get(id_key):
         return False
     size, _ = _position_size(self, p, positions)
-    prefix = 'pc' if partial else 'cl'
     close_id = prefix + __import__('uuid').uuid4().hex[:28]
     p[id_key] = close_id
     p[requested_key] = time.time()
     p[unknown_key] = False
-    _set_phase(self, p, 'CLOSING_PARTIAL' if partial else 'CLOSING_MANUAL')
+    _set_phase(self, p, phase)
     body = {'instId': engine.INSTRUMENT, 'tdMode': 'isolated', 'posSide': p['posSide'],
             'side': 'sell' if p['posSide'] == 'long' else 'buy', 'ordType': 'market',
             'sz': size, 'clOrdId': close_id}
     try:
-        self.x.post('/api/v5/trade/order', body)
+        reply = self.x.post('/api/v5/trade/order', body)
     except Exception as exc:
         if _explicit_rejection(exc):
             rejected_id = p.pop(id_key, '')
@@ -179,12 +180,18 @@ def _submit_position_close(self, p, positions, partial=False, reason='手动平�
             p[unknown_key] = False
             rejection = {'time': time.time(), 'code': str(getattr(exc, 'code', '') or ''),
                          'message': str(exc), 'client_id': rejected_id, 'reason': reason}
-            if partial:
+            if mode == 'partial':
                 p['partial_close_blocked'] = True
                 p['last_partial_close_rejection'] = rejection
                 _set_phase(self, p, 'PARTIAL_CLOSE_REJECTED')
                 self.store.record('部分成交安全平仓被拒绝', rejection)
                 _halt_once(self, '部分成交仓位的市价安全平仓被OKX明确拒绝；不会自动重复提交，请人工核对并处理仓位')
+            elif mode == 'emergency':
+                p['emergency_close_blocked'] = True
+                p['last_emergency_close_rejection'] = rejection
+                _set_phase(self, p, 'EMERGENCY_CLOSE_REJECTED')
+                self.store.record('保护异常安全平仓被拒绝', rejection)
+                _halt_once(self, 'TP/SL保护异常后的市价安全平仓被OKX明确拒绝；不会自动重复提交，请立即人工处理仓位')
             else:
                 p['last_close_rejection'] = rejection
                 _set_phase(self, p, 'CLOSE_REJECTED')
@@ -192,11 +199,18 @@ def _submit_position_close(self, p, positions, partial=False, reason='手动平�
                 _halt_once(self, '手动市价平仓被OKX明确拒绝；未创建本次平仓单，可在修正原因并核对仓位后再次手动提交')
             return False
         p[unknown_key] = True
-        _set_phase(self, p, 'PARTIAL_CLOSE_UNKNOWN' if partial else 'CLOSE_UNKNOWN')
+        _set_phase(self, p, {'partial':'PARTIAL_CLOSE_UNKNOWN','emergency':'EMERGENCY_CLOSE_UNKNOWN'}.get(mode,'CLOSE_UNKNOWN'))
         raise
-    self.store.record('部分成交安全平仓请求' if partial else '手动平仓请求',
-                      {'client_id': p.get('client_id'), 'close_id': close_id, 'size': size, 'reason': reason})
-    self.emit('log', '[ORDER] CLOSE_SENT：'+reason+'市价请求已发送；等待仓位归零确认，禁止重复发送')
+    row = reply[0] if isinstance(reply, list) and reply else {}
+    if mode == 'emergency':
+        p['emergency_close_order_id'] = str(row.get('ordId') or '')
+        p['emergency_close_ack_at'] = time.time()
+        self.store.save()
+    event = {'manual':'手动平仓请求','partial':'部分成交安全平仓请求','emergency':'保护异常自动安全平仓请求'}[mode]
+    self.store.record(event, {'client_id': p.get('client_id'), 'close_id': close_id,
+                              'ordId': str(row.get('ordId') or ''), 'size': size, 'reason': reason})
+    label = '保护异常一次性安全平仓' if mode == 'emergency' else reason
+    self.emit('log', '[ORDER] CLOSE_SENT：'+label+'市价请求已发送；等待仓位归零确认，禁止重复发送')
     return True
 
 
@@ -256,7 +270,7 @@ def _reconcile(self):
         if p.get('partial_close_blocked'):
             self.emit('position', positions)
             return
-        self._submit_position_close(p, positions, partial=True, reason='部分成交安全平仓')
+        self._submit_position_close(p, positions, mode='partial', reason='部分成交安全平仓')
         return
 
     if status not in ('filled', 'canceled', 'mmp_canceled'):
@@ -288,15 +302,21 @@ def _reconcile(self):
         self.emit('log', f'[ORDER] DONE：仓位已归零；本轮USDT净权益变化 {pnl:+.4f}；中国时间连续亏损 {state["streak"]}/{self.settings.consecutive_losses}')
         return
 
-    # Never interpret a partially completed manual market close as TP1.
-    if p.get('close_id'):
-        if time.time() - float(p.get('close_requested', time.time())) > CLOSE_CONFIRM_TIMEOUT:
-            _halt_once(self, '手动市价平仓结果长时间无法确认；不会重复提交，请到OKX核对')
-        self.emit('position', positions)
-        return
+    # Any outstanding market-close request owns the position until it is proven
+    # flat. Do not infer TP1 from an intermediate remaining size and never submit a
+    # second close while the first result is unknown/pending.
+    for key, requested_key, label in (
+        ('emergency_close_id','emergency_close_requested','保护异常安全平仓'),
+        ('close_id','close_requested','手动市价平仓'),
+    ):
+        if p.get(key):
+            if time.time() - float(p.get(requested_key, time.time())) > CLOSE_CONFIRM_TIMEOUT:
+                _halt_once(self, label+'结果长时间无法确认；不会重复提交，请到OKX核对')
+            self.emit('position', positions)
+            return
 
     if p.get('manual_flatten_requested'):
-        self._submit_position_close(p, positions, partial=False, reason='手动平仓')
+        self._submit_position_close(p, positions, mode='manual', reason='手动平仓')
         return
 
     if not all(k in p for k in ('tp1','tp2','tp1_sz','tp2_sz','tp1_id','tp2_id','sl_id')):
@@ -357,7 +377,11 @@ def _reconcile(self):
     else:
         grace = float(p.get('tp1_seen_at', p.get('filled_at', p['submitted'])))
         if time.time() - grace > PROTECTION_CONFIRM_TIMEOUT:
-            _halt_once(self, 'V1.3.5分批TP/保本SL保护状态无法核实；已停止新开仓，请立即到OKX核对')
+            reason = 'V1.3.5分批TP/保本SL保护状态无法核实；已停止新开仓，请立即到OKX核对'
+            _halt_once(self, reason)
+            if not p.get('emergency_close_id') and not p.get('emergency_close_blocked') \
+                    and not p.get('close_id') and not p.get('partial_close_id'):
+                self._submit_position_close(p, positions, mode='emergency', reason='TP/SL保护超过15秒无法核实')
     self.emit('position', positions)
 
 
@@ -367,6 +391,8 @@ def _flatten(self):
     p = self.store.data.get('active') if self.store else None
     if not p:
         raise engine.Halt('没有可识别的本程序仓位/活动订单')
+    if p.get('emergency_close_id'):
+        raise engine.Halt('已有保护异常自动安全平仓请求；为防重复平仓，当前禁止再次发送')
     if p.get('partial_close_id'):
         raise engine.Halt('已有部分成交安全平仓请求结果未确认；为防重复平仓，当前禁止再次发送')
     if p.get('close_id'):
@@ -398,7 +424,7 @@ def _flatten(self):
 
     p['manual_flatten_requested'] = True
     self.store.save()
-    self._submit_position_close(p, positions, partial=False, reason='手动平仓')
+    self._submit_position_close(p, positions, mode='manual', reason='手动平仓')
 
 
 def apply():
@@ -408,8 +434,6 @@ def apply():
     if getattr(engine.Engine, '_kaytrade_v135_execution_patch_applied', False):
         return
 
-    # Persist an explicit phase before every parent-order POST. This closes the
-    # crash window between local persistence and the network write.
     original_store_save = engine.Store.save
     def store_save(self):
         p = self.data.get('active')
@@ -423,8 +447,6 @@ def apply():
         return original_store_save(self)
     engine.Store.save = store_save
 
-    # Never resend set-leverage after an uncertain response. A successful readback
-    # is sufficient to continue; otherwise the original uncertainty is propagated.
     original_post = exchange.Exchange.post
     def post(self, path, body):
         try:
@@ -447,9 +469,6 @@ def apply():
             raise exc
     exchange.Exchange.post = post
 
-    # Read-only health checks run at each manual authorization before any entry can
-    # be submitted. Currency-scoped API permission such as 50123 still can only be
-    # proven by OKX when a trade write is attempted; explicit rejection remains safe.
     original_arm = engine.Engine.arm
     def arm(self, settings):
         self.x.sync_time()
