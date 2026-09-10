@@ -21,6 +21,19 @@ class V135AdditionalSafetyTests(unittest.TestCase):
             assert _score_tier(10.0)[0] == 2.0
         ''')
 
+    def test_limit_entry_risk_uses_worst_case_taker_fee(self):
+        self.run_isolated(r'''
+            from v135_patch import apply
+            apply()
+            from engine import Settings,make_plan
+            from test_engine import TICK,META
+            s=Settings(capital=100,max_notional=500,leverage=5,risk_usdt=5,risk_pct=5,daily_loss=10)
+            p=make_plan(s,'做多',TICK,META,200,100,10,1.0)
+            assert p['entry_fee_budget_bps'] == 5.0
+            assert p['estimated_loss'] <= p['effective_risk_budget'] + 1e-9
+            assert p['position_multiplier'] == 1.0
+        ''')
+
     def test_missing_protection_after_grace_sends_one_emergency_market_close(self):
         self.run_isolated(r'''
             import tempfile,time
@@ -51,8 +64,6 @@ class V135AdditionalSafetyTests(unittest.TestCase):
                 assert '保护状态无法核实' in e.store.data.get('halt','')
                 after=len([w for w in x.writes if w[0]=='/api/v5/trade/order' and w[1].get('ordType')=='market'])
                 assert after == before + 1
-                # The position mock deliberately remains present; a second cycle
-                # must not submit a second market close.
                 e.cycle()
                 final=len([w for w in x.writes if w[0]=='/api/v5/trade/order' and w[1].get('ordType')=='market'])
                 assert final == after
@@ -88,8 +99,6 @@ class V135AdditionalSafetyTests(unittest.TestCase):
 
     def test_stop_flag_prevents_startup_buffer_reenable(self):
         self.run_isolated(r'''
-            # This is the engine-level race invariant used by the patched App.stop:
-            # once stopped=True, the startup-buffer finally block must not re-arm.
             stopped=True; halt=''; enabled=False
             if not stopped and not halt:
                 enabled=True
