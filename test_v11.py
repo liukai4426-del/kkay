@@ -16,39 +16,57 @@ from history import summarize
 import test_engine
 
 class Scores(unittest.TestCase):
-    def score(self, buy=True, r15=None, r1=None, **extra):
-        h=dict(rsi=(20 if buy else 75))
-        m=dict(rsi=(15 if buy else 80),ema20=100,atr=10,lower=90,upper=110,
-               j=(-1 if buy else 101),cross_up=buy,cross_down=not buy)
-        if r15 is not None: m['rsi']=r15
-        if r1 is not None: h['rsi']=r1
-        m.update(extra)
-        rows=[dict(o=100,h=101,l=99,c=100),dict(o=85 if buy else 115,h=90,l=80,c=85 if buy else 115)]
-        with patch('strategy.indicators',side_effect=[h,m,dict(ema20=100)]):
-            return signal(rows,rows)
+    def score(self, *, buy=True, full=False, strong_opposite=False, threshold=7, rsi_extreme=True):
+        if buy:
+            h=dict(rsi=24 if rsi_extreme else 50,ema200=90,ema20=100,ema50=95,down=False,up=False)
+            if strong_opposite: h.update(ema200=110,ema20=90,ema50=100,down=True)
+            m=dict(rsi=19 if rsi_extreme else 40,lower=90,upper=110)
+            hour=[dict(o=100,h=101,l=99,c=100),dict(o=100,h=101,l=99,c=100)]
+            quarter=[dict(o=100,h=101,l=99,c=100),dict(o=95,h=100,l=89 if full else 95,c=96)]
+        else:
+            h=dict(rsi=71 if rsi_extreme else 50,ema200=110,ema20=100,ema50=105,down=False,up=False)
+            if strong_opposite: h.update(ema200=90,ema20=110,ema50=100,up=True)
+            m=dict(rsi=76 if rsi_extreme else 60,lower=90,upper=110)
+            hour=[dict(o=100,h=101,l=99,c=100),dict(o=100,h=101,l=99,c=100)]
+            quarter=[dict(o=100,h=101,l=99,c=100),dict(o=105,h=111 if full else 105,l=100,c=104)]
+        f=dict(rsi=50); previous={}
+        indicators=[h,m,f,previous,previous,previous]
+        true_feature=dict(kdj=full,ema=full,reversal=full,confirmed=full)
+        false_feature=dict(kdj=False,ema=False,reversal=False,confirmed=False)
+        if buy:
+            periods=[true_feature,true_feature,true_feature,false_feature,false_feature,false_feature]
+        else:
+            periods=[false_feature,false_feature,false_feature,true_feature,true_feature,true_feature]
+        with patch('strategy.indicators',side_effect=indicators), patch('strategy._period',side_effect=periods):
+            return signal(hour,quarter,quarter,threshold)
 
-    def test_long_qualified(self):
-        r=self.score(); self.assertEqual(r['side'],'做多'); self.assertEqual(r['scores']['做多']['total'],8)
-    def test_short_qualified(self):
-        r=self.score(False); self.assertEqual(r['side'],'做空'); self.assertEqual(r['scores']['做空']['total'],8)
-    def test_gate_blocks_even_large_score(self):
-        r=self.score(r1=26); self.assertFalse(r['scores']['做多']['eligible']); self.assertEqual(r['side'],'观望')
-    def test_long_rsi_boundary(self):
-        r=self.score(r15=20,r1=25); self.assertTrue(r['scores']['做多']['gate']); self.assertEqual(r['scores']['做多']['total'],6)
-    def test_short_rsi_boundary(self):
-        r=self.score(False,r15=75,r1=70); self.assertTrue(r['scores']['做空']['gate'])
-    def test_outside_gate(self):
-        for buy,r15,r1 in [(True,20.01,25),(True,20,25.01),(False,74.99,70),(False,75,69.99)]:
-            self.assertFalse(self.score(buy,r15,r1)['scores']['做多' if buy else '做空']['gate'])
-    def test_integer_points(self):
+    def test_full_long_scores_ten(self):
+        r=self.score(full=True); self.assertEqual(r['scores']['做多']['total'],10); self.assertEqual(r['side'],'做多')
+    def test_full_short_scores_ten(self):
+        r=self.score(buy=False,full=True); self.assertEqual(r['scores']['做空']['total'],10); self.assertEqual(r['side'],'做空')
+    def test_rsi_is_points_not_gate(self):
+        r=self.score(full=False,rsi_extreme=False)
+        self.assertTrue(r['scores']['做多']['gate']); self.assertEqual(r['scores']['做多']['items'][0][1],0)
+    def test_exact_seven_is_eligible(self):
+        buy=True
+        h=dict(rsi=24,ema200=90,ema20=100,ema50=95,down=False,up=False)
+        m=dict(rsi=19,lower=90,upper=110); f=dict(rsi=50); p={}
+        rows=[dict(o=100,h=101,l=99,c=100),dict(o=95,h=100,l=89,c=96)]
+        generic=dict(kdj=False,ema=False,reversal=False,confirmed=True)
+        false=dict(kdj=False,ema=False,reversal=False,confirmed=False)
+        with patch('strategy.indicators',side_effect=[h,m,f,p,p,p]), patch('strategy._period',side_effect=[generic,generic,generic,false,false,false]):
+            r=signal(rows,rows,rows,7)
+        self.assertEqual(r['scores']['做多']['total'],7); self.assertTrue(r['scores']['做多']['eligible'])
+    def test_strong_opposite_penalty_is_minus_two(self):
+        r=self.score(full=True,strong_opposite=True)
+        items=dict((name,pts) for name,pts,_ in r['scores']['做多']['items'])
+        self.assertEqual(items['1H 强逆势惩罚'],-2)
+        self.assertLess(r['scores']['做多']['total'],10)
+    def test_integer_points_and_bounds(self):
         for buy in (True,False):
-            for row in self.score(buy)['scores'].values():
-                self.assertLessEqual(row['total'],10)
-                self.assertTrue(all(isinstance(i[1],int) for i in row['items']))
-    def test_cross_required_for_kdj_points(self):
-        r=self.score(cross_up=False); self.assertEqual(r['scores']['做多']['items'][3][1],0)
-    def test_deviation_is_directional(self):
-        r=self.score(); self.assertEqual(r['scores']['做空']['items'][5][1],0)
+            row=self.score(buy=buy,full=True)['scores']['做多' if buy else '做空']
+            self.assertGreaterEqual(row['total'],0); self.assertLessEqual(row['total'],10)
+            self.assertTrue(all(isinstance(i[1],int) for i in row['items']))
     def test_defaults(self):
         s=Settings(); self.assertEqual((s.score_threshold,s.stop_atr,s.reward_r),(7,.8,1.5))
     def test_threshold_validation(self):
