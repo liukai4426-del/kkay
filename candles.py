@@ -32,8 +32,9 @@ class CandleCache:
         self.api=api; self.rows={}
 
     def read(self,bar):
-        if bar not in ('1H','15m'):raise ValueError('不支持的K线周期')
-        step=3600000 if bar=='1H' else 900000
+        steps={'1H':3600000,'15m':900000,'5m':300000}
+        if bar not in steps:raise ValueError('不支持的K线周期')
+        step=steps[bar]
         rows=dict(self.rows.get(bar,{}))
         now=self.api.server_now()
         if rows and max(rows)==expected_bar(now,step):
