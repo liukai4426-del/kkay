@@ -5,6 +5,7 @@ on:
       - analysis/v134-1m-100u-10x-backtest-20260911
     paths:
       - analysis_v134_1m_100u_10x.py
+      - analysis_v134_1m_100u_10x_fast.py
       - .github/workflows/v134-1m-100u-10x-backtest.yml
   workflow_dispatch:
 permissions:
@@ -20,7 +21,7 @@ jobs:
           python-version: '3.13'
       - name: Verify V1.3.4 backtest wiring
         run: |
-          python -m py_compile strategy.py core.py engine.py analysis_v134_1m_100u_10x.py
+          python -m py_compile strategy.py core.py engine.py analysis_v134_1m_100u_10x.py analysis_v134_1m_100u_10x_fast.py
           python - <<'PY'
           import strategy
           import analysis_v134_1m_100u_10x as b
@@ -32,7 +33,7 @@ jobs:
           print('V1.3.4 one-month runner verified')
           PY
       - name: Run BTC one-month backtest
-        run: python analysis_v134_1m_100u_10x.py | tee v134_1m_100u_10x_console.txt
+        run: python analysis_v134_1m_100u_10x_fast.py | tee v134_1m_100u_10x_console.txt
       - name: Upload report and trades
         uses: actions/upload-artifact@v4
         with:
