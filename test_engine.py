@@ -102,13 +102,14 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(len([x for x in self.x.writes if x[0].endswith('/order')]),1)
     def test_protection_missing_locks(self):
         p=self.active(); self.x.pos=[self.position(p)]; self.e.cycle()
+        p['filled_at']=time.time()-20; self.e.store.save(); self.e.cycle()
         self.assertFalse(self.e.enabled); self.assertIn('保护',self.e.store.data['halt'])
     def test_protection_verified(self):
         p=self.active(); self.x.pos=[self.position(p)]; self.x.protections=[self.protection(p)]
         self.e.cycle(); self.assertTrue(p['protected'])
     def test_undersized_protection_locks(self):
         p=self.active(); self.x.pos=[self.position(p)]; a=self.protection(p); a['sz']='0.00001'; self.x.protections=[a]
-        self.e.cycle(); self.assertFalse(self.e.enabled)
+        self.e.cycle(); p['filled_at']=time.time()-20; self.e.store.save(); self.e.cycle(); self.assertFalse(self.e.enabled)
     def test_foreign_position_halts(self):
         self.x.pos=[{'pos':'1'}]
         with self.assertRaises(Halt): self.e.cycle()
@@ -154,6 +155,7 @@ class EngineTests(unittest.TestCase):
         with self.assertRaises(Halt): Store(self.e.store.path)
     def test_loss_count_persisted(self):
         self.active(); self.x.equity=99; self.e.reconcile()
+        p=self.e.store.data['active']; p['filled_at']=time.time()-20; self.e.store.save(); self.e.reconcile()
         self.assertEqual(Store(self.e.store.path).data['streak'],1)
 
 class AdapterTests(unittest.TestCase):

@@ -87,4 +87,49 @@ class V13StructureAndSafetyTests(unittest.TestCase):
             self.assertEqual(e.store.data['streak'],0)
 
 
+class V13LimitFillSafetyTests(unittest.TestCase):
+    def make_engine(self,folder):
+        x=test_engine.FakeExchange(); e=Engine(x,folder); e.connect(); e.arm(Settings())
+        e.market={'side':'做多','bar':int(time.time()//300)*300000-300000,'close':60000,
+                  'h':{'atr':2000},'m':{'atr':200},
+                  'scores':{'做多':{'gate':True,'total':8,'level':'普通信号','items':[]}}}
+        e.market_at=time.time(); e.market_monotonic=time.monotonic(); e.cycle()
+        return x,e,e.store.data['active']
+
+    def test_stop_marks_cancel_then_reconcile_cancels_unfilled(self):
+        with tempfile.TemporaryDirectory() as folder:
+            x,e,p=self.make_engine(folder); before=len(x.writes)
+            e.stop()
+            self.assertEqual(len(x.writes),before)
+            self.assertTrue(e.store.data['active']['cancel_on_reconcile'])
+            x.ord={'state':'live','accFillSz':'0'}; e.cycle()
+            self.assertTrue(any(path.endswith('/cancel-order') for path,_ in x.writes[before:]))
+
+    def test_partial_fill_cancel_then_market_flatten(self):
+        with tempfile.TemporaryDirectory() as folder:
+            x,e,p=self.make_engine(folder)
+            qty=float(p['sz'])/2
+            x.pos=[{'mgnMode':'isolated','posSide':p['posSide'],'pos':str(qty)}]
+            x.ord={'state':'partially_filled','accFillSz':str(qty)}
+            e.cycle()
+            self.assertEqual(x.writes[-1][0],'/api/v5/trade/cancel-order')
+            x.ord={'state':'canceled','accFillSz':str(qty)}
+            e.cycle()
+            path,body=x.writes[-1]
+            self.assertEqual(path,'/api/v5/trade/order'); self.assertEqual(body['ordType'],'market')
+            self.assertEqual(body['posSide'],p['posSide']); self.assertTrue(e.store.data['active']['partial_close_id'])
+
+    def test_late_full_fill_gets_fresh_protection_grace(self):
+        with tempfile.TemporaryDirectory() as folder:
+            x,e,p=self.make_engine(folder)
+            p['submitted']=time.time()-240; e.store.save()
+            x.ord={'state':'filled','accFillSz':p['sz']}
+            x.pos=[{'mgnMode':'isolated','posSide':p['posSide'],'pos':p['sz']}]
+            x.protections=[]
+            e.cycle()
+            self.assertTrue(e.store.data['active']['filled'])
+            self.assertGreater(e.store.data['active']['filled_at'],time.time()-5)
+            self.assertEqual(e.store.data.get('halt',''),'')
+
+
 if __name__=='__main__': unittest.main(verbosity=2)

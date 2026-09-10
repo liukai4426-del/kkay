@@ -196,9 +196,11 @@ class Engine:
     def stop(self):
         self.enabled=False; self.stopped=True
         p=self.store.data.get('active') if self.store else None
-        if p and not p.get('filled') and not p.get('cancel_requested') and not self.x.positions():
-            self._cancel_pending_entry(p,'手动停止自动交易')
-        self.emit('log','已停止新开仓；未成交限价开仓会撤销，已有仓位继续监控且交易所TP/SL不撤销')
+        # Do not issue a cancel blindly here: the limit may have filled between UI clicks and REST reads.
+        # Reconcile order + position state first, then cancel only a genuinely unfilled/partial parent order.
+        if p and not p.get('filled') and not p.get('cancel_requested'):
+            p['cancel_on_reconcile']=True; self.store.save()
+        self.emit('log','已停止新开仓；未成交限价开仓会在状态核对后撤销，已有仓位继续监控且交易所TP/SL不撤销')
 
     def _reset_streak_day(self):
         if not self.store:
@@ -337,7 +339,7 @@ class Engine:
         cid='mac'+uuid.uuid4().hex[:28]; aid='sl'+uuid.uuid4().hex[:28]
         # Persist BEFORE sending so network ambiguity and crashes cannot cause duplicate orders.
         state['last_bar']=market['bar']
-        state['active']=dict(plan,client_id=cid,algo_id=aid,submitted=time.time(),expires=time.time()+300,equity_before=equity,filled=False,cancel_requested=False,
+        state['active']=dict(plan,client_id=cid,algo_id=aid,submitted=time.time(),expires=time.time()+300,equity_before=equity,filled=False,cancel_requested=False,cancel_on_reconcile=False,partial_close_id='',
                              score=score['total'],score_items=score.get('items',[]))
         self.store.save()
         body={'instId':INSTRUMENT,'tdMode':'isolated','side':plan['exchange_side'],'posSide':plan['posSide'],
@@ -369,12 +371,15 @@ class Engine:
         if any(r.get('mgnMode')!='isolated' or r.get('posSide')!=p['posSide'] or abs(float(r['pos']))>float(p['sz'])+1e-10 for r in positions):
             raise Halt('仓位与程序记录不一致，请立即在OKX核对')
         if status in ('live','partially_filled'):
-            if filled>0 or positions:
-                self._cancel_pending_entry(p,'限价单出现部分成交，撤销剩余数量并核对保护')
-                return
             if p.get('cancel_requested'):
                 if time.time()-float(p['cancel_requested'])>15:
                     raise Halt('限价撤单状态长时间无法核实；请到OKX核对，禁止重复开仓')
+                return
+            if filled>0 or positions:
+                self._cancel_pending_entry(p,'限价单出现部分成交，先撤销剩余数量')
+                return
+            if p.get('cancel_on_reconcile'):
+                self._cancel_pending_entry(p,'手动停止自动交易')
                 return
             if time.time() >= float(p.get('expires',p['submitted']+300)):
                 self._cancel_pending_entry(p,'限价挂单已等待1根5m K线')
@@ -386,15 +391,33 @@ class Engine:
             self.store.record('限价单未成交',p)
             self.emit('log','限价开仓未成交/已撤销；不计为交易，不触发平仓冷却，该信号不重试')
             return
+        # OKX attached TP/SL is created only after the parent order is fully filled.
+        # A canceled parent with partial fills is therefore flattened at market instead of left unprotected.
+        if status=='canceled' and filled>0 and positions:
+            if p.get('partial_close_id'):
+                if time.time()-float(p.get('partial_close_requested',time.time()))>15:
+                    raise Halt('部分成交仓位的市价安全平仓结果长时间无法核实；请立即到OKX核对')
+                return
+            size=sum(abs(float(r['pos'])) for r in positions)
+            if size<=0 or size>float(p['sz'])+1e-10:
+                raise Halt('部分成交仓位数量异常，请立即到OKX核对')
+            close_id='pc'+uuid.uuid4().hex[:28]
+            p['partial_close_id']=close_id; p['partial_close_requested']=time.time(); self.store.save()
+            self.x.post('/api/v5/trade/order',{'instId':INSTRUMENT,'tdMode':'isolated','posSide':p['posSide'],
+                'side':'sell' if p['posSide']=='long' else 'buy','ordType':'market','sz':str(size),'clOrdId':close_id})
+            self.store.record('部分成交安全平仓请求',{'client_id':p['client_id'],'close_id':close_id,'size':size})
+            self.emit('log','限价开仓仅部分成交：剩余挂单已撤销，已对成交部分发送市价安全平仓请求；禁止重复发送')
+            return
         if status not in ('filled','canceled'):
             if time.time()-p['submitted']>15:
                 raise Halt('订单状态长时间不确定，禁止重复开仓；请到OKX核对')
             return
         if filled<=0:
             raise Halt('成交状态异常')
-        p['filled']=True; p['filled_sz']=filled; self.store.save()
+        if not p.get('filled'):
+            p['filled']=True; p['filled_sz']=filled; p['filled_at']=time.time(); self.store.save()
         if not positions:
-            if time.time()-p['submitted']<10:
+            if time.time()-float(p.get('filled_at',p['submitted']))<10:
                 return
             equity,_=self.x.balance()
             pnl=equity-p['equity_before']
@@ -414,7 +437,7 @@ class Engine:
         if protection:
             if not p.get('protected'):
                 p['protected']=True; self.store.save(); self.emit('log','已核对交易所逐仓持仓及全仓数量TP/SL保护单')
-        elif time.time()-p['submitted']>15:
+        elif time.time()-float(p.get('filled_at',p['submitted']))>15:
             self.halt('止盈止损保护状态无法核实，已锁住新开仓；请立即到OKX核对/平仓')
         self.emit('position',positions)
 
