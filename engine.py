@@ -42,10 +42,12 @@ class Settings:
     consecutive_losses:int=3
     cooldown_minutes:int=30
     stop_atr:float=1.0
-    reward_r:float=1.5
+    reward_r:float=2.0
     score_threshold:float=4.0
-    fee_bps:float=10
-    slippage_bps:float=5
+    # V1.3.3 fixed OKX cost assumptions. fee_bps is maker entry fee.
+    fee_bps:float=2.0
+    taker_fee_bps:float=5.0
+    slippage_bps:float=5.0
 
     def validate(self):
         if not 4.0<=self.score_threshold<=10.0 or abs(self.score_threshold*2-round(self.score_threshold*2))>1e-9:
@@ -54,22 +56,34 @@ class Settings:
             if not isinstance(value,(int,float)) or not math.isfinite(value) or value<=0:
                 raise Halt(name+' 必须是有限正数')
         if int(self.leverage)!=self.leverage or not 1<=self.leverage<=10:
-            raise Halt('首版杠杆范围1—10倍（整数）')
+            raise Halt('杠杆范围1—10倍（整数）')
         if int(self.consecutive_losses)!=self.consecutive_losses or self.consecutive_losses>20:
             raise Halt('连续亏损上限必须是1—20的整数')
         if self.risk_pct>5 or self.risk_usdt>self.capital*.05:
-            raise Halt('首版单笔风险不得超过配置资金的5%')
+            raise Halt('单笔风险不得超过配置资金的5%')
         if self.daily_loss>self.capital or self.max_notional>self.capital*self.leverage:
             raise Halt('日亏损/名义仓位超出资金与杠杆范围')
-        if not .6<=self.stop_atr<=3 or not 1<=self.reward_r<=5:
-            raise Halt('ATR倍数范围0.6—3；止盈R范围1—5')
-        if not 5<=self.fee_bps<=100 or not 1<=self.slippage_bps<=30:
-            raise Halt('单边手续费预算5—100bps；限价偏移1—30bps')
+        if not .6<=self.stop_atr<=3:
+            raise Halt('ATR止损倍数范围0.6—3')
+        if abs(self.reward_r-2.0)>1e-9:
+            raise Halt('V1.3.3最终止盈固定为2R')
+        if abs(self.fee_bps-2.0)>1e-9 or abs(self.taker_fee_bps-5.0)>1e-9 or abs(self.slippage_bps-5.0)>1e-9:
+            raise Halt('V1.3.3成本参数固定：Maker 2bps / Taker 5bps / 滑点预算5bps')
         return self
 
 def rounded(value,tick,up=False):
     v,t=Decimal(str(value)),Decimal(str(tick))
     return format((v/t).to_integral_value(rounding=ROUND_UP if up else ROUND_DOWN)*t,'f')
+
+def _split_tp_sizes(quantity,lot_size,min_size):
+    q=Decimal(str(quantity)); lot=Decimal(str(lot_size)); minimum=Decimal(str(min_size))
+    units=(q/lot).to_integral_value(rounding=ROUND_DOWN)
+    first_units=(units/Decimal('2')).to_integral_value(rounding=ROUND_DOWN)
+    second_units=units-first_units
+    first=first_units*lot; second=second_units*lot
+    if first<minimum or second<minimum or first+second!=q:
+        raise Halt('下单数量不足以安全拆分为两笔止盈，跳过')
+    return format(first,'f'),format(second,'f')
 
 def make_plan(s,side,ticker,meta,atr,available,daily_remaining):
     s.validate()
@@ -79,32 +93,39 @@ def make_plan(s,side,ticker,meta,atr,available,daily_remaining):
     ask,bid=float(ticker['askPx']),float(ticker['bidPx'])
     if not 0<bid<=ask or (ask-bid)/bid>s.slippage_bps/10000:
         raise Halt('买卖价差过大')
-    # V1.3 entry is a normal limit order: buy at best bid / sell at best ask; never chase beyond the saved price.
     limit=float(rounded(bid if buy else ask,meta['tickSz'],not buy))
     dist=atr*s.stop_atr
     sl=rounded(limit-d*dist,meta['tickSz'],not buy)
-    tp=rounded(limit+d*dist*s.reward_r,meta['tickSz'],buy)
-    if not (float(sl)<limit<float(tp) if buy else float(tp)<limit<float(sl)):
+    tp1=rounded(limit+d*dist,meta['tickSz'],buy)
+    tp2=rounded(limit+d*dist*2,meta['tickSz'],buy)
+    if not (float(sl)<limit<float(tp1)<float(tp2) if buy else float(tp2)<float(tp1)<limit<float(sl)):
         raise Halt('止盈止损价格非法')
     unit=float(meta['ctVal'])*float(meta.get('ctMult') or 1)
     if unit<=0 or float(meta['minSz'])<=0 or float(meta['lotSz'])<=0:
         raise Halt('合约单位异常')
-    fee=s.fee_bps/10000
-    per_btc=abs(limit-float(sl))+(limit+float(sl))*fee+limit*s.slippage_bps/10000
+    maker=s.fee_bps/10000; taker=s.taker_fee_bps/10000; slip=s.slippage_bps/10000
+    # Maximum-loss sizing assumes maker entry + marketable/market stop exit + slippage budget.
+    per_btc=abs(limit-float(sl))+limit*maker+float(sl)*(taker+slip)
     risk=min(s.risk_usdt,s.capital*s.risk_pct/100,daily_remaining)
     notional=min(s.max_notional,s.capital*s.leverage,available*.9*s.leverage)
     quantity=rounded(min(risk/per_btc,notional/limit)/unit,meta['lotSz'])
     if Decimal(quantity)<Decimal(meta['minSz']):
         raise Halt('风险预算不足以满足最小下单量，跳过')
+    tp1_sz,tp2_sz=_split_tp_sizes(quantity,meta['lotSz'],meta['minSz'])
     btc=float(quantity)*unit
     if btc*per_btc>risk+1e-9 or btc*limit>notional+1e-9:
         raise Halt('取整后风险超限')
-    expected_roundtrip_cost=limit*((2*s.fee_bps+s.slippage_bps)/10000)
-    tp_distance=dist*s.reward_r
-    cost_multiple=tp_distance/expected_roundtrip_cost if expected_roundtrip_cost>0 else math.inf
+    # Planned gross reward distance is 50% at 1R + 50% at 2R = 1.5R average.
+    weighted_exit=(float(tp1)+float(tp2))/2
+    expected_roundtrip_cost=limit*maker+weighted_exit*(taker+slip)
+    planned_reward_distance=dist*1.5
+    cost_multiple=planned_reward_distance/expected_roundtrip_cost if expected_roundtrip_cost>0 else math.inf
     return dict(side=side,posSide='long' if buy else 'short',exchange_side='buy' if buy else 'sell',
-        px=str(limit),sz=quantity,sl=sl,tp=tp,btc=btc,notional=btc*limit,estimated_loss=btc*per_btc,
-        expected_roundtrip_cost=btc*expected_roundtrip_cost,cost_multiple=cost_multiple)
+        px=str(limit),sz=quantity,sl=sl,tp=tp2,tp1=tp1,tp2=tp2,tp1_sz=tp1_sz,tp2_sz=tp2_sz,
+        btc=btc,notional=btc*limit,estimated_loss=btc*per_btc,
+        expected_roundtrip_cost=btc*expected_roundtrip_cost,cost_multiple=cost_multiple,
+        reward_r=2.0,breakeven_after_tp1=True)
+
 
 class Store:
     def __init__(self,path):
@@ -191,7 +212,7 @@ class Engine:
         if self.store.data['streak']>=settings.consecutive_losses:
             self.emit('log',f'中国时间本日已连续亏损 {self.store.data["streak"]} 次：仅停止新开仓，次日自动恢复')
         self.candle_lag_count=0; self.candle_paused=False
-        self.emit('log','自动交易启动；4H结构→1H环境→15m/1H结构→15m Setup→5m Trigger；10分细分制；限价开仓、市场价退出；SL/TP使用15m ATR；每根5m信号最多一次')
+        self.emit('log','自动交易启动；V1.3.3评分沿用10分制；15m ATR止损；TP1=1R平50%，TP2=2R平余下50%；首个TP成交后由OKX自动把SL移动到成交均价保本；每根5m信号最多一次')
 
     def stop(self):
         self.enabled=False; self.stopped=True
@@ -337,19 +358,31 @@ class Engine:
         if not self.enabled:
             return
         self._verify_latest('5m',market['bar'],ENTRY_STEP)
-        cid='mac'+uuid.uuid4().hex[:28]; aid='sl'+uuid.uuid4().hex[:28]
-        # Persist BEFORE sending so network ambiguity and crashes cannot cause duplicate orders.
+        cid='mac'+uuid.uuid4().hex[:28]
+        tp1_id='t1'+uuid.uuid4().hex[:28]; tp2_id='t2'+uuid.uuid4().hex[:28]; sl_id='sl'+uuid.uuid4().hex[:28]
+        # Persist BEFORE POST so ambiguous writes can never create a duplicate parent order.
         state['last_bar']=market['bar']
-        state['active']=dict(plan,client_id=cid,algo_id=aid,submitted=time.time(),expires=time.time()+300,equity_before=equity,filled=False,cancel_requested=False,cancel_on_reconcile=False,partial_close_id='',
-                             score=score['total'],score_items=score.get('items',[]))
+        state['active']=dict(plan,client_id=cid,algo_id=sl_id,tp1_id=tp1_id,tp2_id=tp2_id,sl_id=sl_id,
+                             submitted=time.time(),expires=time.time()+300,equity_before=equity,filled=False,
+                             cancel_requested=False,cancel_on_reconcile=False,partial_close_id='',
+                             tp1_done=False,breakeven_verified=False,score=score['total'],score_items=score.get('items',[]))
         self.store.save()
+        # OKX split-TP rules require TP and SL as one-way attached algos. Two TP sizes sum exactly to parent size.
+        # Cost-price SL is exchange-native: amendPxOnTriggerType=1 moves SL to avgPx after the first split TP triggers.
+        # TP orders are conditional, marketable limits bounded by the fixed 5bps execution budget; SL remains market.
+        tick=float(self.x.instrument()['tickSz']); slip=s.slippage_bps/10000
+        tp1_exec=rounded(float(plan['tp1'])*(1-slip if plan['posSide']=='long' else 1+slip),tick,plan['posSide']=='short')
+        tp2_exec=rounded(float(plan['tp2'])*(1-slip if plan['posSide']=='long' else 1+slip),tick,plan['posSide']=='short')
         body={'instId':INSTRUMENT,'tdMode':'isolated','side':plan['exchange_side'],'posSide':plan['posSide'],
             'ordType':'limit','px':plan['px'],'sz':plan['sz'],'clOrdId':cid,
-            'attachAlgoOrds':[{'attachAlgoClOrdId':aid,'tpTriggerPx':plan['tp'],'tpOrdPx':'-1',
-                'slTriggerPx':plan['sl'],'slOrdPx':'-1','tpTriggerPxType':'last','slTriggerPxType':'last'}]}
+            'attachAlgoOrds':[
+                {'attachAlgoClOrdId':tp1_id,'tpOrdKind':'condition','tpTriggerPx':plan['tp1'],'tpOrdPx':tp1_exec,'tpTriggerPxType':'last','sz':plan['tp1_sz']},
+                {'attachAlgoClOrdId':tp2_id,'tpOrdKind':'condition','tpTriggerPx':plan['tp2'],'tpOrdPx':tp2_exec,'tpTriggerPxType':'last','sz':plan['tp2_sz']},
+                {'attachAlgoClOrdId':sl_id,'slTriggerPx':plan['sl'],'slOrdPx':'-1','slTriggerPxType':'last','amendPxOnTriggerType':'1'}
+            ]}
         self.x.post('/api/v5/trade/order',body)
         self.store.record('提交开仓请求',state['active'])
-        self.emit('log',f"已提交逐仓限价开仓请求（{score.get('level','信号')} · 评分 {score['total']:g}/10），最多等待1根5m K线；附带市场价TP/SL")
+        self.emit('log',f"已提交逐仓限价开仓（{score.get('level','信号')} · {score['total']:g}/10）：TP1 1R平50% / TP2 2R平50% / SL 1×15m ATR；TP1后自动移保本")
         self.emit('plan',state['active'])
 
     def _cancel_pending_entry(self,p,reason):
@@ -428,18 +461,44 @@ class Engine:
             self.store.record('仓位归零',dict(client_id=p['client_id'],equity_change=pnl,side=p['side'],px=p['px'],sz=p['sz'],score=p.get('score')))
             self.emit('log',f'仓位已归零；本轮USDT净权益变化 {pnl:+.4f}；中国时间连续亏损 {state["streak"]}/{self.settings.consecutive_losses}')
             return
+        if not all(k in p for k in ('tp1','tp2','tp1_sz','tp2_sz','tp1_id','tp2_id','sl_id')):
+            raise Halt('检测到旧版活动仓位；V1.3.3不能接管旧TP/SL结构，请先在OKX完成或人工处理该仓位')
         qty=sum(abs(float(r['pos'])) for r in positions)
-        protection=[a for a in self.x.algos() if a.get('algoClOrdId')==p['algo_id'] and a.get('state')=='live'
-            and a.get('posSide')==p['posSide'] and a.get('side')!=p['exchange_side']
-            and a.get('tdMode')=='isolated' and a.get('slTriggerPx') and a.get('tpTriggerPx')
-            and a.get('slOrdPx')=='-1' and a.get('tpOrdPx')=='-1'
-            and float(a['slTriggerPx'])==float(p['sl']) and float(a['tpTriggerPx'])==float(p['tp'])
-            and float(a.get('sz') or 0)>=qty]
-        if protection:
+        full=float(p['sz']); remaining=float(p['tp2_sz']); tol=1e-10
+        if abs(qty-full)>tol and abs(qty-remaining)>tol:
+            raise Halt('分批止盈后的仓位数量与计划不一致，请立即到OKX核对')
+        algos=self.x.algos()
+        def live(cid):
+            return next((a for a in algos if a.get('algoClOrdId')==cid and a.get('state')=='live'
+                         and a.get('posSide')==p['posSide'] and a.get('side')!=p['exchange_side']
+                         and a.get('tdMode')=='isolated'),None)
+        t1=live(p['tp1_id']); t2=live(p['tp2_id']); sl=live(p['sl_id'])
+        tp2_ok=bool(t2 and float(t2.get('tpTriggerPx') or 0)==float(p['tp2'])
+                    and float(t2.get('sz') or 0)+tol>=float(p['tp2_sz']))
+        sl_ok=bool(sl and sl.get('slOrdPx')=='-1' and sl.get('amendPxOnTriggerType')=='1')
+        if abs(qty-full)<=tol:
+            tp1_ok=bool(t1 and float(t1.get('tpTriggerPx') or 0)==float(p['tp1'])
+                        and float(t1.get('sz') or 0)+tol>=float(p['tp1_sz']))
+            sl_price_ok=sl_ok and float(sl.get('slTriggerPx') or 0)==float(p['sl'])
+            protection_ok=tp1_ok and tp2_ok and sl_price_ok
+        else:
+            if not p.get('tp1_done'):
+                p['tp1_done']=True; p['tp1_seen_at']=time.time(); self.store.save()
+                self.emit('log','TP1已完成：50%仓位止盈；等待核对剩余仓位保本SL已移动到成交均价')
+            entry_avg=float(positions[0].get('avgPx') or p['px'])
+            sl_px=float(sl.get('slTriggerPx') or 0) if sl else 0
+            be_ok=sl_ok and abs(sl_px-entry_avg)<=max(.11,entry_avg*1e-8)
+            protection_ok=tp2_ok and be_ok
+            if protection_ok and not p.get('breakeven_verified'):
+                p['breakeven_verified']=True; self.store.save()
+                self.emit('log',f'已核对TP1后保本止损：剩余50% SL={sl_px:g}（成交均价 {entry_avg:g}）')
+        if protection_ok:
             if not p.get('protected'):
-                p['protected']=True; self.store.save(); self.emit('log','已核对交易所逐仓持仓及全仓数量TP/SL保护单')
-        elif time.time()-float(p.get('filled_at',p['submitted']))>15:
-            self.halt('止盈止损保护状态无法核实，已锁住新开仓；请立即到OKX核对/平仓')
+                p['protected']=True; self.store.save(); self.emit('log','已核对V1.3.3分批TP与SL保护结构')
+        else:
+            grace=float(p.get('tp1_seen_at',p.get('filled_at',p['submitted'])))
+            if time.time()-grace>15:
+                self.halt('V1.3.3分批止盈/保本止损保护状态无法核实，已锁住新开仓；请立即到OKX核对')
         self.emit('position',positions)
 
     def flatten(self):

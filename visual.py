@@ -53,13 +53,69 @@ class Card(tk.Canvas):
 
     def resize(self,event):
         w,h=event.width,event.height
-        self.delete('surface')
-        r=min(20,max(8,h//3))
+        self.delete('surface'); self.delete('shadow'); self.delete('shine')
+        r=min(20,max(10,h//3))
+        shadow=[r+3,5,w-r+1,5,w-1,5,w-1,r+3,w-1,h-r,w-1,h-1,w-r+1,h-1,r+3,h-1,3,h-1,3,h-r,3,r+3,3,5]
         points=[r,1,w-r,1,w-1,1,w-1,r,w-1,h-r,w-1,h-1,w-r,h-1,r,h-1,1,h-1,1,h-r,1,r,1,1]
-        self.create_polygon(points,smooth=True,splinesteps=24,fill=self.fill,outline='',tags='surface')
-        self.tag_lower('surface')
+        self.create_polygon(shadow,smooth=True,splinesteps=24,fill='#05090c',outline='',tags='shadow')
+        self.create_polygon(points,smooth=True,splinesteps=24,fill=self.fill,outline='#22323a',width=1,tags='surface')
+        self.create_line(r+4,3,max(r+5,w-r-4),3,fill='#2a3b43',width=1,tags='shine')
+        self.tag_lower('shadow'); self.tag_lower('surface'); self.tag_raise('shine')
         self.itemconfigure(self.window,width=max(1,w-36),height=max(1,h-32))
 
+
+
+class ScrollablePage(tk.Frame):
+    """Whole-page vertical scrolling for compact Mac windows; nested tables keep their own wheel events."""
+    def __init__(self,parent,**kwargs):
+        super().__init__(parent,bg=BG,bd=0,highlightthickness=0,**kwargs)
+        self.canvas=tk.Canvas(self,bg=BG,highlightthickness=0,borderwidth=0,yscrollincrement=24)
+        self.scroll=WideScrollbar(self,command=self.canvas.yview,width=16)
+        self.canvas.configure(yscrollcommand=self.scroll.set)
+        self.scroll.pack(side='right',fill='y'); self.canvas.pack(side='left',fill='both',expand=True)
+        self.body=tk.Frame(self.canvas,bg=BG,bd=0,highlightthickness=0)
+        self.window=self.canvas.create_window(0,0,anchor='nw',window=self.body)
+        self.body.bind('<Configure>',self._sync)
+        self.canvas.bind('<Configure>',self._resize)
+        self.bind_all('<MouseWheel>',self._wheel,add='+')
+        self.bind_all('<Button-4>',lambda event:self._linux_wheel(event,-1),add='+')
+        self.bind_all('<Button-5>',lambda event:self._linux_wheel(event,1),add='+')
+
+    def _sync(self,event=None):
+        self.canvas.configure(scrollregion=self.canvas.bbox('all') or (0,0,1,1))
+
+    def _resize(self,event):
+        self.canvas.itemconfigure(self.window,width=max(1,event.width))
+        self._sync()
+
+    def _nested_scroll(self,widget):
+        w=widget
+        while w is not None:
+            if isinstance(w,(ScoreTable,ttk.Treeview,tk.Text)):
+                return True
+            if w is self:return False
+            try:w=w.master
+            except Exception:return False
+        return False
+
+    def _wheel(self,event):
+        if not self.winfo_ismapped() or self._nested_scroll(getattr(event,'widget',None)):
+            return
+        delta=getattr(event,'delta',0)
+        if not delta:return
+        units=(-1 if delta>0 else 1) if abs(delta)<120 else int(-delta/120)
+        self.canvas.yview_scroll(units,'units'); return 'break'
+
+    def _linux_wheel(self,event,units):
+        if self.winfo_ismapped() and not self._nested_scroll(getattr(event,'widget',None)):
+            self.canvas.yview_scroll(units,'units'); return 'break'
+
+
+class MetricTile(Card):
+    def __init__(self,parent,title,variable=None,value='—',accent=TEXT,height=76,**kwargs):
+        super().__init__(parent,height=height,fill=PANEL_ALT,**kwargs)
+        label(self.body,text=title,color=MUTED,size=9).pack(anchor='w')
+        label(self.body,text=value,variable=variable,color=accent,size=16,bold=True).pack(anchor='w',pady=(5,0))
 
 def label(parent,text=None,variable=None,size=13,color=TEXT,bold=False,bg=None):
     return tk.Label(parent,text=text,textvariable=variable,bg=bg or parent.cget('bg'),fg=color,
@@ -478,7 +534,7 @@ def mark(parent):
 
 
 class Tabs(tk.Frame):
-    """Plain page navigation avoids Aqua ttk notebook painting artifacts."""
+    """Rounded page navigation avoids Aqua ttk notebook artifacts."""
     def __init__(self,parent,**kwargs):
         super().__init__(parent,bg=BG,bd=0,highlightthickness=0,**kwargs)
         self.nav=tk.Frame(self,bg=BG,bd=0,highlightthickness=0)
@@ -486,11 +542,10 @@ class Tabs(tk.Frame):
         self.pages=[]; self.buttons=[]; self.active=None
 
     def add(self,page,text):
-        index=len(self.pages)
-        self.pages.append(page)
-        button=tk.Label(self.nav,text=text,bg=BG,fg=MUTED,font=('Helvetica',13),padx=20,pady=10,cursor='hand2',bd=0,highlightthickness=0)
-        button.pack(side='left',padx=(0,6))
-        button.bind('<Button-1>',lambda event:self.select(index))
+        index=len(self.pages); self.pages.append(page)
+        button=RoundedButton(self.nav,text=text,command=lambda i=index:self.select(i),variant='neutral',
+                             width=max(108,52+len(text)*18),height=38,radius=12,font=('Helvetica',11,'bold'))
+        button.pack(side='left',padx=(0,7))
         self.buttons.append(button)
         if self.active is None:self.select(index)
 
@@ -498,11 +553,8 @@ class Tabs(tk.Frame):
         if page is None:return str(self.pages[self.active])
         index=page if isinstance(page,int) else self.pages.index(page)
         for p in self.pages:p.pack_forget()
-        self.pages[index].pack(fill='both',expand=True)
-        self.pages[index].lift()
-        self.active=index
-        for i,b in enumerate(self.buttons):
-            b.configure(bg='#15382e' if i==index else BG,fg=GREEN if i==index else MUTED)
+        self.pages[index].pack(fill='both',expand=True); self.pages[index].lift(); self.active=index
+        for i,b in enumerate(self.buttons):b.configure(variant='accent' if i==index else 'neutral')
         self.event_generate('<<NotebookTabChanged>>')
         self.after_idle(lambda:self.repaint(self.pages[index]))
 

@@ -78,15 +78,22 @@ class EngineTests(unittest.TestCase):
         return p
     def position(self,p):
         return dict(mgnMode='isolated',posSide=p['posSide'],pos=p['sz'])
-    def protection(self,p):
-        return dict(algoClOrdId=p['algo_id'],state='live',posSide=p['posSide'],side='sell',tdMode='isolated',
-                    slTriggerPx=p['sl'],tpTriggerPx=p['tp'],slOrdPx='-1',tpOrdPx='-1',sz=p['sz'])
+    def protections(self,p):
+        opposite='sell' if p['posSide']=='long' else 'buy'
+        return [
+            dict(algoClOrdId=p['tp1_id'],state='live',posSide=p['posSide'],side=opposite,tdMode='isolated',tpTriggerPx=p['tp1'],sz=p['tp1_sz']),
+            dict(algoClOrdId=p['tp2_id'],state='live',posSide=p['posSide'],side=opposite,tdMode='isolated',tpTriggerPx=p['tp2'],sz=p['tp2_sz']),
+            dict(algoClOrdId=p['sl_id'],state='live',posSide=p['posSide'],side=opposite,tdMode='isolated',slTriggerPx=p['sl'],slOrdPx='-1',amendPxOnTriggerType='1')
+        ]
     def test_read_connection_no_orders(self):
         self.assertEqual(self.x.writes,[])
     def test_attached_and_isolated(self):
         p=self.active(); path,b=self.x.writes[-1]
         self.assertEqual(b['tdMode'],'isolated'); self.assertEqual(b['ordType'],'limit')
-        self.assertTrue(b['attachAlgoOrds'][0]['slTriggerPx']); self.assertTrue(b['attachAlgoOrds'][0]['tpTriggerPx'])
+        self.assertEqual(len(b['attachAlgoOrds']),3)
+        tps=[x for x in b['attachAlgoOrds'] if x.get('tpTriggerPx')]; sl=[x for x in b['attachAlgoOrds'] if x.get('slTriggerPx')]
+        self.assertEqual(len(tps),2); self.assertEqual(len(sl),1); self.assertEqual(sl[0]['amendPxOnTriggerType'],'1')
+        self.assertAlmostEqual(sum(float(x['sz']) for x in tps),float(p['sz']))
         self.assertEqual(b['clOrdId'],p['client_id'])
     def test_execution_uses_15m_atr(self):
         p=self.active()
@@ -105,10 +112,10 @@ class EngineTests(unittest.TestCase):
         p['filled_at']=time.time()-20; self.e.store.save(); self.e.cycle()
         self.assertFalse(self.e.enabled); self.assertIn('保护',self.e.store.data['halt'])
     def test_protection_verified(self):
-        p=self.active(); self.x.pos=[self.position(p)]; self.x.protections=[self.protection(p)]
+        p=self.active(); self.x.pos=[self.position(p)]; self.x.protections=self.protections(p)
         self.e.cycle(); self.assertTrue(p['protected'])
     def test_undersized_protection_locks(self):
-        p=self.active(); self.x.pos=[self.position(p)]; a=self.protection(p); a['sz']='0.00001'; self.x.protections=[a]
+        p=self.active(); self.x.pos=[self.position(p)]; a=self.protections(p); a[1]['sz']='0.00001'; self.x.protections=a
         self.e.cycle(); p['filled_at']=time.time()-20; self.e.store.save(); self.e.cycle(); self.assertFalse(self.e.enabled)
     def test_foreign_position_halts(self):
         self.x.pos=[{'pos':'1'}]
@@ -118,7 +125,7 @@ class EngineTests(unittest.TestCase):
         p=self.active(); self.x.pos=[dict(self.position(p),mgnMode='cross')]
         with self.assertRaises(Halt): self.e.cycle()
     def test_stop_does_not_cancel_protection(self):
-        p=self.active(); self.x.pos=[self.position(p)]; self.x.protections=[self.protection(p)]
+        p=self.active(); self.x.pos=[self.position(p)]; self.x.protections=self.protections(p)
         before=len(self.x.writes); self.e.stop(); self.e.cycle()
         self.assertEqual(len(self.x.writes),before); self.assertTrue(p['protected'])
     def test_daily_loss(self):
@@ -126,7 +133,7 @@ class EngineTests(unittest.TestCase):
         with self.assertRaises(Halt): self.e.cycle()
         self.assertEqual(self.x.writes,[])
     def test_daily_loss_while_position_active(self):
-        p=self.active(); self.x.pos=[self.position(p)]; self.x.protections=[self.protection(p)]; self.x.equity=96
+        p=self.active(); self.x.pos=[self.position(p)]; self.x.protections=self.protections(p); self.x.equity=96
         with self.assertRaises(Halt): self.e.cycle()
         self.assertTrue(p['protected'])
     def test_streak_blocks(self):

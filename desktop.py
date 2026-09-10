@@ -27,17 +27,19 @@ def smoke_test():
                  patch.object(app.messagebox, 'showerror', side_effect=AssertionError):
                 ui = app.App(root, Path(folder))
                 root.update()
-                assert 'KAYTRADE' in root.title() and '1.3.2' in root.title()
+                assert 'KAYTRADE' in root.title() and '1.3.3' in root.title()
                 assert ui.mode.get() == 'OKX模拟盘'
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
                 ui.fields['capital'].set('2000')
                 ui.save_settings()
-                saved = json.loads((Path(folder) / 'settings-v1.3.2.json').read_text())
+                saved = json.loads((Path(folder) / 'settings-v1.3.3.json').read_text())
                 assert saved['capital'] == 2000
                 assert not {'key', 'secret', 'phrase'} & saved.keys()
                 assert ui.fields['stop_atr'].get() == '1.0'
-                assert ui.fields['reward_r'].get() == '1.5'
+                assert 'reward_r' not in ui.fields
+                from engine import Settings
+                assert Settings().reward_r == 2.0 and Settings().fee_bps == 2.0 and Settings().taker_fee_bps == 5.0 and Settings().slippage_bps == 5.0
                 assert ui.fields['score_threshold'].get() == '4.0'
                 # Render both score cards, details, network status and filtered alarms.
                 from strategy import signal
@@ -118,20 +120,20 @@ def smoke_test():
                 if sys.platform=='darwin' and os.environ.get('CI'):
                     import subprocess
                     import time
-                    for index,name in [(0,'connect'),(1,'risk'),(2,'scores'),(3,'history')]:
+                    for index,name in [(0,'connect'),(1,'risk'),(2,'execution'),(3,'scores'),(4,'history')]:
                         ui.book.select(index)
                         root.lift(); root.focus_force()
                         root.after(1000,root.quit)
                         root.mainloop()
                         assert ui.log.winfo_height()>40, 'Log panel clipped'
-                        if name=='risk':
+                        if name in ('risk','execution'):
                             page=root.nametowidget(ui.book.select())
                             def descendants(w):
                                 out=[]
                                 for child in w.winfo_children(): out.append(child); out.extend(descendants(child))
                                 return out
                             entries=[w for w in descendants(page) if w.winfo_class() in ('Entry','TEntry')]
-                            assert len(entries)==13 and all(w.winfo_ismapped() and w.winfo_width()>30 for w in entries), 'Risk inputs not visible'
+                            assert entries and all(w.winfo_ismapped() and w.winfo_width()>30 for w in entries), 'Settings inputs not visible'
                         target=Path(sys.argv[2]).parent/f'ui-{name}.png'
                         if name=='scores':
                             def inspect_widget(w):
@@ -153,7 +155,7 @@ def smoke_test():
                 ui.lock.close()
         finally:
             root.destroy()
-    Path(sys.argv[2]).write_text('PASS: KAYTRADE V1.3.2 UI, functional 20px detail scrollbars, score wheel/trackpad + thumb dragging, 10-point detailed scoring, direction-aware score colors, rounded dark fields/options, animated borderless score bars, red/green P&L, demo default, settings and bundled CA roots. Screenshots use synthetic test data. No network or orders.\n')
+    Path(sys.argv[2]).write_text('PASS: KAYTRADE V1.3.3 UI + split TP execution, functional detail scrollbars, score wheel/trackpad + thumb dragging, 10-point detailed scoring, direction-aware score colors, rounded dark fields/options, animated borderless score bars, red/green P&L, demo default, settings and bundled CA roots. Screenshots use synthetic test data. No network or orders.\n')
 
 
 if __name__ == '__main__':
