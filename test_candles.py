@@ -6,23 +6,28 @@ from exchange import Exchange
 STEP=900000
 BOUNDARY=2000*STEP
 
-def rows(start,end,confirmed='1'):
-    return [[str(i*STEP),'100','101','99','100','1','1','1',confirmed] for i in range(end,start-1,-1)]
+def rows(start,end,confirmed='1',step=STEP):
+    return [[str(i*step),'100','101','99','100','1','1','1',confirmed] for i in range(end,start-1,-1)]
 
 class API:
-    def __init__(self):self.now=BOUNDARY/1000+5; self.calls=[]; self.newest=rows(1700,1999)
+    def __init__(self,step=STEP):self.step=step; self.now=2000*step/1000+5; self.calls=[]; self.newest=rows(1700,1999,step=step)
     def server_now(self):return self.now
     def get(self,path,args):
         self.calls.append((path,args))
         if path.endswith('/candles'):return self.newest
-        end=int(args['after'])//STEP-1
-        return rows(end-299,end)
+        end=int(args['after'])//self.step-1
+        return rows(end-299,end,step=self.step)
 
 class Candles(unittest.TestCase):
     def test_warmup_then_no_redundant_fetch(self):
         a=API(); c=CandleCache(a)
         self.assertGreaterEqual(len(c.read('15m')),1000)
         count=len(a.calls); c.read('15m'); self.assertEqual(len(a.calls),count)
+
+    def test_5m_supported_and_cached(self):
+        step=300000; a=API(step); c=CandleCache(a)
+        data=c.read('5m'); self.assertGreaterEqual(len(data),1000); self.assertEqual(data[-1]['t'],1999*step)
+        count=len(a.calls); c.read('5m'); self.assertEqual(len(a.calls),count)
 
     def test_incremental_update_uses_one_page(self):
         a=API(); c=CandleCache(a); c.read('15m'); a.calls=[]
