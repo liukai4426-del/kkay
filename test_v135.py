@@ -84,6 +84,62 @@ class V135OrderReconcileTests(unittest.TestCase):
         self.assertTrue(any(k=='log' and '继续检查TP/SL' in str(v) for k,v in self.events))
 
 
+class V135Legacy51603MigrationTests(unittest.TestCase):
+    OLD='OKX错误码 51603（核对环境、权限、地区与系统时间）'
+
+    def setUp(self):
+        import tempfile
+        self.tmp=tempfile.TemporaryDirectory()
+        self.x=test_engine.FakeExchange(); self.events=[]
+        self.x.recent_orders=lambda: []
+        first=Engine(self.x,self.tmp.name,lambda k,d:self.events.append((k,d)))
+        first.connect()
+        self.path=first.store.path
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def seed(self,active=None,halt=None):
+        from engine import Store
+        store=Store(self.path)
+        store.data['active']=active
+        store.data['halt']=self.OLD if halt is None else halt
+        store.save()
+
+    def reconnect(self):
+        e=Engine(self.x,self.tmp.name,lambda k,d:self.events.append((k,d)))
+        e.connect()
+        return e
+
+    def test_old_51603_flat_missing_order_is_auto_migrated(self):
+        self.seed({'client_id':'legacy-client','order_id':''})
+        self.x.order=lambda cid='',order_id='': (_ for _ in ()).throw(APIError('OKX错误码 51603','51603'))
+        e=self.reconnect()
+        self.assertEqual(e.store.data['halt'],'')
+        self.assertIsNone(e.store.data['active'])
+        self.assertTrue(any(k=='log' and '旧51603故障锁' in str(v) and '已解除' in str(v) for k,v in self.events))
+
+    def test_old_51603_with_live_exposure_stays_locked(self):
+        self.seed(None)
+        self.x.pos=[{'mgnMode':'isolated','posSide':'long','pos':'0.01'}]
+        e=self.reconnect()
+        self.assertTrue(e.store.data['halt'])
+        self.assertIn('历史51603故障锁',e.store.data['halt'])
+
+    def test_old_51603_with_historical_fill_stays_locked(self):
+        self.seed({'client_id':'legacy-client','order_id':'123'})
+        self.x.order=lambda cid='',order_id='': (_ for _ in ()).throw(APIError('OKX错误码 51603','51603'))
+        self.x.recent_orders=lambda: [{'ordId':'123','clOrdId':'legacy-client','state':'filled','accFillSz':'0.01'}]
+        e=self.reconnect()
+        self.assertTrue(e.store.data['halt'])
+        self.assertIsNotNone(e.store.data['active'])
+
+    def test_new_51603_lock_is_never_auto_cleared(self):
+        self.seed(None,'51603：OKX暂未找到该订单，正在核对订单与持仓状态')
+        e=self.reconnect()
+        self.assertTrue(e.store.data['halt'])
+
+
 class V135AdapterTests(unittest.TestCase):
     class Response:
         def __init__(self,payload): self.payload=payload
