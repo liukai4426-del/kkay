@@ -9,6 +9,9 @@ import certifi
 
 os.environ['SSL_CERT_FILE'] = certifi.where()
 
+from v135_patch import apply as apply_v135_patch
+apply_v135_patch()
+
 
 def smoke_test():
     """Exercise the packaged V1.3.5 UI without credentials, network, or orders."""
@@ -42,11 +45,17 @@ def smoke_test():
                 assert ui.fields['score_threshold'].get() == '3.5'
                 assert ui.fields['consecutive_losses'].get() == '3'
                 assert 'reward_r' not in ui.fields
-                from engine import Settings
+                from engine import Settings, Halt
                 defaults = Settings()
                 assert defaults.reward_r == 2.0
                 assert defaults.fee_bps == 2.0 and defaults.taker_fee_bps == 5.0 and defaults.slippage_bps == 5.0
                 assert defaults.score_threshold == 3.5
+                Settings(score_threshold=1.0).validate()
+                try:
+                    Settings(score_threshold=0.5).validate()
+                    raise AssertionError('score threshold below 1 must fail')
+                except Halt:
+                    pass
 
                 # Render V1.3.5 score cards, daily indicators, ticker and a tiered position plan.
                 from strategy import signal
@@ -147,7 +156,7 @@ def smoke_test():
         finally:
             root.destroy()
     Path(sys.argv[2]).write_text(
-        'PASS: KAYTRADE V1.3.5 UI + 1D EMA indicators + 3.5 threshold + tiered 1x/1.5x/2x sizing + split TP execution; '
+        'PASS: KAYTRADE V1.3.5 UI + 1D EMA indicators + selectable 1-10 threshold range + 5s startup no-entry buffer + tiered 1x/1.5x/2x sizing + split TP execution; '
         'functional detail scrollbars, score wheel/trackpad + thumb dragging, 10-point scoring, direction-aware colors, demo default, '
         'settings and bundled CA roots. Screenshots use synthetic test data. No network or orders.\n')
 
