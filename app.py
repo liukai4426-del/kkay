@@ -33,7 +33,7 @@ class App:
         self.candle_wait_log=0
         self.log_lines=[]
         self.history_key=None; self.history_curve=[]
-        self.root.title('OKX Local 1.2.1 · BTC 策略控制台'); self.root.geometry('1200x920'); self.root.minsize(1040,840)
+        self.root.title('OKX Local 1.2.2 · BTC 策略控制台'); self.root.geometry('1200x920'); self.root.minsize(1040,840)
         style=ttk.Style(); style.theme_use('clam')
         style.configure('.',font=('Helvetica',13),background='#101820',foreground='#e5eef5')
         style.configure('TEntry',fieldbackground='#192832',foreground='#e5eef5',padding=7,insertcolor='white')
@@ -58,7 +58,7 @@ class App:
         mark(top).pack(side='left',padx=(0,12))
         brand=ttk.Frame(top); brand.pack(side='left')
         ttk.Label(brand,text='OKX Local',style='Title.TLabel').pack(anchor='w')
-        ttk.Label(brand,text='BTC / USDT   ·   V1.2.1 K线修复版',style='Muted.TLabel').pack(anchor='w')
+        ttk.Label(brand,text='BTC / USDT   ·   V1.2.2 稳定性修复版',style='Muted.TLabel').pack(anchor='w')
         self.status=tk.StringVar(value='默认停止 · 未连接')
         ttk.Label(top,textvariable=self.status,style='Muted.TLabel').pack(side='right')
         badges=ttk.Frame(root,padding=(15,0)); badges.pack(fill='x')
