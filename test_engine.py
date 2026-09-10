@@ -70,7 +70,7 @@ class EngineTests(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory(); self.x=FakeExchange(); self.events=[]
         self.e=Engine(self.x,self.tmp.name,lambda k,d:self.events.append((k,d))); self.e.connect()
         self.e.arm(Settings())
-        self.e.market={'side':'做多','bar':int(time.time()//300)*300000-300000,'close':60000,'h':{'atr':2000},'m':{'atr':200},'scores':{'做多':{'gate':True,'total':7}}}
+        self.e.market={'side':'做多','bar':int(time.time()//300)*300000-300000,'close':60000,'h':{'atr':2000},'m':{'atr':200},'scores':{'做多':{'gate':True,'total':8}}}
         self.e.market_at=time.time()
     def tearDown(self): self.tmp.cleanup()
     def active(self):
