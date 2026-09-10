@@ -1,5 +1,5 @@
 name: Build KAYTRADE Intel Mac 1.3.5
-# V1.3.5 legacy-51603 hotfix validation trigger.
+# V1.3.5 execution and legacy-51603 hotfix validation trigger.
 on:
   push:
     branches: [codex/v1-3-5-fixes]
@@ -12,6 +12,7 @@ on:
       - test_engine.py
       - test_v134.py
       - test_v135.py
+      - test_v135_execution.py
       - RELEASE-1.3.5.md
       - .github/workflows/build-mac-v135.yml
   workflow_dispatch:
@@ -33,8 +34,8 @@ jobs:
         run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0'
       - name: Test V1.3.5 and preserved safety
         run: |
-          python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py desktop.py v135_patch.py
-          python -m unittest -v test_engine test_candles test_v122 test_v132 test_v133 test_v134 test_v135
+          python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py desktop.py v135_patch.py test_v135_execution.py
+          python -m unittest -v test_engine test_candles test_v122 test_v132 test_v133 test_v134 test_v135 test_v135_execution
       - name: Verify V1.3.5 fixes and preserved strategy
         run: |
           python - <<'PY'
@@ -52,7 +53,7 @@ jobs:
           assert '单笔风险不得超过配置资金的5%' not in e
           for token in ("state['active']['order_id']=order_id","_lookup_parent_order","51603：OKX暂未找到该订单"):
               assert token in e, token
-          for token in ("params['ordId']=str(order_id)","def recent_orders", "self.code=str(code or '')"):
+          for token in ("params['ordId']=str(order_id)","def recent_orders", "self.code=str(code or '')", "self.deterministic=bool(deterministic)"):
               assert token in x, token
           assert "def _is_legacy_51603_lock" in e
           assert "def _migrate_legacy_51603_lock" in e
@@ -61,7 +62,11 @@ jobs:
           assert "settings-v1.3.5.json" in a and "settings-v1.3.4.json" in a
           assert '1.3.5' in d
           assert "STARTUP_BUFFER_SECONDS = 5.0" in p
-          assert "OKX 50123" in p and "不进入51603订单核对" in p
+          assert "_remove_15m_setup_gate" in p
+          assert "DailyRiskStop" in p
+          assert "tpOrdPx'] = '-1'" in p
+          assert "_is_explicit_rejection" in p
+          assert "不进入51603订单核对" in p
           assert "'1Dutc':86400000" in Path('candles.py').read_text()
           print('V1.3.5 wiring OK')
           PY
