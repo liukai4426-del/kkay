@@ -1,4 +1,5 @@
 """KAYTRADE V1.3.5 runtime refinements and safety hotfixes."""
+import copy
 import json
 import math
 import time
@@ -57,6 +58,14 @@ def _is_okx_50123(exc):
     code = str(getattr(exc, 'code', '') or '')
     text = str(exc or '')
     return code == '50123' or 'OKX 50123' in text or '错误码 50123' in text
+
+
+def _is_explicit_rejection(exc):
+    """True only when OKX returned a parsed rejection, never for uncertain writes."""
+    code = str(getattr(exc, 'code', '') or '')
+    if code == '51603':
+        return False
+    return bool(getattr(exc, 'deterministic', False))
 
 
 def _remove_15m_setup_gate(original_signal, strategy_module):
@@ -163,11 +172,27 @@ def _check_latest(bar, timestamp, now, step):
     )
 
 
+def _market_split_tp_post(original_post):
+    """Force split TP exits to market as required by V1.3.5 and OKX split-TP rules."""
+    def post(self, path, body):
+        payload = body
+        if path == '/api/v5/trade/order' and isinstance(body, dict) and body.get('attachAlgoOrds'):
+            payload = copy.deepcopy(body)
+            tps = [item for item in payload.get('attachAlgoOrds', []) if item.get('tpTriggerPx') is not None]
+            if len(tps) >= 2:
+                for item in tps:
+                    item['tpOrdKind'] = 'condition'
+                    item['tpOrdPx'] = '-1'
+        return original_post(self, path, payload)
+    return post
+
+
 def apply():
     """Apply the V1.3.5 refinements once, before the desktop UI is instantiated."""
     import app
     import candles
     import engine
+    import exchange
     import strategy
 
     if getattr(engine.Engine, '_kaytrade_v135_patch_applied', False):
@@ -185,6 +210,11 @@ def apply():
     # 3) Preserve confirmed-candle safety but distinguish normal <=45s settlement from real lag.
     candles.check_latest = _check_latest
     engine.check_latest = _check_latest
+
+    # 4) V1.3.5 requires market exits. In OKX split-TP mode, both condition TP
+    # legs use tpOrdPx=-1 while the SL already uses slOrdPx=-1.
+    original_exchange_post = exchange.Exchange.post
+    exchange.Exchange.post = _market_split_tp_post(original_exchange_post)
 
     original_app_init = app.App.__init__
 
@@ -209,7 +239,7 @@ def apply():
 
     app.App.__init__ = app_init
 
-    # 4) Daily drawdown is a day-level stop, not a permanent fault lock.
+    # 5) Daily drawdown is a day-level stop, not a permanent fault lock.
     engine.Engine.daily = _daily
 
     original_engine_init = engine.Engine.__init__
@@ -217,6 +247,7 @@ def apply():
     original_arm = engine.Engine.arm
     original_cycle = engine.Engine.cycle
     original_stop = engine.Engine.stop
+    original_reconcile = engine.Engine.reconcile
 
     def engine_init(self, *args, **kwargs):
         original_engine_init(self, *args, **kwargs)
@@ -258,37 +289,45 @@ def apply():
             self.emit('log', str(exc))
         return None
 
+    def _handle_explicit_rejection(self, exc):
+        p = self.store.data.get('active') if self.store else None
+        cleared = False
+        # The parent order placeholder is written immediately before POST. If
+        # OKX explicitly rejects that POST and no ordId/fill exists, there is no
+        # exchange order to reconcile and keeping active would create a 51603 loop.
+        if isinstance(p, dict) and not p.get('order_id') and not p.get('filled'):
+            snapshot = {
+                'client_id': p.get('client_id', ''),
+                'side': p.get('side', ''),
+                'score': p.get('score'),
+                'submitted': p.get('submitted'),
+                'code': str(getattr(exc, 'code', '') or ''),
+                'reason': str(exc),
+            }
+            self.store.data['active'] = None
+            self.store.save()
+            self.store.record('OKX明确拒绝开仓', snapshot)
+            cleared = True
+
+        self.enabled = False
+        self.startup_buffer_until = 0.0
+        code = str(getattr(exc, 'code', '') or '')
+        detail = '；已清理本地未成交占位，不进入51603订单核对' if cleared else '；本地活动状态保留，禁止重复提交'
+        if code == '50123' or _is_okx_50123(exc):
+            message = 'OKX 50123：API Key没有BTC/对应交易市场的下单权限；本次请求被OKX明确拒绝，订单未创建'
+        else:
+            message = 'OKX明确拒绝交易请求'+(f'（错误码 {code}）' if code else '')+'：'+str(exc)
+        raise engine.Halt(message + detail + '；已停止新开仓，请核对原因后重新测试连接/启动') from None
+
     def run_original_cycle(self):
         try:
             return original_cycle(self)
         except DailyRiskStop as exc:
             return _handle_daily_stop(self, exc)
         except Exception as exc:
-            if not _is_okx_50123(exc):
-                raise
-
-            p = self.store.data.get('active') if self.store else None
-            cleared = False
-            if isinstance(p, dict) and not p.get('order_id') and not p.get('filled'):
-                snapshot = {
-                    'client_id': p.get('client_id', ''),
-                    'side': p.get('side', ''),
-                    'score': p.get('score'),
-                    'submitted': p.get('submitted'),
-                    'reason': 'OKX 50123 explicit API permission rejection',
-                }
-                self.store.data['active'] = None
-                self.store.save()
-                self.store.record('OKX明确拒绝开仓', snapshot)
-                cleared = True
-
-            self.enabled = False
-            self.startup_buffer_until = 0.0
-            detail = '；已清理本地未成交记录，不进入51603订单核对' if cleared else ''
-            raise engine.Halt(
-                'OKX 50123：API Key没有BTC/对应交易市场的下单权限；本次开仓被OKX明确拒绝，订单未创建'
-                + detail + '；已停止新开仓。请在OKX修正API交易权限后重新测试连接并启动'
-            ) from None
+            if _is_explicit_rejection(exc) or _is_okx_50123(exc):
+                return _handle_explicit_rejection(self, exc)
+            raise
 
     def cycle(self):
         until = float(getattr(self, 'startup_buffer_until', 0.0) or 0.0)
@@ -305,6 +344,25 @@ def apply():
             self.emit('log', '启动缓冲5秒结束；自动开仓现已启用')
         return run_original_cycle(self)
 
+    def reconcile(self):
+        result = original_reconcile(self)
+        p = self.store.data.get('active') if self.store else None
+        # Verify once, immediately after the base engine has confirmed the full
+        # protection set. This catches an accidental regression back to limit TP.
+        if p and p.get('protected') and p.get('filled') and not p.get('market_tp_verified') and not p.get('tp1_done'):
+            algos = self.x.algos()
+            by_id = {a.get('algoClOrdId'): a for a in algos if isinstance(a, dict) and a.get('state') == 'live'}
+            t1 = by_id.get(p.get('tp1_id')); t2 = by_id.get(p.get('tp2_id'))
+            if not t1 or not t2:
+                return result
+            if str(t1.get('tpOrdPx') or '') != '-1' or str(t2.get('tpOrdPx') or '') != '-1':
+                self.halt('V1.3.5检测到TP不是市价执行；已锁住新开仓，请立即核对OKX保护单')
+                return result
+            p['market_tp_verified'] = True
+            self.store.save()
+            self.emit('log', '已核对TP1/TP2均为触发后市价止盈（tpOrdPx=-1），SL为市价止损；分批保护结构有效')
+        return result
+
     def stop(self):
         self.startup_buffer_until = 0.0
         return original_stop(self)
@@ -313,5 +371,6 @@ def apply():
     engine.Engine.connect = connect
     engine.Engine.arm = arm
     engine.Engine.cycle = cycle
+    engine.Engine.reconcile = reconcile
     engine.Engine.stop = stop
     engine.Engine._kaytrade_v135_patch_applied = True
