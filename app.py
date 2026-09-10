@@ -33,13 +33,13 @@ class App:
         self.candle_wait_log=0
         self.log_lines=[]
         self.history_key=None; self.history_curve=[]
-        self.root.title('KAYTRADE 1.3.1 · BTC 策略控制台'); self.root.geometry('1200x920'); self.root.minsize(1040,840)
+        self.root.title('KAYTRADE 1.3.2 · BTC 策略控制台'); self.root.geometry('1200x920'); self.root.minsize(1040,840)
         theme(root)
         top=ttk.Frame(root,padding=15); top.pack(fill='x')
         mark(top).pack(side='left',padx=(0,12))
         brand=ttk.Frame(top); brand.pack(side='left')
         ttk.Label(brand,text='KAYTRADE',style='Title.TLabel').pack(anchor='w')
-        ttk.Label(brand,text='BTC / USDT   ·   V1.3.1 视觉优化 · V1.3 分层结构策略',style='Muted.TLabel').pack(anchor='w')
+        ttk.Label(brand,text='BTC / USDT   ·   V1.3.2 10分细分结构策略',style='Muted.TLabel').pack(anchor='w')
         self.status=tk.StringVar(value='默认停止 · 未连接')
         ttk.Label(top,textvariable=self.status,style='Muted.TLabel').pack(side='right')
         badges=ttk.Frame(root,padding=(15,0)); badges.pack(fill='x')
@@ -105,15 +105,20 @@ class App:
         self.account_view.grid(row=8,column=0,columnspan=2,sticky='nsew',pady=16); connection.rowconfigure(8,weight=1)
         defaults=asdict(Settings())
         # Separate V1.1 risk preferences; preserve all account state and locks.
-        settings_path=folder/'settings-v1.1.json'
-        if settings_path.exists():
+        settings_path=folder/'settings-v1.3.2.json'
+        legacy_path=folder/'settings-v1.1.json'
+        self.settings_path=settings_path
+        source=settings_path if settings_path.exists() else legacy_path
+        if source.exists():
             try:
-                loaded=json.loads(settings_path.read_text())
+                loaded=json.loads(source.read_text())
                 defaults.update({k:v for k,v in loaded.items() if k in defaults})
-                if defaults.get('score_threshold') == 7:
-                    defaults['score_threshold'] = 8
-                if defaults.get('score_threshold',8) > 18:
-                    defaults['score_threshold'] = 18
+                if source==legacy_path:
+                    old_threshold=float(defaults.get('score_threshold',8))
+                    defaults['score_threshold']=max(4.0,min(9.0,round(old_threshold)/2))
+                else:
+                    value=float(defaults.get('score_threshold',4.0))
+                    defaults['score_threshold']=max(4.0,min(10.0,round(value*2)/2))
             except Exception:
                 pass
         self.fields={}
@@ -124,7 +129,7 @@ class App:
                 'consecutive_losses':'中国时间日内连续亏损停开次数（默认3）','cooldown_minutes':'平仓后冷却时间 分钟',
                 'stop_atr':'15分钟ATR止损倍数 0.6—3','reward_r':'止盈距离 / 止损距离 1—5',
                 'fee_bps':'单边手续费预算 bps（10=0.1%）','slippage_bps':'价差 / 市价退出滑点预算 bps',
-                'score_threshold':'自动开仓评分阈值 8—18（默认8）'}
+                'score_threshold':'自动开仓评分阈值 4—10（0.5步进，默认4）'}
         for i,(name,label) in enumerate(labels.items()):
             col=0 if i<7 else 2; row=i%7+1
             tk.Label(risk,text=label,wraplength=260,bg=PANEL,fg='#dbe6eb',font=('Helvetica',13),bd=0,highlightthickness=0).grid(row=row,column=col,sticky='w',padx=6,pady=10)
@@ -143,7 +148,7 @@ class App:
         self.spark=tk.Canvas(quote.body,width=300,height=72,bg=PANEL,highlightthickness=0)
         self.spark.place(relx=1,y=4,anchor='ne')
         self.spark.create_text(150,36,text='连接后显示行情走势',fill=MUTED,font=('Helvetica',11))
-        self.signal=tk.StringVar(value='V1.3 最高18分 · 1H环境 → 结构 → 15m Setup → 5m Trigger · ≥8开仓')
+        self.signal=tk.StringVar(value='V1.3.2 最高10分 · 4H结构 → 1H环境 → 15m Setup → 5m Trigger · 默认≥4.0开仓')
         ttk.Label(dash,textvariable=self.signal,wraplength=1080,style='Muted.TLabel').pack(anchor='w',pady=(0,10))
         cards=ttk.Frame(dash); cards.pack(fill='x',pady=(0,12))
         self.score_vars={}; self.gate_vars={}; self.score_bars={}
@@ -152,10 +157,10 @@ class App:
             card=surface.body
             color=GREEN if side=='做多' else RED
             card_label(card,text=side+' / LONG' if side=='做多' else side+' / SHORT',color=color,size=11,bold=True).pack(anchor='w')
-            self.score_vars[side]=tk.StringVar(value='— / 18')
+            self.score_vars[side]=tk.StringVar(value='— / 10')
             self.gate_vars[side]=tk.StringVar(value='等待评分；不是胜率')
             card_label(card,variable=self.score_vars[side],size=28,color=color,bold=True).pack(anchor='w')
-            self.score_bars[side]=AnimatedScoreBar(card,maximum=18,color=color,height=9); self.score_bars[side].pack(fill='x',pady=7)
+            self.score_bars[side]=AnimatedScoreBar(card,maximum=10,color=color,height=9); self.score_bars[side].pack(fill='x',pady=7)
             card_label(card,variable=self.gate_vars[side],color=MUTED,size=10).pack(anchor='w')
         detail=Tabs(dash); detail.pack(fill='both',expand=True)
         score_tab=ttk.Frame(detail); indicator_tab=ttk.Frame(detail)
@@ -219,7 +224,7 @@ class App:
             if self.engine and self.engine.enabled:
                 raise Halt('先停止自动开仓，再修改设置')
             s=self.settings()
-            path=self.folder/'settings-v1.1.json'
+            path=self.settings_path
             fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
             with os.fdopen(fd,'w') as f:
                 json.dump(asdict(s),f,indent=2)
@@ -292,7 +297,7 @@ class App:
         env='OKX模拟盘' if self.engine.x.demo else '真实账户'
         summary=f'{env} / BTC-USDT-SWAP / 逐仓{s.leverage}倍\n资金预算{s.capital} USDT，最大名义仓位{s.max_notional} USDT\n单笔风险≤{min(s.risk_usdt,s.capital*s.risk_pct/100)} USDT（估计）\n中国时间日回撤{s.daily_loss} USDT，连亏{s.consecutive_losses}次停止新开仓\n止损{s.stop_atr}×15m ATR，止盈{s.reward_r}R（同一15m ATR风险距离）\n每个信号可自动下单，无需逐笔确认。\n使用专用子账户；必须确认当地账户有合约/API资格。\n本版本未经过真实资金/真实Mac验收，不保证盈利或止损成交价。'
         token='LIVE' if not self.engine.x.demo else 'DEMO'
-        typed=simpledialog.askstring('启动全自动授权',summary+f'\n最高18分；最终评分 ≥ {s.score_threshold:g}/18 才进入开仓风控。8–10普通 / 11–13强 / 14+高共振；1H强逆势 -3分且最终需≥11。15m Setup≥2、5m Trigger≥1；前方结构<1R禁止开仓。\n\n同意上述参数请输入 '+token,parent=self.root)
+        typed=simpledialog.askstring('启动全自动授权',summary+f'\n最高10分；最终评分 ≥ {s.score_threshold:g}/10 才进入开仓风控。4–5普通 / 5.5–6.5较强 / 7–8强 / 8.5+高共振；强逆势仅扣1.5分，无额外11分门槛。15m Setup≥0.5、5m Trigger≥0.5；前方结构<1R禁止开仓。\n\n同意上述参数请输入 '+token,parent=self.root)
         if typed==token:
             self.submit('arm',s)
 
@@ -345,7 +350,7 @@ class App:
                     e.connect(); self.engine=e
                     self.network_paused=False; self.recovery_count=0
                     self.history_key=None; self.refresh_history()
-                    self.emit('log','开始加载1H / 15m / 5m指标历史K线，首次可能需数十秒')
+                    self.emit('log','开始加载4H / 1H / 15m / 5m指标历史K线，首次可能需数十秒')
                     e.refresh_market()
                 elif kind=='arm':
                     if not self.engine: raise Halt('先连接')
@@ -413,7 +418,7 @@ class App:
                 elif kind=='market':
                     self.signal.set(time.strftime('%m-%d %H:%M',time.localtime((data['bar']+300000)/1000))+' 5m已收盘｜'+data['side']+'｜'+data['why'])
                     for side,score in data.get('scores',{}).items():
-                        self.score_vars[side].set(f"{score['total']} / {data.get('score_max',18)}")
+                        self.score_vars[side].set(f"{score['total']:g} / {data.get('score_max',10):g}")
                         self.score_bars[side]['value']=score['total']
                         self.gate_vars[side].set(score['reason'])
                     for item in self.score_table.get_children(): self.score_table.delete(item)

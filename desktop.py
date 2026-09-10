@@ -26,7 +26,7 @@ def smoke_test():
                  patch.object(app.messagebox, 'showerror', side_effect=AssertionError):
                 ui = app.App(root, Path(folder))
                 root.update()
-                assert 'KAYTRADE' in root.title() and '1.3.1' in root.title()
+                assert 'KAYTRADE' in root.title() and '1.3.2' in root.title()
                 assert ui.mode.get() == 'OKX模拟盘'
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
@@ -37,7 +37,7 @@ def smoke_test():
                 assert not {'key', 'secret', 'phrase'} & saved.keys()
                 assert ui.fields['stop_atr'].get() == '1.0'
                 assert ui.fields['reward_r'].get() == '1.5'
-                assert ui.fields['score_threshold'].get() == '8'
+                assert ui.fields['score_threshold'].get() == '4.0'
                 # Render both score cards, details, network status and filtered alarms.
                 from strategy import signal
                 rows=[dict(t=i*900000,o=100,h=101,l=99,c=100) for i in range(1002)]
@@ -104,7 +104,7 @@ def smoke_test():
                 ui.lock.close()
         finally:
             root.destroy()
-    Path(sys.argv[2]).write_text('PASS: KAYTRADE V1.3.1 UI, direction-aware score colors, rounded dark fields/options, animated borderless score bars, layered V1.3 18-point strategy, red/green P&L, demo default, settings and bundled CA roots. Screenshots use synthetic test data. No network or orders.\n')
+    Path(sys.argv[2]).write_text('PASS: KAYTRADE V1.3.2 UI, 10-point detailed scoring, direction-aware score colors, rounded dark fields/options, animated borderless score bars, red/green P&L, demo default, settings and bundled CA roots. Screenshots use synthetic test data. No network or orders.\n')
 
 
 if __name__ == '__main__':

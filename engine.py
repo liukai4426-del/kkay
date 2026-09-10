@@ -43,13 +43,13 @@ class Settings:
     cooldown_minutes:int=30
     stop_atr:float=1.0
     reward_r:float=1.5
-    score_threshold:float=8
+    score_threshold:float=4.0
     fee_bps:float=10
     slippage_bps:float=5
 
     def validate(self):
-        if int(self.score_threshold)!=self.score_threshold or not 8<=self.score_threshold<=18:
-            raise Halt('评分阈值必须是8—18的整数')
+        if not 4.0<=self.score_threshold<=10.0 or abs(self.score_threshold*2-round(self.score_threshold*2))>1e-9:
+            raise Halt('评分阈值必须是4—10之间、以0.5为步进')
         for name,value in asdict(self).items():
             if not isinstance(value,(int,float)) or not math.isfinite(value) or value<=0:
                 raise Halt(name+' 必须是有限正数')
@@ -191,7 +191,7 @@ class Engine:
         if self.store.data['streak']>=settings.consecutive_losses:
             self.emit('log',f'中国时间本日已连续亏损 {self.store.data["streak"]} 次：仅停止新开仓，次日自动恢复')
         self.candle_lag_count=0; self.candle_paused=False
-        self.emit('log','自动交易启动；1H环境→15m/1H结构→15m Setup→5m Trigger；限价开仓、市场价退出；SL/TP使用15m ATR；每根5m信号最多一次')
+        self.emit('log','自动交易启动；4H结构→1H环境→15m/1H结构→15m Setup→5m Trigger；10分细分制；限价开仓、市场价退出；SL/TP使用15m ATR；每根5m信号最多一次')
 
     def stop(self):
         self.enabled=False; self.stopped=True
@@ -252,14 +252,15 @@ class Engine:
 
     def refresh_market(self):
         try:
-            h,m,f=self.x.candles('1H'),self.x.candles('15m'),self.x.candles('5m')
+            q,h,m,f=self.x.candles('4H'),self.x.candles('1H'),self.x.candles('15m'),self.x.candles('5m')
+            check_latest('4H',q[-1]['t'],self.market_now(),14400000)
             check_latest('1H',h[-1]['t'],self.market_now(),3600000)
             check_latest('15m',m[-1]['t'],self.market_now(),900000)
             check_latest('5m',f[-1]['t'],self.market_now(),ENTRY_STEP)
         except CandleLag as exc:
             self._handle_candle_lag(exc)
-        value=signal(h,m,f,self.settings.score_threshold if self.settings else 8,self.settings.stop_atr if self.settings else 1.0)
-        self.market=dict(value,bar=f[-1]['t'],bar15=m[-1]['t'],bar1h=h[-1]['t'],close=f[-1]['c'])
+        value=signal(h,m,f,self.settings.score_threshold if self.settings else 4.0,self.settings.stop_atr if self.settings else 1.0,four=q)
+        self.market=dict(value,bar=f[-1]['t'],bar15=m[-1]['t'],bar1h=h[-1]['t'],bar4h=q[-1]['t'],close=f[-1]['c'])
         self.market_at=time.time()
         self.market_monotonic=time.monotonic()
         self._candle_recovered()
@@ -348,7 +349,7 @@ class Engine:
                 'slTriggerPx':plan['sl'],'slOrdPx':'-1','tpTriggerPxType':'last','slTriggerPxType':'last'}]}
         self.x.post('/api/v5/trade/order',body)
         self.store.record('提交开仓请求',state['active'])
-        self.emit('log',f"已提交逐仓限价开仓请求（{score.get('level','信号')} · 评分 {score['total']}/18），最多等待1根5m K线；附带市场价TP/SL")
+        self.emit('log',f"已提交逐仓限价开仓请求（{score.get('level','信号')} · 评分 {score['total']:g}/10），最多等待1根5m K线；附带市场价TP/SL")
         self.emit('plan',state['active'])
 
     def _cancel_pending_entry(self,p,reason):
