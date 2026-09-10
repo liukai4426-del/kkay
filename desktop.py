@@ -53,7 +53,7 @@ def smoke_test():
                 assert len(ui.price_history)==4
                 assert ui.score_bars['做多'].color == app.GREEN
                 assert ui.score_bars['做空'].color == app.RED
-                assert ui.score_bars['做空'].cget('highlightthickness') == 0
+                assert int(ui.score_bars['做空'].cget('highlightthickness')) == 0
                 from engine import Store
                 from history import summarize
                 ledger=Store(Path(folder)/'fake-account.json')
