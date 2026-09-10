@@ -38,12 +38,12 @@ def signal(hour, quarter, five=None, threshold=7):
             hc['c'] > h['ema200'] and h['ema20'] > h['ema50'] and h['up']
         )
 
+        if buy:
+            directional_environment = hf['confirmed'] or h['rsi'] <= 45 or hc['c'] >= h['ema20']
+        else:
+            directional_environment = hf['confirmed'] or h['rsi'] >= 55 or hc['c'] <= h['ema20']
         # 1H is an environment confirmation rather than a requirement for an identical 5m pattern.
-        hour_support = (not strong_opposite) and (
-            hf['confirmed'] or
-            (h['rsi'] <= 45 or hc['c'] >= h['ema20']) if buy else
-            (h['rsi'] >= 55 or hc['c'] <= h['ema20'])
-        )
+        hour_support = (not strong_opposite) and directional_environment
 
         # Stair-step confirmation is counted once per side, never 1+2+3.
         if ff['confirmed'] and mf['confirmed'] and hour_support:
