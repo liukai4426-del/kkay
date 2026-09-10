@@ -14,6 +14,7 @@ def smoke_test():
     """Exercise the packaged UI without credentials, network, or orders."""
     import ssl
     import tkinter as tk
+    from types import SimpleNamespace
     from unittest.mock import patch
     import app
 
@@ -54,14 +55,44 @@ def smoke_test():
                 assert ui.score_bars['做多'].color == app.GREEN
                 assert ui.score_bars['做空'].color == app.RED
                 assert int(ui.score_bars['做空'].cget('highlightthickness')) == 0
+
+                # Score Detail is the visible detail pane by default. Verify real rendered width first.
+                assert ui.score_scroll.winfo_ismapped()
                 assert ui.score_scroll.winfo_width() >= 18
-                assert ui.indicator_scroll.winfo_width() >= 18
                 extra=[]
-                for i in range(24): extra.append(ui.score_table.insert('','end',text=f'滚动测试 {i}',values=(0,0,0)))
-                root.update(); ui.score_table.yview('moveto',1.0); root.update()
+                for i in range(24):
+                    extra.append(ui.score_table.insert('','end',text=f'滚动测试 {i}',values=(0,0,0)))
+                root.update()
+
+                # Programmatic y-view must move.
+                ui.score_table.yview('moveto',1.0); root.update()
                 assert ui.score_table.yview()[0] > 0, 'Score detail table did not scroll'
-                ui.score_table.yview('moveto',0.0)
+                ui.score_table.yview('moveto',0.0); root.update()
+
+                # Trackpad / mouse-wheel path must also move the custom Canvas table.
+                before=ui.score_table.yview()[0]
+                ui.score_table._on_mousewheel(SimpleNamespace(delta=-120)); root.update()
+                assert ui.score_table.yview()[0] > before, 'Score detail wheel/trackpad scroll did not move'
+                ui.score_table.yview('moveto',0.0); root.update()
+
+                # Dragging the custom thumb must move the table too.
+                ui.score_scroll.set(*ui.score_table.yview()); root.update()
+                y1,y2,_,_,_=ui.score_scroll._bounds()
+                start=(y1+y2)/2
+                ui.score_scroll._press(SimpleNamespace(y=start))
+                ui.score_scroll._drag(SimpleNamespace(y=min(ui.score_scroll.winfo_height()-2,start+60)))
+                root.update()
+                assert ui.score_table.yview()[0] > 0, 'Score detail scrollbar thumb drag did not move'
+                ui.score_scroll._release(SimpleNamespace(y=start)); ui.score_table.yview('moveto',0.0)
                 for iid in extra: ui.score_table.delete(iid)
+
+                # Indicator pane is hidden until selected; select it before measuring its fixed width.
+                detail_tabs=ui.indicator_scroll.master.master
+                detail_tabs.select(ui.indicator_scroll.master); root.update()
+                assert ui.indicator_scroll.winfo_ismapped()
+                assert ui.indicator_scroll.winfo_width() >= 18
+                detail_tabs.select(ui.score_scroll.master); root.update()
+
                 from engine import Store
                 from history import summarize
                 ledger=Store(Path(folder)/'fake-account.json')
@@ -112,7 +143,7 @@ def smoke_test():
                 ui.lock.close()
         finally:
             root.destroy()
-    Path(sys.argv[2]).write_text('PASS: KAYTRADE V1.3.2 UI, 10-point detailed scoring, direction-aware score colors, rounded dark fields/options, animated borderless score bars, red/green P&L, demo default, settings and bundled CA roots. Screenshots use synthetic test data. No network or orders.\n')
+    Path(sys.argv[2]).write_text('PASS: KAYTRADE V1.3.2 UI, functional 20px detail scrollbars, score wheel/trackpad + thumb dragging, 10-point detailed scoring, direction-aware score colors, rounded dark fields/options, animated borderless score bars, red/green P&L, demo default, settings and bundled CA roots. Screenshots use synthetic test data. No network or orders.\n')
 
 
 if __name__ == '__main__':
