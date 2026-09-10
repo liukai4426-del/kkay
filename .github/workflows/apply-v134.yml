@@ -5,6 +5,7 @@ on:
     paths:
       - v134_upgrade.py
       - v134_anchor_fix.py
+      - v134_prompt_fix.py
       - .github/workflows/apply-v134.yml
 permissions:
   contents: write
@@ -19,8 +20,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Fix patch anchor
+      - name: Fix trigger patch anchor
         run: python v134_anchor_fix.py
+      - name: Fix auth prompt patch anchor
+        run: python v134_prompt_fix.py
       - name: Apply V1.3.4 upgrade
         run: python v134_upgrade.py
       - name: Compile and test
