@@ -20,6 +20,7 @@ def smoke_test():
     assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
     with tempfile.TemporaryDirectory(prefix='okx-ui-check-') as folder:
         root = tk.Tk()
+        print('Bundled Tk version:',root.tk.call('package','provide','Tk'),flush=True)
         try:
             with patch.object(app.App, 'worker', lambda self: None), \
                  patch.object(app.messagebox, 'showerror', side_effect=AssertionError):
