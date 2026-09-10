@@ -1,1 +1,0 @@
-Temporary marker for V1.3.2 scrollbar UI fix.
