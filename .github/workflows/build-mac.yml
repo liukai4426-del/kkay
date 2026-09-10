@@ -29,7 +29,7 @@ jobs:
         run: python -m PyInstaller --noconfirm OKXLocal.spec
       - name: Check macOS compatibility metadata
         run: python verify_bundle.py
-      - name: Test packaged UI without network or orders
+      - name: Test packaged V1.3 UI without network or orders
         run: |
           dist/OKXLocal.app/Contents/MacOS/OKXLocal --smoke-test "$RUNNER_TEMP/okx-smoke.txt"
           test -s "$RUNNER_TEMP/okx-smoke.txt"
