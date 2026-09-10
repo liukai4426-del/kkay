@@ -1,0 +1,43 @@
+name: KAYTRADE V1.3.2 Three-Month BTC Backtest
+on:
+  push:
+    branches:
+      - analysis/v132-3m-backtest-20260910
+    paths:
+      - analysis_v132_backtest.py
+      - strategy.py
+      - core.py
+      - .github/workflows/v132-3m-backtest.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backtest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Verify V1.3.2 strategy source
+        run: |
+          python -m py_compile strategy.py core.py analysis_v132_backtest.py
+          python - <<'PY'
+          import strategy
+          assert strategy.SCORE_MAX == 10.0
+          assert strategy.NORMAL_THRESHOLD == 4.0
+          print('V1.3.2 strategy source verified')
+          PY
+      - name: Run exact three-month backtest
+        run: python analysis_v132_backtest.py | tee v132_backtest_console.txt
+      - name: Upload report and trades
+        uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.3.2-3M-Backtest
+          path: |
+            v132_backtest_report.json
+            v132_backtest_trades.csv
+            v132_backtest_console.txt
+          if-no-files-found: error
+          retention-days: 14
