@@ -36,7 +36,7 @@ def theme(root):
     s.configure('Treeview.Heading',background=PANEL_ALT,foreground=MUTED,font=('Helvetica',11,'bold'),relief='flat',borderwidth=0,padding=8)
     s.map('Treeview',background=[('selected','#214039')],foreground=[('selected',TEXT)])
     s.layout('Vertical.TScrollbar',[('Vertical.Scrollbar.trough',{'sticky':'ns','children':[('Vertical.Scrollbar.thumb',{'expand':'1','sticky':'nswe'})]})])
-    s.configure('Vertical.TScrollbar',background='#31424b',troughcolor=PANEL,borderwidth=0,arrowsize=0,relief='flat',width=9)
+    s.configure('Vertical.TScrollbar',background='#31424b',troughcolor=PANEL,borderwidth=0,arrowsize=0,relief='flat',width=16)
     s.map('Vertical.TScrollbar',background=[('active','#40545f'),('pressed','#4b616c')])
     for name,color in [('Long',GREEN),('Short',RED)]:
         s.configure(name+'.Horizontal.TProgressbar',background=color,troughcolor='#202b32',borderwidth=0,lightcolor=color,darkcolor=color,thickness=5)
