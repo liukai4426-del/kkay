@@ -1,4 +1,5 @@
 name: Build KAYTRADE Intel Mac 1.3.5
+# V1.3.5 legacy-51603 hotfix validation trigger.
 on:
   push:
     branches: [codex/v1-3-5-fixes]
@@ -52,6 +53,9 @@ jobs:
               assert token in e, token
           for token in ("params['ordId']=str(order_id)","def recent_orders", "self.code=str(code or '')"):
               assert token in x, token
+          assert "def _is_legacy_51603_lock" in e
+          assert "def _migrate_legacy_51603_lock" in e
+          assert "V1.3.5已安全迁移旧51603故障锁" in e
           assert 'KAYTRADE 1.3.5' in a
           assert "settings-v1.3.5.json" in a and "settings-v1.3.4.json" in a
           assert '1.3.5' in d
