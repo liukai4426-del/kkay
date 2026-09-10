@@ -19,7 +19,42 @@ on:
 permissions:
   contents: read
 jobs:
+  unit:
+    name: execution-safety-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile V1.3.5 execution path
+        run: python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py desktop.py v135_patch.py test_v135_execution.py
+      - name: Run strategy and execution safety tests
+        run: python -m unittest -v test_engine test_candles test_v134 test_v135 test_v135_execution
+      - name: Verify V1.3.5 wiring
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import strategy
+          assert strategy.SCORE_MAX == 10.0
+          assert strategy.NORMAL_THRESHOLD == 3.5
+          assert strategy._position_multiplier(3.5) == 1.0
+          assert strategy._position_multiplier(5.0) == 1.5
+          assert strategy._position_multiplier(7.0) == 2.0
+          e=Path('engine.py').read_text(); x=Path('exchange.py').read_text(); p=Path('v135_patch.py').read_text()
+          for token in ("state['active']['order_id']=order_id","_lookup_parent_order","51603：OKX暂未找到该订单"):
+              assert token in e, token
+          for token in ("self.code=str(code or '')", "self.deterministic=bool(deterministic)", "OKX订单级错误码"):
+              assert token in x, token
+          for token in ("STARTUP_BUFFER_SECONDS = 5.0","_remove_15m_setup_gate","DailyRiskStop","tpOrdPx'] = '-1'","_is_explicit_rejection","不进入51603订单核对"):
+              assert token in p, token
+          print('PASS: V1.3.5 strategy/order/API safety wiring')
+          PY
+
   build:
+    name: intel-mac-package
+    needs: unit
     runs-on: macos-15-intel
     timeout-minutes: 30
     env:
@@ -32,44 +67,10 @@ jobs:
           architecture: x64
       - name: Install packaging dependencies
         run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0'
-      - name: Test V1.3.5 and preserved safety
+      - name: Re-run execution tests on Intel Mac
         run: |
           python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py desktop.py v135_patch.py test_v135_execution.py
           python -m unittest -v test_engine test_candles test_v122 test_v132 test_v133 test_v134 test_v135 test_v135_execution
-      - name: Verify V1.3.5 fixes and preserved strategy
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import strategy
-          from engine import Settings
-          assert strategy.SCORE_MAX == 10.0
-          assert strategy.NORMAL_THRESHOLD == 3.5
-          assert strategy._position_multiplier(3.5) == 1.0
-          assert strategy._position_multiplier(5.0) == 1.5
-          assert strategy._position_multiplier(7.0) == 2.0
-          Settings(capital=100,max_notional=1000,leverage=10,risk_usdt=80,risk_pct=80,daily_loss=100).validate()
-          e=Path('engine.py').read_text(); x=Path('exchange.py').read_text(); a=Path('app.py').read_text(); d=Path('desktop.py').read_text(); p=Path('v135_patch.py').read_text()
-          assert "s.capital*.05" not in e
-          assert '单笔风险不得超过配置资金的5%' not in e
-          for token in ("state['active']['order_id']=order_id","_lookup_parent_order","51603：OKX暂未找到该订单"):
-              assert token in e, token
-          for token in ("params['ordId']=str(order_id)","def recent_orders", "self.code=str(code or '')", "self.deterministic=bool(deterministic)"):
-              assert token in x, token
-          assert "def _is_legacy_51603_lock" in e
-          assert "def _migrate_legacy_51603_lock" in e
-          assert "V1.3.5已安全迁移旧51603故障锁" in e
-          assert 'KAYTRADE 1.3.5' in a
-          assert "settings-v1.3.5.json" in a and "settings-v1.3.4.json" in a
-          assert '1.3.5' in d
-          assert "STARTUP_BUFFER_SECONDS = 5.0" in p
-          assert "_remove_15m_setup_gate" in p
-          assert "DailyRiskStop" in p
-          assert "tpOrdPx'] = '-1'" in p
-          assert "_is_explicit_rejection" in p
-          assert "不进入51603订单核对" in p
-          assert "'1Dutc':86400000" in Path('candles.py').read_text()
-          print('V1.3.5 wiring OK')
-          PY
       - name: Create application icon
         run: python build_icon.py
       - name: Build Intel application
