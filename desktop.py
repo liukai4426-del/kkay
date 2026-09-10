@@ -26,7 +26,7 @@ def smoke_test():
                  patch.object(app.messagebox, 'showerror', side_effect=AssertionError):
                 ui = app.App(root, Path(folder))
                 root.update()
-                assert 'KAYTRADE' in root.title() and '1.3' in root.title()
+                assert 'KAYTRADE' in root.title() and '1.3.1' in root.title()
                 assert ui.mode.get() == 'OKX模拟盘'
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
@@ -51,7 +51,9 @@ def smoke_test():
                 assert ui.score_vars['做多'].get().endswith('/ 18')
                 assert ui.price.get()=='79,045.00 USDT'
                 assert len(ui.price_history)==4
-                assert 'Short' in str(ui.score_bars['做空']['style'])
+                assert ui.score_bars['做多'].color == app.GREEN
+                assert ui.score_bars['做空'].color == app.RED
+                assert ui.score_bars['做空'].cget('highlightthickness') == 0
                 from engine import Store
                 from history import summarize
                 ledger=Store(Path(folder)/'fake-account.json')
@@ -102,7 +104,7 @@ def smoke_test():
                 ui.lock.close()
         finally:
             root.destroy()
-    Path(sys.argv[2]).write_text('PASS: KAYTRADE V1.3 UI, rounded controls, depth-based cards, layered 18-point scores, red/green P&L, demo default, settings and bundled CA roots. Screenshots use synthetic test data. No network or orders.\n')
+    Path(sys.argv[2]).write_text('PASS: KAYTRADE V1.3.1 UI, direction-aware score colors, rounded dark fields/options, animated borderless score bars, layered V1.3 18-point strategy, red/green P&L, demo default, settings and bundled CA roots. Screenshots use synthetic test data. No network or orders.\n')
 
 
 if __name__ == '__main__':
