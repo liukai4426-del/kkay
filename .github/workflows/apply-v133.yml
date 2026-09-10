@@ -18,6 +18,13 @@ jobs:
           python-version: '3.13'
       - name: Apply V1.3.3 UI and execution changes
         run: python v133_apply.py
+      - name: Normalize generated test source
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('test_v133.py')
+          p.write_text(p.read_text().replace(r'\n','\n'))
+          PY
       - name: Syntax check
         run: python -m py_compile strategy.py engine.py exchange.py candles.py app.py visual.py desktop.py test_engine.py test_v133.py
       - name: Commit V1.3.3 source
