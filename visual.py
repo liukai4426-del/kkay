@@ -288,6 +288,71 @@ class AnimatedScoreBar(tk.Canvas):
         return super().__getitem__(key)
 
 
+class WideScrollbar(tk.Canvas):
+    """Fixed-width dark scrollbar; independent of native Aqua ttk sizing."""
+    def __init__(self,parent,command=None,width=20,**kwargs):
+        self.command=command
+        self.bar_width=int(width)
+        self.first=0.0; self.last=1.0
+        self.drag_y=None; self.drag_first=0.0
+        try: parent_bg=parent.cget('bg')
+        except Exception: parent_bg=BG
+        super().__init__(parent,width=self.bar_width,bg=parent_bg,highlightthickness=0,
+                         borderwidth=0,takefocus=0,**kwargs)
+        self.configure(width=self.bar_width)
+        self.bind('<Configure>',lambda event:self._draw())
+        self.bind('<ButtonPress-1>',self._press)
+        self.bind('<B1-Motion>',self._drag)
+        self.bind('<ButtonRelease-1>',self._release)
+        self._draw()
+
+    def set(self,first,last):
+        try:
+            self.first=max(0.0,min(1.0,float(first)))
+            self.last=max(self.first,min(1.0,float(last)))
+        except Exception:
+            self.first,self.last=0.0,1.0
+        self._draw()
+
+    def _bounds(self):
+        h=max(1,self.winfo_height())
+        margin=3
+        track=max(1,h-2*margin)
+        span=max(0.0,min(1.0,self.last-self.first))
+        thumb=max(36.0,track*span)
+        thumb=min(track,thumb)
+        travel=max(0.0,track-thumb)
+        max_first=max(1e-9,1.0-span)
+        y1=margin+(travel*(self.first/max_first) if travel else 0)
+        return y1,y1+thumb,track,thumb,span
+
+    def _draw(self):
+        if not self.winfo_exists():return
+        self.delete('all')
+        w=max(self.bar_width,self.winfo_width()); h=max(1,self.winfo_height())
+        self.create_rectangle(2,0,w-2,h,fill='#18242b',outline='')
+        y1,y2,_,_,_=self._bounds()
+        self.create_rectangle(4,y1,w-4,y2,fill='#4b616c',outline='')
+
+    def _press(self,event):
+        y1,y2,_,_,_=self._bounds()
+        if y1<=event.y<=y2:
+            self.drag_y=event.y; self.drag_first=self.first
+        elif self.command:
+            self.command('scroll',-1 if event.y<y1 else 1,'pages')
+
+    def _drag(self,event):
+        if self.drag_y is None or not self.command:return
+        y1,y2,track,thumb,span=self._bounds()
+        travel=max(1.0,track-thumb)
+        max_first=max(0.0,1.0-span)
+        fraction=max(0.0,min(max_first,self.drag_first+(event.y-self.drag_y)/travel*max_first))
+        self.command('moveto',fraction)
+
+    def _release(self,event):
+        self.drag_y=None
+
+
 class ScoreTable(tk.Frame):
     """Score detail grid with direction-aware cell colors; API mirrors the Treeview calls used by App."""
     def __init__(self,parent,columns=(),show=None,height=8,**kwargs):
@@ -305,6 +370,17 @@ class ScoreTable(tk.Frame):
         self.canvas.pack(fill='both',expand=True)
         self.header.bind('<Configure>',lambda event:self._redraw_header())
         self.canvas.bind('<Configure>',lambda event:self._redraw_rows())
+        self.canvas.bind('<MouseWheel>',self._on_mousewheel)
+        self.canvas.bind('<Button-4>',lambda event:self.canvas.yview_scroll(-1,'units'))
+        self.canvas.bind('<Button-5>',lambda event:self.canvas.yview_scroll(1,'units'))
+
+    def _on_mousewheel(self,event):
+        delta=getattr(event,'delta',0)
+        if delta:
+            units=-1 if delta>0 else 1
+            if abs(delta)>=120: units=int(-delta/120)
+            self.canvas.yview_scroll(units,'units')
+        return 'break'
 
     def heading(self,key,text='',anchor='w',**kwargs):
         self.titles[key]=text; self._redraw_header()
