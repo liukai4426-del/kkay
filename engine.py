@@ -11,9 +11,23 @@ from decimal import Decimal, ROUND_DOWN, ROUND_UP
 from pathlib import Path
 from core import INSTRUMENT
 from strategy import signal
+from candles import check_latest, CandlePending, CandleLag
 
 class Halt(RuntimeError):
     pass
+
+HALT_PREFIX='已有故障锁：'
+HALT_SUFFIX='。先人工核对并解除故障锁'
+
+def normalize_halt_reason(reason):
+    text=str(reason or '').strip()
+    while text.startswith(HALT_PREFIX):
+        text=text[len(HALT_PREFIX):].strip()
+    while text.endswith(HALT_SUFFIX):
+        text=text[:-len(HALT_SUFFIX)].rstrip()
+    while text.startswith(HALT_PREFIX):
+        text=text[len(HALT_PREFIX):].strip()
+    return text
 
 @dataclass(frozen=True)
 class Settings:
@@ -94,6 +108,11 @@ class Store:
                 self.data.update(json.loads(self.path.read_text()))
             except Exception:
                 raise Halt('本地状态损坏；禁止自动交易。保留文件并人工核对OKX') from None
+            old=self.data.get('halt','')
+            clean=normalize_halt_reason(old)
+            if clean!=old:
+                self.data['halt']=clean
+                self.save()
 
     def save(self):
         self.path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
@@ -116,6 +135,7 @@ class Engine:
         self.enabled=False; self.stopped=False; self.settings=None; self.store=None
         self.market=None; self.market_at=0; self.poll_at=0
         self.connection_id=None
+        self.candle_lag_count=0; self.candle_paused=False
 
     def connect(self):
         self.x.sync_time()
@@ -132,7 +152,14 @@ class Engine:
 
     def halt(self,reason):
         self.enabled=False
+        raw=str(reason)
         if self.store:
+            current=normalize_halt_reason(self.store.data.get('halt',''))
+            if raw.startswith(HALT_PREFIX) and current:
+                self.store.data['halt']=current; self.store.save()
+                self.emit('alarm',HALT_PREFIX+current+HALT_SUFFIX)
+                return
+            reason=normalize_halt_reason(raw)
             self.store.data['halt']=reason; self.store.save()
         self.emit('alarm',reason)
 
@@ -141,7 +168,7 @@ class Engine:
         if not self.store:
             raise Halt('先测试连接')
         if self.store.data['halt']:
-            raise Halt('已有故障锁：'+self.store.data['halt']+'。先人工核对并解除故障锁')
+            raise Halt(HALT_PREFIX+normalize_halt_reason(self.store.data['halt'])+HALT_SUFFIX)
         a=self.x.account()
         if a.get('uid')!=self.connection_id or a.get('posMode')!='long_short_mode':
             raise Halt('首版要求专用子账户、双向持仓模式；请在OKX手动设置')
@@ -155,6 +182,7 @@ class Engine:
         if self.store.data['streak']>=settings.consecutive_losses:
             raise Halt('连续亏损已达上限')
         self.enabled=True; self.stopped=False; self.poll_at=time.monotonic()
+        self.candle_lag_count=0; self.candle_paused=False
         self.emit('log','自动交易启动；逐仓、单仓位、每单TP/SL、每根15m信号最多一次')
 
     def stop(self):
@@ -174,12 +202,47 @@ class Engine:
             raise Halt('达到UTC日内权益回撤上限；暂停开仓，原有TP/SL继续生效')
         return remaining
 
+    def _handle_candle_lag(self,exc):
+        self.candle_lag_count=min(3,self.candle_lag_count+1)
+        count=self.candle_lag_count
+        if count>=3 and not self.candle_paused:
+            self.enabled=False
+            self.candle_paused=True
+            self.emit('log','K线连续3次未更新：已暂停自动新开仓，但未写入永久故障锁；行情恢复后继续观察，需重新授权才会再次自动交易')
+        raise CandlePending(f'{exc}（连续异常 {count}/3）') from None
+
+    def _candle_recovered(self):
+        if not self.candle_lag_count:
+            return
+        was_paused=self.candle_paused
+        self.candle_lag_count=0; self.candle_paused=False
+        if was_paused:
+            self.emit('log','K线已恢复：行情观察恢复；自动交易保持停止，请重新授权启动')
+        else:
+            self.emit('log','K线已恢复：继续使用最新已收盘K线')
+
+    def _verify_latest(self,bar,timestamp,step):
+        try:
+            check_latest(bar,timestamp,self.market_now(),step)
+        except CandleLag as exc:
+            self._handle_candle_lag(exc)
+
     def refresh_market(self):
-        h,m=self.x.candles('1H'),self.x.candles('15m')
+        try:
+            h,m=self.x.candles('1H'),self.x.candles('15m')
+            check_latest('1H',h[-1]['t'],self.market_now(),3600000)
+            check_latest('15m',m[-1]['t'],self.market_now(),900000)
+        except CandleLag as exc:
+            self._handle_candle_lag(exc)
         value=signal(h,m,self.settings.score_threshold if self.settings else 7)
         self.market=dict(value,bar=m[-1]['t'],close=m[-1]['c'])
         self.market_at=time.time()
+        self.market_monotonic=time.monotonic()
+        self._candle_recovered()
         self.emit('market',self.market)
+
+    def market_now(self):
+        return getattr(self.x,'server_now',time.time)()
 
     def cycle(self):
         now=time.monotonic()
@@ -195,11 +258,11 @@ class Engine:
                 if self.enabled:
                     equity,_=self.x.balance()
                     self.daily(equity)
-                expected=int(time.time()//900)*900000-900000
+                expected=int(self.market_now()//900)*900000-900000
                 if not self.market or self.market['bar']!=expected:
                     self.refresh_market()
                 return
-        expected=int(time.time()//900)*900000-900000
+        expected=int(self.market_now()//900)*900000-900000
         if not self.market or self.market['bar']!=expected:
             self.refresh_market()
         if not self.enabled:
@@ -213,12 +276,14 @@ class Engine:
             return
         if self.x.positions() or self.x.orders() or self.x.algos():
             raise Halt('出现非本程序仓位或挂单，停止自动开仓')
-        expected=int(time.time()//900)*900000-900000
+        expected=int(self.market_now()//900)*900000-900000
         if not self.market or self.market['bar']!=expected:
             self.refresh_market()
         market=self.market
-        if market['bar']!=expected or time.time()-self.market_at>900:
-            raise Halt('策略K线过期')
+        self._verify_latest('15m',market['bar'],900000)
+        age=time.monotonic()-self.market_monotonic if hasattr(self,'market_monotonic') else time.time()-self.market_at
+        if age>900:
+            self._handle_candle_lag(CandleLag('15m 策略缓存超过15分钟未刷新；本轮不使用旧信号'))
         if market['side']=='观望' or state['last_bar']==market['bar']:
             return
         # Score and gate are independently rechecked at the execution boundary.
@@ -237,6 +302,7 @@ class Engine:
             raise Halt('逐仓杠杆回读不一致')
         if not self.enabled:
             return
+        self._verify_latest('15m',market['bar'],900000)
         cid='mac'+uuid.uuid4().hex[:28]; aid='sl'+uuid.uuid4().hex[:28]
         # Persist BEFORE sending so network ambiguity and crashes cannot cause duplicate orders.
         state['last_bar']=market['bar']

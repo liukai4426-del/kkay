@@ -1,8 +1,8 @@
-name: Build Intel Mac App 1.1
+name: Build Intel Mac App 1.2.2 Stability Fix
 on:
   push:
     branches:
-      - codex/intel-mac-app
+      - codex/v1-2-visual-only
   pull_request:
   workflow_dispatch:
 permissions:
@@ -17,12 +17,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.13'
           architecture: x64
       - name: Install packaging dependencies
-        run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3'
-      - name: Test order engine and V1.1 scoring/network with fake exchange
-        run: python -m unittest -v test_engine test_v11
+        run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0'
+      - name: Create application icon
+        run: python build_icon.py
+      - name: Test order engine, scoring, network and V1.2.2 stability guards
+        run: python -m unittest -v test_engine test_v11 test_candles test_v122
       - name: Build bundled Intel application
         run: python -m PyInstaller --noconfirm OKXLocal.spec
       - name: Check macOS compatibility metadata
@@ -38,17 +40,18 @@ jobs:
         run: |
           mkdir -p installer
           ditto dist/OKXLocal.app installer/OKXLocal.app
-          cp INSTALL-中文.md installer/INSTALL-中文.md
-          cp RELEASE-1.1.md installer/RELEASE-1.1.md
+          cp RELEASE-1.2.md installer/RELEASE-1.2.md
+          cp RELEASE-1.2.1.md installer/RELEASE-1.2.1.md
+          cp RELEASE-1.2.2.md installer/RELEASE-1.2.2.md
           cp "$RUNNER_TEMP/okx-smoke.txt" installer/BUILD-TEST.txt
           ln -s /Applications installer/Applications
-          hdiutil create -volname OKXLocal-1.1 -srcfolder installer -ov -format UDZO OKXLocal-1.1-Intel-test.dmg
-          shasum -a 256 OKXLocal-1.1-Intel-test.dmg > SHA256.txt
+          hdiutil create -volname OKXLocal-1.2.2 -srcfolder installer -ov -format UDZO OKXLocal-1.2.2-Intel-test.dmg
+          shasum -a 256 OKXLocal-1.2.2-Intel-test.dmg > SHA256.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: OKXLocal-1.1-Intel-test
+          name: OKXLocal-1.2.2-Intel-test
           path: |
-            OKXLocal-1.1-Intel-test.dmg
+            OKXLocal-1.2.2-Intel-test.dmg
             SHA256.txt
             ui-*.png
           if-no-files-found: error

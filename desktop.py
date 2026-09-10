@@ -20,11 +20,13 @@ def smoke_test():
     assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
     with tempfile.TemporaryDirectory(prefix='okx-ui-check-') as folder:
         root = tk.Tk()
+        print('Bundled Tk version:',root.tk.call('package','provide','Tk'),flush=True)
         try:
             with patch.object(app.App, 'worker', lambda self: None), \
                  patch.object(app.messagebox, 'showerror', side_effect=AssertionError):
                 ui = app.App(root, Path(folder))
                 root.update()
+                assert '1.2' in root.title()
                 assert ui.mode.get() == 'OKX模拟盘'
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
@@ -41,10 +43,15 @@ def smoke_test():
                 rows=[dict(t=i*900000,o=100,h=101,l=99,c=100) for i in range(1002)]
                 market=dict(signal(rows,rows),bar=rows[-1]['t'],close=100)
                 ui.emit('market',market); ui.emit('network','正常')
+                for last in ('79000','79020','78990','79045'):
+                    ui.emit('ticker',{'last':last})
                 ui.emit('alarm','测试警报：无网络、无订单')
                 ui.drain(); root.update()
                 assert len(ui.score_table.get_children()) == 7
                 assert ui.score_vars['做多'].get().endswith('/ 10')
+                assert ui.price.get()=='79,045.00 USDT'
+                assert len(ui.price_history)==4
+                assert 'Short' in str(ui.score_bars['做空']['style'])
                 from engine import Store
                 from history import summarize
                 ledger=Store(Path(folder)/'fake-account.json')
@@ -72,13 +79,27 @@ def smoke_test():
                             assert len(entries)==13 and all(w.winfo_ismapped() and w.winfo_width()>30 for w in entries), 'Risk inputs not visible'
                             assert all(0<=w.winfo_x()<body.winfo_width() and 0<=w.winfo_y()<body.winfo_height() for w in entries), 'Risk inputs outside pane'
                         target=Path(sys.argv[2]).parent/f'ui-{name}.png'
-                        subprocess.run(['/usr/sbin/screencapture','-x',str(target)],check=False,timeout=10)
+                        if name=='scores':
+                            def inspect_widget(w):
+                                print('WIDGET',str(w),w.winfo_class(),w.winfo_manager(),w.winfo_ismapped(),w.winfo_geometry(),w.winfo_rootx(),w.winfo_rooty(),flush=True)
+                                for child in w.winfo_children():inspect_widget(child)
+                            inspect_widget(root.nametowidget(ui.book.select()))
+                        capture=subprocess.Popen(['/usr/sbin/screencapture','-x',str(target)])
+                        deadline=time.monotonic()+10
+                        def finish_capture():
+                            if capture.poll() is not None:root.quit()
+                            elif time.monotonic()>deadline:
+                                capture.kill(); root.quit()
+                            else:root.after(50,finish_capture)
+                        root.after(50,finish_capture)
+                        root.mainloop()
+                        assert capture.wait(timeout=2)==0, 'Mac screenshot failed'
                 ui.finished.set()
                 ui.thread.join(timeout=2)
                 ui.lock.close()
         finally:
             root.destroy()
-    Path(sys.argv[2]).write_text('PASS: UI, demo default, stopped state, settings, bundled CA roots. No network or orders.\n')
+    Path(sys.argv[2]).write_text('PASS: V1.2 UI, red/green scores, ticker rendering, demo default, stopped state, settings, bundled CA roots. Screenshots use synthetic test data. No network or orders.\n')
 
 
 if __name__ == '__main__':
