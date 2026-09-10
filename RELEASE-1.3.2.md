@@ -24,6 +24,11 @@ Strategy-scoring update on top of the V1.3.1 visual build.
 ## Market data
 - Adds closed 4H candle loading and freshness validation.
 
+## UI fix
+- Score Detail and Indicator Value panes now use fixed-width 20px dark custom scrollbars instead of Aqua ttk sizing.
+- Score Detail supports mouse-wheel / trackpad scrolling as well as dragging the scrollbar thumb.
+- Packaged UI smoke test verifies the scrollbar is visibly wide and the Score Detail y-view actually moves.
+
 ## Preserved execution and safety
 - Isolated margin / hedge-side execution.
 - Normal limit entry and one-5m-candle expiry.
