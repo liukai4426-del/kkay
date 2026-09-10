@@ -85,7 +85,7 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(self.x.writes,[])
     def test_attached_and_isolated(self):
         p=self.active(); path,b=self.x.writes[-1]
-        self.assertEqual(b['tdMode'],'isolated'); self.assertEqual(b['ordType'],'fok')
+        self.assertEqual(b['tdMode'],'isolated'); self.assertEqual(b['ordType'],'limit')
         self.assertTrue(b['attachAlgoOrds'][0]['slTriggerPx']); self.assertTrue(b['attachAlgoOrds'][0]['tpTriggerPx'])
         self.assertEqual(b['clOrdId'],p['client_id'])
     def test_execution_uses_15m_atr(self):
@@ -98,7 +98,7 @@ class EngineTests(unittest.TestCase):
         self.assertTrue(store.data['active']['client_id']); self.assertTrue(store.data['last_bar'])
     def test_no_duplicate_while_pending(self):
         self.active(); self.x.ord={'state':'live'}
-        with self.assertRaises(Halt): self.e.cycle()
+        self.e.cycle()
         self.assertEqual(len([x for x in self.x.writes if x[0].endswith('/order')]),1)
     def test_protection_missing_locks(self):
         p=self.active(); self.x.pos=[self.position(p)]; self.e.cycle()
@@ -129,13 +129,14 @@ class EngineTests(unittest.TestCase):
         with self.assertRaises(Halt): self.e.cycle()
         self.assertTrue(p['protected'])
     def test_streak_blocks(self):
-        self.e.store.data['streak']=3
-        with self.assertRaises(Halt): self.e.cycle()
+        self.e._reset_streak_day(); self.e.store.data['streak']=3; self.e.store.save()
+        before=len(self.x.writes); self.e.cycle()
+        self.assertEqual(len(self.x.writes),before); self.assertTrue(self.e.enabled)
     def test_restart_preserves_dedup(self):
         p=self.active(); self.assertEqual(Store(self.e.store.path).data['active']['client_id'],p['client_id'])
-    def test_fok_cancel_cooldown(self):
+    def test_limit_cancel_is_not_a_trade(self):
         self.active(); self.x.ord={'state':'canceled','accFillSz':'0'}; self.e.cycle()
-        self.assertIsNone(self.e.store.data['active']); self.assertGreater(self.e.store.data['last_close'],0)
+        self.assertIsNone(self.e.store.data['active']); self.assertEqual(self.e.store.data['last_close'],0)
     def test_sleep_locks(self):
         self.e.poll_at=time.monotonic()-61; self.e.cycle()
         self.assertFalse(self.e.enabled); self.assertEqual(self.x.writes,[])

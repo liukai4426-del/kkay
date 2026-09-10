@@ -7,6 +7,7 @@ import time
 import uuid
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from decimal import Decimal, ROUND_DOWN, ROUND_UP
 from pathlib import Path
 from core import INSTRUMENT
@@ -47,8 +48,8 @@ class Settings:
     slippage_bps:float=5
 
     def validate(self):
-        if int(self.score_threshold)!=self.score_threshold or not 8<=self.score_threshold<=19:
-            raise Halt('评分阈值必须是8—19的整数')
+        if int(self.score_threshold)!=self.score_threshold or not 8<=self.score_threshold<=18:
+            raise Halt('评分阈值必须是8—18的整数')
         for name,value in asdict(self).items():
             if not isinstance(value,(int,float)) or not math.isfinite(value) or value<=0:
                 raise Halt(name+' 必须是有限正数')
@@ -78,7 +79,8 @@ def make_plan(s,side,ticker,meta,atr,available,daily_remaining):
     ask,bid=float(ticker['askPx']),float(ticker['bidPx'])
     if not 0<bid<=ask or (ask-bid)/bid>s.slippage_bps/10000:
         raise Halt('买卖价差过大')
-    limit=float(rounded((ask if buy else bid)*(1+d*s.slippage_bps/10000),meta['tickSz'],buy))
+    # V1.3 entry is a normal limit order: buy at best bid / sell at best ask; never chase beyond the saved price.
+    limit=float(rounded(bid if buy else ask,meta['tickSz'],not buy))
     dist=atr*s.stop_atr
     sl=rounded(limit-d*dist,meta['tickSz'],not buy)
     tp=rounded(limit+d*dist*s.reward_r,meta['tickSz'],buy)
@@ -97,13 +99,17 @@ def make_plan(s,side,ticker,meta,atr,available,daily_remaining):
     btc=float(quantity)*unit
     if btc*per_btc>risk+1e-9 or btc*limit>notional+1e-9:
         raise Halt('取整后风险超限')
+    expected_roundtrip_cost=limit*((2*s.fee_bps+s.slippage_bps)/10000)
+    tp_distance=dist*s.reward_r
+    cost_multiple=tp_distance/expected_roundtrip_cost if expected_roundtrip_cost>0 else math.inf
     return dict(side=side,posSide='long' if buy else 'short',exchange_side='buy' if buy else 'sell',
-        px=str(limit),sz=quantity,sl=sl,tp=tp,btc=btc,notional=btc*limit,estimated_loss=btc*per_btc)
+        px=str(limit),sz=quantity,sl=sl,tp=tp,btc=btc,notional=btc*limit,estimated_loss=btc*per_btc,
+        expected_roundtrip_cost=btc*expected_roundtrip_cost,cost_multiple=cost_multiple)
 
 class Store:
     def __init__(self,path):
         self.path=Path(path)
-        self.data={'active':None,'last_bar':0,'last_close':0,'streak':0,'day':'','peak':0,'halt':''}
+        self.data={'active':None,'last_bar':0,'last_close':0,'streak':0,'streak_day':'','streak_notice_day':'','day':'','peak':0,'halt':''}
         if self.path.exists():
             try:
                 self.data.update(json.loads(self.path.read_text()))
@@ -180,27 +186,41 @@ class Engine:
             raise Halt('BTC存在非本程序管理的仓位或挂单，请先在OKX处理')
         self.settings=settings
         equity,_=self.x.balance(); self.daily(equity)
-        if self.store.data['streak']>=settings.consecutive_losses:
-            raise Halt('连续亏损已达上限')
+        self._reset_streak_day()
         self.enabled=True; self.stopped=False; self.poll_at=time.monotonic()
+        if self.store.data['streak']>=settings.consecutive_losses:
+            self.emit('log',f'中国时间本日已连续亏损 {self.store.data["streak"]} 次：仅停止新开仓，次日自动恢复')
         self.candle_lag_count=0; self.candle_paused=False
-        self.emit('log','自动交易启动；5m入场、15m结构、1H环境；SL/TP使用15m ATR；最终评分达阈值才允许进入风控；每根5m信号最多一次')
+        self.emit('log','自动交易启动；1H环境→15m/1H结构→15m Setup→5m Trigger；限价开仓、市场价退出；SL/TP使用15m ATR；每根5m信号最多一次')
 
     def stop(self):
         self.enabled=False; self.stopped=True
-        self.emit('log','已停止新开仓；继续监控本程序仓位。交易所TP/SL不撤销；已发送请求无法撤回')
+        p=self.store.data.get('active') if self.store else None
+        if p and not p.get('filled') and not p.get('cancel_requested') and not self.x.positions():
+            self._cancel_pending_entry(p,'手动停止自动交易')
+        self.emit('log','已停止新开仓；未成交限价开仓会撤销，已有仓位继续监控且交易所TP/SL不撤销')
+
+    def _reset_streak_day(self):
+        if not self.store:
+            return ''
+        day=datetime.now(ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d')
+        state=self.store.data
+        if state.get('streak_day')!=day:
+            state.update(streak_day=day,streak=0,streak_notice_day='')
+            self.store.save()
+        return day
 
     def daily(self,equity):
         if not math.isfinite(equity) or equity<=0:
             raise Halt('账户权益无效')
         state=self.store.data
-        day=datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        day=datetime.now(ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d')
         if state['day']!=day:
-            state.update(day=day,peak=equity,streak=0)
+            state.update(day=day,peak=equity)
         state['peak']=max(equity,state['peak']); self.store.save()
         remaining=self.settings.daily_loss-max(0,state['peak']-equity)
         if remaining<=0:
-            raise Halt('达到UTC日内权益回撤上限；暂停开仓，原有TP/SL继续生效')
+            raise Halt('达到中国时间日内权益回撤上限；暂停开仓，原有TP/SL继续生效')
         return remaining
 
     def _handle_candle_lag(self,exc):
@@ -236,7 +256,7 @@ class Engine:
             check_latest('5m',f[-1]['t'],self.market_now(),ENTRY_STEP)
         except CandleLag as exc:
             self._handle_candle_lag(exc)
-        value=signal(h,m,f,self.settings.score_threshold if self.settings else 8)
+        value=signal(h,m,f,self.settings.score_threshold if self.settings else 8,self.settings.stop_atr if self.settings else 1.0)
         self.market=dict(value,bar=f[-1]['t'],bar15=m[-1]['t'],bar1h=h[-1]['t'],close=f[-1]['c'])
         self.market_at=time.time()
         self.market_monotonic=time.monotonic()
@@ -271,9 +291,13 @@ class Engine:
             return
         equity,available=self.x.balance()
         remaining=self.daily(equity)
+        self._reset_streak_day()
         state=self.store.data; s=self.settings
         if state['streak']>=s.consecutive_losses:
-            raise Halt('达到连续亏损次数上限')
+            if state.get('streak_notice_day')!=state.get('streak_day'):
+                state['streak_notice_day']=state.get('streak_day',''); self.store.save()
+                self.emit('log',f'中国时间本日连续净亏损已达 {s.consecutive_losses} 次：停止新开仓；已有仓位/TP/SL继续管理，次日自动恢复')
+            return
         if time.time()-state['last_close']<s.cooldown_minutes*60:
             return
         if self.x.positions() or self.x.orders() or self.x.algos():
@@ -296,6 +320,11 @@ class Engine:
         if abs(float(ticker['last'])-market['close'])>.3*market['h']['atr']:
             self.emit('log','价格偏离信号超过0.3 ATR，本轮不追价'); return
         plan=make_plan(s,market['side'],ticker,self.x.instrument(),market['m']['atr'],available,remaining)
+        # Expected TP space must cover at least 2x estimated round-trip execution cost.
+        if plan['cost_multiple'] < 2:
+            state['last_bar']=market['bar']; self.store.save()
+            self.emit('log',f"预计TP空间仅为往返成本 {plan['cost_multiple']:.2f} 倍（最低2倍），本轮跳过")
+            return
         # Check settings explicitly; set only isolated leverage for this side, never account mode.
         self.x.post('/api/v5/account/set-leverage',{'instId':INSTRUMENT,'lever':str(s.leverage),
                     'mgnMode':'isolated','posSide':plan['posSide']})
@@ -308,17 +337,26 @@ class Engine:
         cid='mac'+uuid.uuid4().hex[:28]; aid='sl'+uuid.uuid4().hex[:28]
         # Persist BEFORE sending so network ambiguity and crashes cannot cause duplicate orders.
         state['last_bar']=market['bar']
-        state['active']=dict(plan,client_id=cid,algo_id=aid,submitted=time.time(),equity_before=equity,filled=False,
+        state['active']=dict(plan,client_id=cid,algo_id=aid,submitted=time.time(),expires=time.time()+300,equity_before=equity,filled=False,cancel_requested=False,
                              score=score['total'],score_items=score.get('items',[]))
         self.store.save()
         body={'instId':INSTRUMENT,'tdMode':'isolated','side':plan['exchange_side'],'posSide':plan['posSide'],
-            'ordType':'fok','px':plan['px'],'sz':plan['sz'],'clOrdId':cid,
+            'ordType':'limit','px':plan['px'],'sz':plan['sz'],'clOrdId':cid,
             'attachAlgoOrds':[{'attachAlgoClOrdId':aid,'tpTriggerPx':plan['tp'],'tpOrdPx':'-1',
                 'slTriggerPx':plan['sl'],'slOrdPx':'-1','tpTriggerPxType':'last','slTriggerPxType':'last'}]}
         self.x.post('/api/v5/trade/order',body)
         self.store.record('提交开仓请求',state['active'])
-        self.emit('log',f"已提交逐仓FOK开仓请求（{score.get('level','信号')} · 评分 {score['total']}/19），附带TP/SL；尚不代表成交或保护单生效")
+        self.emit('log',f"已提交逐仓限价开仓请求（{score.get('level','信号')} · 评分 {score['total']}/18），最多等待1根5m K线；附带市场价TP/SL")
         self.emit('plan',state['active'])
+
+    def _cancel_pending_entry(self,p,reason):
+        if p.get('filled') or p.get('cancel_requested'):
+            return
+        p['cancel_requested']=time.time(); p['cancel_reason']=reason; self.store.save()
+        # Persist before the write: an uncertain cancel response must never trigger a duplicate order.
+        self.x.post('/api/v5/trade/cancel-order',{'instId':INSTRUMENT,'clOrdId':p['client_id']})
+        self.store.record('撤销限价开仓',{'client_id':p['client_id'],'reason':reason})
+        self.emit('log','已发送限价开仓撤单请求：'+reason+'；等待交易所确认')
 
     def reconcile(self):
         state=self.store.data; p=state['active']
@@ -326,31 +364,45 @@ class Engine:
             return
         order=self.x.order(p['client_id'])
         status=order.get('state')
+        filled=float(order.get('accFillSz') or 0)
         positions=self.x.positions()
         if any(r.get('mgnMode')!='isolated' or r.get('posSide')!=p['posSide'] or abs(float(r['pos']))>float(p['sz'])+1e-10 for r in positions):
             raise Halt('仓位与程序记录不一致，请立即在OKX核对')
-        if status=='canceled' and float(order.get('accFillSz') or 0)==0:
+        if status in ('live','partially_filled'):
+            if filled>0 or positions:
+                self._cancel_pending_entry(p,'限价单出现部分成交，撤销剩余数量并核对保护')
+                return
+            if p.get('cancel_requested'):
+                if time.time()-float(p['cancel_requested'])>15:
+                    raise Halt('限价撤单状态长时间无法核实；请到OKX核对，禁止重复开仓')
+                return
+            if time.time() >= float(p.get('expires',p['submitted']+300)):
+                self._cancel_pending_entry(p,'限价挂单已等待1根5m K线')
+            return
+        if status=='canceled' and filled<=0:
             if positions:
-                raise Halt('订单取消但仓位非空')
-            state['active']=None; state['last_close']=time.time(); self.store.save()
-            self.store.record('FOK未成交',p)
-            self.emit('log','FOK未成交，未产生仓位；该信号不再重试'); return
+                raise Halt('限价订单已取消但仓位非空')
+            state['active']=None; self.store.save()
+            self.store.record('限价单未成交',p)
+            self.emit('log','限价开仓未成交/已撤销；不计为交易，不触发平仓冷却，该信号不重试')
+            return
         if status not in ('filled','canceled'):
             if time.time()-p['submitted']>15:
                 raise Halt('订单状态长时间不确定，禁止重复开仓；请到OKX核对')
             return
-        if float(order.get('accFillSz') or 0)<=0:
+        if filled<=0:
             raise Halt('成交状态异常')
-        p['filled']=True; self.store.save()
+        p['filled']=True; p['filled_sz']=filled; self.store.save()
         if not positions:
             if time.time()-p['submitted']<10:
                 return
             equity,_=self.x.balance()
             pnl=equity-p['equity_before']
+            self._reset_streak_day()
             state['streak']=state['streak']+1 if pnl<0 else 0
             state['active']=None; state['last_close']=time.time(); self.store.save()
             self.store.record('仓位归零',dict(client_id=p['client_id'],equity_change=pnl,side=p['side'],px=p['px'],sz=p['sz'],score=p.get('score')))
-            self.emit('log',f'仓位已归零；本轮USDT权益变化 {pnl:+.4f}（含费用/资金费及外部资金变化）')
+            self.emit('log',f'仓位已归零；本轮USDT净权益变化 {pnl:+.4f}；中国时间连续亏损 {state["streak"]}/{self.settings.consecutive_losses}')
             return
         qty=sum(abs(float(r['pos'])) for r in positions)
         protection=[a for a in self.x.algos() if a.get('algoClOrdId')==p['algo_id'] and a.get('state')=='live'
@@ -398,6 +450,7 @@ class Engine:
             if float(order.get('accFillSz') or 0)>0:
                 equity,_=self.x.balance()
                 pnl=equity-p['equity_before']
+                self._reset_streak_day()
                 self.store.data['streak']=self.store.data['streak']+1 if pnl<0 else 0
                 self.store.record('人工核对平仓',dict(client_id=p['client_id'],equity_change=pnl,side=p['side'],px=p['px'],sz=p['sz'],score=p.get('score')))
         self.store.data['active']=None; self.store.data['halt']=''; self.store.save()

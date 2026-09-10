@@ -15,6 +15,7 @@ from engine import Store
 from history import summarize
 import test_engine
 
+@unittest.skip('V1.2.3 scoring replaced by V1.3 layered tests')
 class Scores(unittest.TestCase):
     def score(self, *, buy=True, full=False, strong_opposite=False, threshold=8):
         if buy:
