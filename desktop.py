@@ -79,6 +79,11 @@ def smoke_test():
                             assert len(entries)==13 and all(w.winfo_ismapped() and w.winfo_width()>30 for w in entries), 'Risk inputs not visible'
                             assert all(0<=w.winfo_x()<body.winfo_width() and 0<=w.winfo_y()<body.winfo_height() for w in entries), 'Risk inputs outside pane'
                         target=Path(sys.argv[2]).parent/f'ui-{name}.png'
+                        if name=='scores':
+                            def inspect_widget(w):
+                                print('WIDGET',str(w),w.winfo_class(),w.winfo_manager(),w.winfo_ismapped(),w.winfo_geometry(),w.winfo_rootx(),w.winfo_rooty(),flush=True)
+                                for child in w.winfo_children():inspect_widget(child)
+                            inspect_widget(root.nametowidget(ui.book.select()))
                         subprocess.run(['/usr/sbin/screencapture','-x',str(target)],check=False,timeout=10)
                 ui.finished.set()
                 ui.thread.join(timeout=2)
