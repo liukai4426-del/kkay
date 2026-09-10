@@ -1,4 +1,4 @@
-name: Build Intel Mac App 1.2.3 Expanded 12-Point Scoring
+name: Build Intel Mac App 1.2.3 Per-Signal 19-Point Scoring
 on:
   push:
     branches:
@@ -23,7 +23,7 @@ jobs:
         run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0'
       - name: Create application icon
         run: python build_icon.py
-      - name: Test order engine, V1.2.3 12-point scoring, 15m ATR, network and stability guards
+      - name: Test order engine, V1.2.3 19-point per-signal scoring, 15m ATR, network and stability guards
         run: python -m unittest -v test_engine test_v11 test_candles test_v122
       - name: Build bundled Intel application
         run: python -m PyInstaller --noconfirm OKXLocal.spec
