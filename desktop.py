@@ -84,7 +84,16 @@ def smoke_test():
                                 print('WIDGET',str(w),w.winfo_class(),w.winfo_manager(),w.winfo_ismapped(),w.winfo_geometry(),w.winfo_rootx(),w.winfo_rooty(),flush=True)
                                 for child in w.winfo_children():inspect_widget(child)
                             inspect_widget(root.nametowidget(ui.book.select()))
-                        subprocess.run(['/usr/sbin/screencapture','-x',str(target)],check=False,timeout=10)
+                        capture=subprocess.Popen(['/usr/sbin/screencapture','-x',str(target)])
+                        deadline=time.monotonic()+10
+                        def finish_capture():
+                            if capture.poll() is not None:root.quit()
+                            elif time.monotonic()>deadline:
+                                capture.kill(); root.quit()
+                            else:root.after(50,finish_capture)
+                        root.after(50,finish_capture)
+                        root.mainloop()
+                        assert capture.wait(timeout=2)==0, 'Mac screenshot failed'
                 ui.finished.set()
                 ui.thread.join(timeout=2)
                 ui.lock.close()
