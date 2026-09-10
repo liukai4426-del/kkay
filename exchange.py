@@ -14,7 +14,9 @@ from core import Client, HOSTS, INSTRUMENT
 from candles import CandleCache
 
 class APIError(RuntimeError):
-    pass
+    def __init__(self,message,code=''):
+        super().__init__(message)
+        self.code=str(code or '')
 
 class NetworkError(APIError):
     pass
@@ -93,13 +95,16 @@ class Exchange(Client):
         except Exception as exc:
             raise APIError('HTTPS连接失败：'+type(exc).__name__+'；若刚提交订单，结果可能未知，请勿重复提交') from None
         if result.get('code')!='0':
-            raise APIError('OKX错误码 '+str(result.get('code'))+'（核对环境、权限、地区与系统时间）')
+            code=str(result.get('code') or '')
+            if code=='51603':
+                raise APIError('OKX错误码 51603：订单不存在或暂未可查询',code)
+            raise APIError('OKX错误码 '+code+'（请按具体错误码核对账户/请求参数）',code)
         data=result.get('data')
         if not isinstance(data,list):
             raise APIError('OKX响应结构异常')
         for row in data:
             if isinstance(row,dict) and row.get('sCode') not in (None,'0'):
-                raise APIError('OKX订单级错误码 '+str(row['sCode']))
+                raise APIError('OKX订单级错误码 '+str(row['sCode']),str(row['sCode']))
         return data
 
     def get(self,path,params=None,private=False):
@@ -146,8 +151,21 @@ class Exchange(Client):
     def algos(self):
         return sum((self.get('/api/v5/trade/orders-algo-pending',{'instId':INSTRUMENT,'ordType':t},True) for t in ('oco','conditional')),[])
 
-    def order(self,client_id):
-        return self.get('/api/v5/trade/order',{'instId':INSTRUMENT,'clOrdId':client_id},True)[0]
+    def order(self,client_id='',order_id=''):
+        params={'instId':INSTRUMENT}
+        if order_id:
+            params['ordId']=str(order_id)
+        elif client_id:
+            params['clOrdId']=str(client_id)
+        else:
+            raise APIError('订单查询缺少ordId/clOrdId')
+        rows=self.get('/api/v5/trade/order',params,True)
+        if not rows:
+            raise APIError('OKX错误码 51603：订单不存在或暂未可查询','51603')
+        return rows[0]
+
+    def recent_orders(self):
+        return self.get('/api/v5/trade/orders-history',{'instType':'SWAP','instId':INSTRUMENT,'limit':'100'},True)
 
     def ticker(self):
         r=self.get('/api/v5/market/ticker',{'instId':INSTRUMENT})[0]

@@ -33,13 +33,13 @@ class App:
         self.candle_wait_log=0
         self.log_lines=[]
         self.history_key=None; self.history_curve=[]
-        self.root.title('KAYTRADE 1.3.4 · BTC 策略控制台'); self.root.geometry('1200x920'); self.root.minsize(820,620)
+        self.root.title('KAYTRADE 1.3.5 · BTC 策略控制台'); self.root.geometry('1200x920'); self.root.minsize(820,620)
         theme(root)
         top=ttk.Frame(root,padding=15); top.pack(fill='x')
         mark(top).pack(side='left',padx=(0,12))
         brand=ttk.Frame(top); brand.pack(side='left')
         ttk.Label(brand,text='KAYTRADE',style='Title.TLabel').pack(anchor='w')
-        ttk.Label(brand,text='BTC / USDT   ·   V1.3.4 10分细分结构策略',style='Muted.TLabel').pack(anchor='w')
+        ttk.Label(brand,text='BTC / USDT   ·   V1.3.5 10分细分结构策略',style='Muted.TLabel').pack(anchor='w')
         self.status=tk.StringVar(value='默认停止 · 未连接')
         ttk.Label(top,textvariable=self.status,style='Muted.TLabel').pack(side='right')
         badges=ttk.Frame(root,padding=(15,0)); badges.pack(fill='x')
@@ -106,8 +106,8 @@ class App:
         self.account_view.grid(row=8,column=0,columnspan=2,sticky='nsew',pady=16); connection.rowconfigure(8,weight=1)
         defaults=asdict(Settings())
         # Separate V1.1 risk preferences; preserve all account state and locks.
-        settings_path=folder/'settings-v1.3.4.json'
-        previous_path=folder/'settings-v1.3.3.json'
+        settings_path=folder/'settings-v1.3.5.json'
+        previous_path=folder/'settings-v1.3.4.json'
         legacy_path=folder/'settings-v1.1.json'
         self.settings_path=settings_path
         source=settings_path if settings_path.exists() else previous_path if previous_path.exists() else legacy_path
@@ -121,11 +121,11 @@ class App:
                     value=float(defaults.get('score_threshold',3.5))
                     defaults['score_threshold']=max(3.5,min(10.0,round(value*2)/2))
                 else:
-                    # V1.3.4 intentionally starts its new score model at the new 3.5 default; preserve other user settings.
+                    # V1.3.5 intentionally starts its new score model at the new 3.5 default; preserve other user settings.
                     defaults['score_threshold']=3.5
             except Exception:
                 pass
-        # V1.3.4 fixed execution economics are not user-editable.
+        # V1.3.5 fixed execution economics are not user-editable.
         defaults['fee_bps']=2.0; defaults['taker_fee_bps']=5.0; defaults['slippage_bps']=5.0; defaults['reward_r']=2.0
         # Consecutive-loss stop is the only fixed risk control in the Risk page.
         defaults['consecutive_losses']=3
@@ -146,7 +146,7 @@ class App:
                  font=('Helvetica',12),anchor='w',bd=0).grid(row=6,column=0,sticky='w',padx=6,pady=11)
         tk.Label(risk,text='3（固定）',bg=PANEL,fg=MUTED,font=('Helvetica',13,'bold'),anchor='e',bd=0,
                  padx=8,pady=8).grid(row=6,column=1,sticky='e',padx=8,pady=11)
-        tk.Label(risk,text='除连续亏损停开次数外，其余风险数值均可修改并保存；保存时仍执行基本合法性与风险边界校验。',
+        tk.Label(risk,text='除连续亏损停开次数外，其余风险数值均可修改并保存；单笔风险不再设资金5%硬上限，仍保留日回撤、名义仓位/杠杆与基础合法性校验。',
                  wraplength=760,bg=PANEL,fg=MUTED,font=('Helvetica',10),anchor='w',justify='left').grid(row=7,column=0,columnspan=2,sticky='w',pady=(16,8))
         RoundedButton(risk,text='校验并保存风险设置',command=self.save_settings,variant='accent',width=190).grid(row=8,column=0,columnspan=2,sticky='w')
         add_fields(execution,'交易执行参数',[
@@ -168,7 +168,7 @@ class App:
         self.spark=tk.Canvas(quote.body,width=300,height=72,bg=PANEL,highlightthickness=0)
         self.spark.place(relx=1,y=4,anchor='ne')
         self.spark.create_text(150,36,text='连接后显示行情走势',fill=MUTED,font=('Helvetica',11))
-        self.signal=tk.StringVar(value='V1.3.4 最高10分 · 日线EMA位置 + 结构 + 极值回归 · 1H/4H逆势扣分 · 默认≥3.5开仓')
+        self.signal=tk.StringVar(value='V1.3.5 最高10分 · 日线EMA位置 + 结构 + 极值回归 · 1H/4H逆势扣分 · 默认≥3.5开仓')
         ttk.Label(dash,textvariable=self.signal,wraplength=1080,style='Muted.TLabel').pack(anchor='w',pady=(0,10))
         cards=ttk.Frame(dash); cards.pack(fill='x',pady=(0,12))
         self.score_vars={}; self.gate_vars={}; self.score_bars={}
@@ -358,7 +358,7 @@ class App:
         except Exception as exc:
             messagebox.showerror('设置错误',str(exc)); return
         env='OKX模拟盘' if self.engine.x.demo else '真实账户'
-        summary=f'{env} / BTC-USDT-SWAP / 逐仓{s.leverage}倍\n资金预算{s.capital} USDT，最大名义仓位{s.max_notional} USDT\n基础单笔风险≤{min(s.risk_usdt,s.capital*s.risk_pct/100)} USDT；评分仓位倍率1×/1.5×/2×，最终仍受日回撤、最大名义仓位和资金5%绝对风险上限约束\n中国时间日回撤{s.daily_loss} USDT，连亏{s.consecutive_losses}次停止新开仓\n止损{s.stop_atr}×15m ATR，止盈TP1=1R平50%，TP2=2R平余下50%；TP1后SL自动移到成交均价\n每个信号可自动下单，无需逐笔确认。\n使用专用子账户；必须确认当地账户有合约/API资格。\n本版本未经过真实资金/真实Mac验收，不保证盈利或止损成交价。'
+        summary=f'{env} / BTC-USDT-SWAP / 逐仓{s.leverage}倍\n资金预算{s.capital} USDT，最大名义仓位{s.max_notional} USDT\n基础单笔风险≤{min(s.risk_usdt,s.capital*s.risk_pct/100)} USDT；评分仓位倍率1×/1.5×/2×，不再设资金5%硬上限，最终仍受日回撤、最大名义仓位与杠杆约束\n中国时间日回撤{s.daily_loss} USDT，连亏{s.consecutive_losses}次停止新开仓\n止损{s.stop_atr}×15m ATR，止盈TP1=1R平50%，TP2=2R平余下50%；TP1后SL自动移到成交均价\n每个信号可自动下单，无需逐笔确认。\n使用专用子账户；必须确认当地账户有合约/API资格。\n本版本未经过真实资金/真实Mac验收，不保证盈利或止损成交价。'
         token='LIVE' if not self.engine.x.demo else 'DEMO'
         typed=simpledialog.askstring('启动全自动授权',summary+f'\n最高10分；最终评分 ≥ {s.score_threshold:g}/10 才进入开仓风控。3.5–4.5=1×仓位 / 5.0–6.5=1.5× / 7.0–10=2×。1D EMA5/10/20支撑或压力最高分别+1/+2/+3且只取最高；1H与4H明显反向趋势各-1。15m Setup≥0.5、5m Trigger≥0.5；前方结构<1R禁止开仓。\n\n同意上述参数请输入 '+token,parent=self.root)
         if typed==token:

@@ -44,7 +44,7 @@ class Settings:
     stop_atr:float=1.0
     reward_r:float=2.0
     score_threshold:float=3.5
-    # V1.3.4 fixed OKX cost assumptions. fee_bps is maker entry fee.
+    # V1.3.5 fixed OKX cost assumptions. fee_bps is maker entry fee.
     fee_bps:float=2.0
     taker_fee_bps:float=5.0
     slippage_bps:float=5.0
@@ -59,16 +59,14 @@ class Settings:
             raise Halt('杠杆范围1—10倍（整数）')
         if int(self.consecutive_losses)!=self.consecutive_losses or self.consecutive_losses>20:
             raise Halt('连续亏损上限必须是1—20的整数')
-        if self.risk_pct>5 or self.risk_usdt>self.capital*.05:
-            raise Halt('单笔风险不得超过配置资金的5%')
         if self.daily_loss>self.capital or self.max_notional>self.capital*self.leverage:
             raise Halt('日亏损/名义仓位超出资金与杠杆范围')
         if not .6<=self.stop_atr<=3:
             raise Halt('ATR止损倍数范围0.6—3')
         if abs(self.reward_r-2.0)>1e-9:
-            raise Halt('V1.3.4最终止盈固定为2R')
+            raise Halt('V1.3.5最终止盈固定为2R')
         if abs(self.fee_bps-2.0)>1e-9 or abs(self.taker_fee_bps-5.0)>1e-9 or abs(self.slippage_bps-5.0)>1e-9:
-            raise Halt('V1.3.4成本参数固定：Maker 2bps / Taker 5bps / 滑点预算5bps')
+            raise Halt('V1.3.5成本参数固定：Maker 2bps / Taker 5bps / 滑点预算5bps')
         return self
 
 def rounded(value,tick,up=False):
@@ -109,8 +107,8 @@ def make_plan(s,side,ticker,meta,atr,available,daily_remaining,position_multipli
     # Maximum-loss sizing assumes maker entry + marketable/market stop exit + slippage budget.
     per_btc=abs(limit-float(sl))+limit*maker+float(sl)*(taker+slip)
     base_risk=min(s.risk_usdt,s.capital*s.risk_pct/100)
-    # Score tiers scale the base risk unit, but never bypass the daily remaining loss budget or the 5% absolute per-trade cap.
-    risk=min(base_risk*float(position_multiplier),daily_remaining,s.capital*.05)
+    # V1.3.5 removes the former 5% capital hard cap. Score tiers still cannot bypass the configured daily-loss budget.
+    risk=min(base_risk*float(position_multiplier),daily_remaining)
     notional=min(s.max_notional,s.capital*s.leverage,available*.9*s.leverage)
     quantity=rounded(min(risk/per_btc,notional/limit)/unit,meta['lotSz'])
     if Decimal(quantity)<Decimal(meta['minSz']):
@@ -217,7 +215,7 @@ class Engine:
         if self.store.data['streak']>=settings.consecutive_losses:
             self.emit('log',f'中国时间本日已连续亏损 {self.store.data["streak"]} 次：仅停止新开仓，次日自动恢复')
         self.candle_lag_count=0; self.candle_paused=False
-        self.emit('log','自动交易启动；V1.3.4评分沿用10分制；15m ATR止损；TP1=1R平50%，TP2=2R平余下50%；首个TP成交后由OKX自动把SL移动到成交均价保本；每根5m信号最多一次')
+        self.emit('log','自动交易启动；V1.3.5评分沿用10分制；15m ATR止损；TP1=1R平50%，TP2=2R平余下50%；首个TP成交后由OKX自动把SL移动到成交均价保本；每根5m信号最多一次')
 
     def stop(self):
         self.enabled=False; self.stopped=True
@@ -387,7 +385,17 @@ class Engine:
                 {'attachAlgoClOrdId':tp2_id,'tpOrdKind':'condition','tpTriggerPx':plan['tp2'],'tpOrdPx':tp2_exec,'tpTriggerPxType':'last','sz':plan['tp2_sz']},
                 {'attachAlgoClOrdId':sl_id,'slTriggerPx':plan['sl'],'slOrdPx':'-1','slTriggerPxType':'last','amendPxOnTriggerType':'1'}
             ]}
-        self.x.post('/api/v5/trade/order',body)
+        reply=self.x.post('/api/v5/trade/order',body)
+        row=reply[0] if reply else {}
+        order_id=str(row.get('ordId') or '') if isinstance(row,dict) else ''
+        if not order_id:
+            raise Halt('OKX下单响应缺少ordId；本地已保留请求记录，禁止重复提交，请核对OKX')
+        returned_client=str(row.get('clOrdId') or '') if isinstance(row,dict) else ''
+        if returned_client and returned_client!=cid:
+            raise Halt('OKX返回的clOrdId与本地请求不一致；禁止重复提交，请核对OKX')
+        state['active']['order_id']=order_id
+        state['active']['okx_ack_at']=time.time()
+        self.store.save()
         self.store.record('提交开仓请求',state['active'])
         self.emit('log',f"已提交逐仓限价开仓（{score.get('level','信号')} · {score['total']:g}/10 · {multiplier:g}×仓位）：TP1 1R平50% / TP2 2R平50% / SL 1×15m ATR；TP1后自动移保本")
         self.emit('plan',state['active'])
@@ -397,15 +405,70 @@ class Engine:
             return
         p['cancel_requested']=time.time(); p['cancel_reason']=reason; self.store.save()
         # Persist before the write: an uncertain cancel response must never trigger a duplicate order.
-        self.x.post('/api/v5/trade/cancel-order',{'instId':INSTRUMENT,'clOrdId':p['client_id']})
+        cancel={'instId':INSTRUMENT}
+        if p.get('order_id'):
+            cancel['ordId']=str(p['order_id'])
+        else:
+            cancel['clOrdId']=p['client_id']
+        self.x.post('/api/v5/trade/cancel-order',cancel)
         self.store.record('撤销限价开仓',{'client_id':p['client_id'],'reason':reason})
         self.emit('log','已发送限价开仓撤单请求：'+reason+'；等待交易所确认')
+
+    def _same_parent_order(self,row,p):
+        if not isinstance(row,dict):
+            return False
+        return bool((p.get('order_id') and str(row.get('ordId') or '')==str(p['order_id'])) or
+                    (p.get('client_id') and str(row.get('clOrdId') or '')==str(p['client_id'])))
+
+    def _lookup_parent_order(self,p):
+        try:
+            return self.x.order(p.get('client_id',''),p.get('order_id',''))
+        except Exception as exc:
+            if str(getattr(exc,'code',''))!='51603':
+                raise
+            now=time.time()
+            p['order_missing_checks']=int(p.get('order_missing_checks') or 0)+1
+            p['order_missing_last']=now
+            self.store.save()
+            self.emit('log','51603：OKX暂未找到该订单，正在核对当前委托、历史订单与BTC持仓；不会重复下单')
+            pending=self.x.orders()
+            found=next((row for row in pending if self._same_parent_order(row,p)),None)
+            if found:
+                if not p.get('order_id') and found.get('ordId'):
+                    p['order_id']=str(found['ordId']); self.store.save()
+                return found
+            history=self.x.recent_orders() if hasattr(self.x,'recent_orders') else []
+            found=next((row for row in history if self._same_parent_order(row,p)),None)
+            if found:
+                if not p.get('order_id') and found.get('ordId'):
+                    p['order_id']=str(found['ordId']); self.store.save()
+                return found
+            positions=self.x.positions()
+            same=[r for r in positions if r.get('mgnMode')=='isolated' and r.get('posSide')==p.get('posSide') and abs(float(r.get('pos') or 0))>0]
+            if same:
+                if len(same)!=1 or abs(float(same[0].get('pos') or 0))>float(p['sz'])+1e-10:
+                    raise Halt('51603：订单查询不到且BTC仓位与本地记录不一致；已停止新开仓，请立即核对OKX')
+                # Keep managing the position instead of treating a transient order lookup miss as an absent trade.
+                self.emit('log','51603核对发现同方向逐仓BTC持仓：按已成交状态继续检查TP/SL保护，不重复开仓')
+                return {'state':'filled','accFillSz':str(abs(float(same[0]['pos']))),'ordId':str(p.get('order_id') or ''),'clOrdId':p.get('client_id','')}
+            age=now-float(p.get('submitted',now))
+            if age<20:
+                return None
+            if not p.get('order_id'):
+                # Legacy/ambiguous local record: all read-only sources are empty, so it is safe to release the stale parent record.
+                self.store.data['active']=None; self.store.save()
+                self.store.record('51603确认订单不存在',{'client_id':p.get('client_id'),'checks':p.get('order_missing_checks',0)})
+                self.emit('log','51603多路核对确认：无订单、无历史成交、无BTC持仓；已清理本地未成交记录，不计为交易')
+                return None
+            raise Halt('51603：OKX已返回ordId，但20秒后当前委托、历史订单和BTC持仓仍均无法匹配；已停止新开仓，请核对OKX')
 
     def reconcile(self):
         state=self.store.data; p=state['active']
         if not p:
             return
-        order=self.x.order(p['client_id'])
+        order=self._lookup_parent_order(p)
+        if order is None:
+            return
         status=order.get('state')
         filled=float(order.get('accFillSz') or 0)
         positions=self.x.positions()
@@ -469,7 +532,7 @@ class Engine:
             self.emit('log',f'仓位已归零；本轮USDT净权益变化 {pnl:+.4f}；中国时间连续亏损 {state["streak"]}/{self.settings.consecutive_losses}')
             return
         if not all(k in p for k in ('tp1','tp2','tp1_sz','tp2_sz','tp1_id','tp2_id','sl_id')):
-            raise Halt('检测到旧版活动仓位；V1.3.4不能接管旧TP/SL结构，请先在OKX完成或人工处理该仓位')
+            raise Halt('检测到旧版活动仓位；V1.3.5不能接管旧TP/SL结构，请先在OKX完成或人工处理该仓位')
         qty=sum(abs(float(r['pos'])) for r in positions)
         full=float(p['sz']); remaining=float(p['tp2_sz']); tol=1e-10
         if abs(qty-full)>tol and abs(qty-remaining)>tol:
@@ -501,11 +564,11 @@ class Engine:
                 self.emit('log',f'已核对TP1后保本止损：剩余50% SL={sl_px:g}（成交均价 {entry_avg:g}）')
         if protection_ok:
             if not p.get('protected'):
-                p['protected']=True; self.store.save(); self.emit('log','已核对V1.3.4分批TP与SL保护结构')
+                p['protected']=True; self.store.save(); self.emit('log','已核对V1.3.5分批TP与SL保护结构')
         else:
             grace=float(p.get('tp1_seen_at',p.get('filled_at',p['submitted'])))
             if time.time()-grace>15:
-                self.halt('V1.3.4分批止盈/保本止损保护状态无法核实，已锁住新开仓；请立即到OKX核对')
+                self.halt('V1.3.5分批止盈/保本止损保护状态无法核实，已锁住新开仓；请立即到OKX核对')
         self.emit('position',positions)
 
     def flatten(self):
@@ -534,10 +597,15 @@ class Engine:
             raise Halt('账户仍有BTC仓位/挂单；请先在OKX人工处理')
         p=self.store.data['active']
         if p:
-            order=self.x.order(p['client_id'])
-            if order.get('state') not in ('filled','canceled'):
+            try:
+                order=self.x.order(p.get('client_id',''),p.get('order_id',''))
+            except Exception as exc:
+                if str(getattr(exc,'code',''))!='51603':
+                    raise
+                order=None
+            if order is not None and order.get('state') not in ('filled','canceled'):
                 raise Halt('原订单仍无法核实，不可解除故障锁')
-            if float(order.get('accFillSz') or 0)>0:
+            if order is not None and float(order.get('accFillSz') or 0)>0:
                 equity,_=self.x.balance()
                 pnl=equity-p['equity_before']
                 self._reset_streak_day()

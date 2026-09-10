@@ -32,13 +32,14 @@ class FakeExchange:
         self.writes.append((path,body))
         if self.fail and path.endswith('/order'): raise APIError('网络未知')
         return [{'ordId':'test','sCode':'0'}]
-    def order(self,cid): return self.ord
+    def order(self,cid='',order_id=''): return self.ord
+    def recent_orders(self): return []
 
 class RiskTests(unittest.TestCase):
     def test_settings(self): self.assertEqual(Settings().validate().leverage,5)
     def test_invalid_settings(self):
         for kwargs in [dict(capital=0),dict(risk_pct=float('nan')),dict(leverage=11),dict(leverage=2.5),
-                       dict(risk_usdt=6),dict(max_notional=1000),dict(fee_bps=0),dict(daily_loss=101)]:
+                       dict(max_notional=1000),dict(fee_bps=0),dict(daily_loss=101)]:
             with self.subTest(kwargs=kwargs),self.assertRaises(Halt): replace(Settings(),**kwargs).validate()
     def test_long_plan(self):
         p=make_plan(Settings(),'做多',TICK,META,200,100,3)

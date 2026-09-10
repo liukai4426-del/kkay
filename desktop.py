@@ -11,7 +11,7 @@ os.environ['SSL_CERT_FILE'] = certifi.where()
 
 
 def smoke_test():
-    """Exercise the packaged V1.3.4 UI without credentials, network, or orders."""
+    """Exercise the packaged V1.3.5 UI without credentials, network, or orders."""
     import ssl
     import tkinter as tk
     from types import SimpleNamespace
@@ -27,15 +27,15 @@ def smoke_test():
                  patch.object(app.messagebox, 'showerror', side_effect=AssertionError):
                 ui = app.App(root, Path(folder))
                 root.update()
-                assert 'KAYTRADE' in root.title() and '1.3.4' in root.title()
+                assert 'KAYTRADE' in root.title() and '1.3.5' in root.title()
                 assert ui.mode.get() == 'OKX模拟盘'
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
 
-                # V1.3.4 settings persist under their own file and preserve fixed execution economics.
+                # V1.3.5 settings persist under their own file and preserve fixed execution economics.
                 ui.fields['capital'].set('2000')
                 ui.save_settings()
-                saved = json.loads((Path(folder) / 'settings-v1.3.4.json').read_text())
+                saved = json.loads((Path(folder) / 'settings-v1.3.5.json').read_text())
                 assert saved['capital'] == 2000
                 assert not {'key','secret','phrase'} & saved.keys()
                 assert ui.fields['stop_atr'].get() == '1.0'
@@ -48,7 +48,7 @@ def smoke_test():
                 assert defaults.fee_bps == 2.0 and defaults.taker_fee_bps == 5.0 and defaults.slippage_bps == 5.0
                 assert defaults.score_threshold == 3.5
 
-                # Render V1.3.4 score cards, daily indicators, ticker and a tiered position plan.
+                # Render V1.3.5 score cards, daily indicators, ticker and a tiered position plan.
                 from strategy import signal
                 rows=[dict(t=i*900000,o=100,h=101,l=99,c=100,v=100) for i in range(1002)]
                 market=dict(signal(rows,rows),bar=rows[-1]['t'],close=100)
@@ -147,7 +147,7 @@ def smoke_test():
         finally:
             root.destroy()
     Path(sys.argv[2]).write_text(
-        'PASS: KAYTRADE V1.3.4 UI + 1D EMA indicators + 3.5 threshold + tiered 1x/1.5x/2x sizing + split TP execution; '
+        'PASS: KAYTRADE V1.3.5 UI + 1D EMA indicators + 3.5 threshold + tiered 1x/1.5x/2x sizing + split TP execution; '
         'functional detail scrollbars, score wheel/trackpad + thumb dragging, 10-point scoring, direction-aware colors, demo default, '
         'settings and bundled CA roots. Screenshots use synthetic test data. No network or orders.\n')
 

@@ -52,7 +52,7 @@ class V134StrategyTests(unittest.TestCase):
         base=make_plan(s, '做多', test_engine.TICK, test_engine.META, 200, 1000, 30, 1.0)
         high=make_plan(s, '做多', test_engine.TICK, test_engine.META, 200, 1000, 30, 2.0)
         self.assertGreater(float(high['sz']),float(base['sz']))
-        self.assertLessEqual(high['estimated_loss'],s.capital*.05+1e-9)
+        self.assertLessEqual(high['estimated_loss'],30+1e-9)
         self.assertEqual(high['position_multiplier'],2.0)
 
     def test_signal_ten_point_budget_and_double_trend_penalty(self):
