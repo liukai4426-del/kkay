@@ -4,6 +4,7 @@ on:
     branches: [codex/v1-3-5-fixes]
     paths:
       - v135_fix.py
+      - v135_fix_anchor.py
       - test_v135.py
       - RELEASE-1.3.5.md
       - .github/workflows/apply-v135.yml
@@ -21,7 +22,9 @@ jobs:
         with:
           python-version: '3.13'
       - name: Apply V1.3.5 fixes
-        run: python v135_fix.py
+        run: |
+          python v135_fix_anchor.py
+          python v135_fix.py
       - name: Compile and test
         run: |
           python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py desktop.py
