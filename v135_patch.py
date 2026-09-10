@@ -1,4 +1,4 @@
-"""KAYTRADE V1.3.5 runtime refinements: 1-10 score threshold and 5s startup buffer."""
+"""KAYTRADE V1.3.5 runtime refinements: 1-10 score threshold, 5s startup buffer, and explicit OKX 50123 handling."""
 import json
 import math
 import time
@@ -44,6 +44,12 @@ def _widgets(root):
         out.append(child)
         out.extend(_widgets(child))
     return out
+
+
+def _is_okx_50123(exc):
+    code = str(getattr(exc, 'code', '') or '')
+    text = str(exc or '')
+    return code == '50123' or 'OKX 50123' in text or '错误码 50123' in text
 
 
 def apply():
@@ -103,6 +109,39 @@ def apply():
         self.emit('log', '自动交易已开启；启动缓冲5秒，期间只更新行情/核对仓位，不允许自动开仓')
         return result
 
+    def run_original_cycle(self):
+        try:
+            return original_cycle(self)
+        except Exception as exc:
+            if not _is_okx_50123(exc):
+                raise
+
+            # OKX 50123 is a deterministic authorization rejection. The parent
+            # order was not accepted, so keeping the pre-POST local "active"
+            # placeholder would only cause pointless 51603 reconciliation loops.
+            p = self.store.data.get('active') if self.store else None
+            cleared = False
+            if isinstance(p, dict) and not p.get('order_id') and not p.get('filled'):
+                snapshot = {
+                    'client_id': p.get('client_id', ''),
+                    'side': p.get('side', ''),
+                    'score': p.get('score'),
+                    'submitted': p.get('submitted'),
+                    'reason': 'OKX 50123 explicit API permission rejection',
+                }
+                self.store.data['active'] = None
+                self.store.save()
+                self.store.record('OKX明确拒绝开仓', snapshot)
+                cleared = True
+
+            self.enabled = False
+            self.startup_buffer_until = 0.0
+            detail = '；已清理本地未成交记录，不进入51603订单核对' if cleared else ''
+            raise engine.Halt(
+                'OKX 50123：API Key没有BTC/对应交易市场的下单权限；本次开仓被OKX明确拒绝，订单未创建'
+                + detail + '；已停止新开仓。请在OKX修正API交易权限后重新测试连接并启动'
+            ) from None
+
     def cycle(self):
         until = float(getattr(self, 'startup_buffer_until', 0.0) or 0.0)
         if self.enabled and until:
@@ -110,7 +149,7 @@ def apply():
             if now < until:
                 self.enabled = False
                 try:
-                    return original_cycle(self)
+                    return run_original_cycle(self)
                 finally:
                     # Do not revive trading if the user stopped it or a permanent
                     # safety lock was written while reconciliation was running.
@@ -118,7 +157,7 @@ def apply():
                         self.enabled = True
             self.startup_buffer_until = 0.0
             self.emit('log', '启动缓冲5秒结束；自动开仓现已启用')
-        return original_cycle(self)
+        return run_original_cycle(self)
 
     def stop(self):
         self.startup_buffer_until = 0.0
