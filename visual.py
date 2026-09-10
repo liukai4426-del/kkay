@@ -366,20 +366,28 @@ class ScoreTable(tk.Frame):
         self._counter=0
         self.header=tk.Canvas(self,height=38,bg=PANEL_ALT,highlightthickness=0,borderwidth=0)
         self.header.pack(fill='x')
-        self.canvas=tk.Canvas(self,height=max(1,height)*29,bg=PANEL,highlightthickness=0,borderwidth=0)
+        self.canvas=tk.Canvas(self,height=max(1,height)*29,bg=PANEL,highlightthickness=0,borderwidth=0,yscrollincrement=29)
         self.canvas.pack(fill='both',expand=True)
         self.header.bind('<Configure>',lambda event:self._redraw_header())
         self.canvas.bind('<Configure>',lambda event:self._redraw_rows())
-        self.canvas.bind('<MouseWheel>',self._on_mousewheel)
-        self.canvas.bind('<Button-4>',lambda event:self.canvas.yview_scroll(-1,'units'))
-        self.canvas.bind('<Button-5>',lambda event:self.canvas.yview_scroll(1,'units'))
+        # ScoreTable is custom-drawn, so it must own its scrolling instead of relying on Treeview behavior.
+        for widget in (self,self.header,self.canvas):
+            widget.bind('<MouseWheel>',self._on_mousewheel)
+            widget.bind('<Button-4>',lambda event:self._scroll_units(-1))
+            widget.bind('<Button-5>',lambda event:self._scroll_units(1))
+
+    def _scroll_units(self,units):
+        before=self.canvas.yview()
+        self.canvas.yview_scroll(int(units),'units')
+        self.canvas.update_idletasks()
+        return before!=self.canvas.yview()
 
     def _on_mousewheel(self,event):
         delta=getattr(event,'delta',0)
         if delta:
-            units=-1 if delta>0 else 1
-            if abs(delta)>=120: units=int(-delta/120)
-            self.canvas.yview_scroll(units,'units')
+            # Aqua reports small trackpad deltas while classic wheels often report +/-120.
+            units=(-1 if delta>0 else 1) if abs(delta)<120 else int(-delta/120)
+            self._scroll_units(units)
         return 'break'
 
     def heading(self,key,text='',anchor='w',**kwargs):
@@ -395,7 +403,16 @@ class ScoreTable(tk.Frame):
         if kwargs:return super().configure(**kwargs)
     config=configure
 
-    def yview(self,*args):return self.canvas.yview(*args)
+    def yview(self,*args):
+        result=self.canvas.yview(*args)
+        self.canvas.update_idletasks()
+        return result
+
+    def yview_moveto(self,fraction):
+        self.canvas.yview_moveto(float(fraction)); self.canvas.update_idletasks()
+
+    def yview_scroll(self,number,what='units'):
+        self.canvas.yview_scroll(int(number),what); self.canvas.update_idletasks()
 
     def get_children(self,*args):return tuple(row['iid'] for row in self.rows)
 
@@ -444,8 +461,11 @@ class ScoreTable(tk.Frame):
                 value=cells[idx] if idx<len(cells) else ''
                 color=self._score_color(value,key) if key in ('long','short') else TEXT if key=='#0' else MUTED
                 self.canvas.create_text(x+9,y+row_h/2,text=str(value),fill=color,font=('Helvetica',12),anchor='w')
-        content_h=max(self.canvas.winfo_height(),len(self.rows)*row_h)
+        # Keep the logical content height independent from the viewport height. This makes
+        # Canvas yview fractions stable on macOS and allows the custom scrollbar to move.
+        content_h=max(1,len(self.rows)*row_h)
         self.canvas.configure(scrollregion=(0,0,max(total_width,self.canvas.winfo_width()),content_h))
+        self.canvas.update_idletasks()
 
 
 def mark(parent):

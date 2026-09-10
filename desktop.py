@@ -50,6 +50,16 @@ def smoke_test():
                 ui.drain(); root.update()
                 assert len(ui.score_table.get_children()) == 15
                 assert ui.score_vars['做多'].get().endswith('/ 10')
+                # Score details are custom Canvas rows: prove that the viewport can actually move.
+                for i in range(20):
+                    ui.score_table.insert('','end',text=f'滚动测试 {i}',values=(0,0,.5))
+                root.update_idletasks()
+                top_before=ui.score_table.canvas.yview()[0]
+                ui.score_table.yview_moveto(.55)
+                root.update_idletasks()
+                top_after=ui.score_table.canvas.yview()[0]
+                assert top_after > top_before + .05, (top_before,top_after,ui.score_table.canvas.cget('scrollregion'))
+                ui.score_table.yview_moveto(0)
                 assert ui.price.get()=='79,045.00 USDT'
                 assert len(ui.price_history)==4
                 assert ui.score_bars['做多'].color == app.GREEN
