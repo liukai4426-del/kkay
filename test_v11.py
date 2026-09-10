@@ -59,7 +59,7 @@ class Scores(unittest.TestCase):
         rows=[dict(o=100,h=101,l=99,c=100),dict(o=95,h=100,l=89,c=96)]
         hfeat=dict(kdj=False,ema=False,reversal=False,confirmed=False)
         mfeat=dict(kdj=True,ema=False,reversal=False,confirmed=True)
-        ffeat=dict(kdj=False,ema=True,reversal=False,confirmed=True)
+        ffeat=dict(kdj=False,ema=False,reversal=True,confirmed=True)
         off=dict(kdj=False,ema=False,reversal=False,confirmed=False)
         with patch('strategy.indicators',side_effect=[h,m,f,p,p,p]), patch('strategy._period',side_effect=[hfeat,mfeat,ffeat,off,off,off]), patch('strategy._volume_boll_return',side_effect=[(False,1.0),(False,1.0)]):
             r=signal(rows,rows,rows,7)
