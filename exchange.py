@@ -163,6 +163,14 @@ class Exchange(Client):
     def account(self):
         return self.get('/api/v5/account/config',private=True)[0]
 
+    def account_instrument(self):
+        """Verify BTC-USDT-SWAP is in the authenticated account's tradable instrument set."""
+        rows=self.get('/api/v5/account/instruments',{'instType':'SWAP','instId':INSTRUMENT},True)
+        match=next((r for r in rows if isinstance(r,dict) and r.get('instId')==INSTRUMENT),None)
+        if not match:
+            raise APIError('当前OKX账户未返回BTC-USDT-SWAP可交易权限；禁止自动开仓')
+        return match
+
     def balance(self):
         data=self.get('/api/v5/account/balance',{'ccy':'USDT'},True)[0]
         detail=next((r for r in data['details'] if r['ccy']=='USDT'),None)
@@ -177,10 +185,12 @@ class Exchange(Client):
         return self.get('/api/v5/trade/orders-pending',{'instId':INSTRUMENT},True)
 
     def algos(self):
-        # Preflight must see every pending algo family, not only TP/SL. Otherwise a
-        # foreign trigger/trailing order on BTC could coexist with this bot unnoticed.
-        return sum((self.get('/api/v5/trade/orders-algo-pending',{'instId':INSTRUMENT,'ordType':t},True)
-                    for t in ('oco','conditional','trigger','move_order_stop')),[])
+        # Current OKX algo families include stops/triggers/trailing plus chase,
+        # iceberg/TWAP variants. Query each family so a foreign BTC algo cannot
+        # coexist unnoticed with this single-strategy account.
+        kinds=('conditional','oco','trigger','move_order_stop','chase','iceberg','twap','smart_iceberg')
+        return sum((self.get('/api/v5/trade/orders-algo-pending',{'instType':'SWAP','instId':INSTRUMENT,'ordType':t,'limit':'100'},True)
+                    for t in kinds),[])
 
     def order(self,client_id='',order_id=''):
         params={'instId':INSTRUMENT}
