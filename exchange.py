@@ -82,7 +82,11 @@ class Exchange(Client):
             with self.opener.open(req,timeout=10) as response:
                 result=json.load(response)
         except urllib.error.HTTPError as exc:
-            suffix='只读请求失败，不会下单' if method=='GET' else '写入请求被拒绝' if 400<=exc.code<500 and exc.code not in (408,) else '写入结果需核对，禁止重复提交'
+            # A completed HTTP 4xx response (except timeout/rate-limit semantics) is
+            # an explicit server-side rejection even if the body is HTML or omits an
+            # OKX code. This distinction is critical: deterministic rejections may
+            # release a pre-submit placeholder; network/5xx uncertainty never may.
+            suffix='只读请求失败，不会下单' if method=='GET' else '写入请求被拒绝' if 400<=exc.code<500 and exc.code not in (408,429) else '写入结果需核对，禁止重复提交'
             code=''; msg=''
             try:
                 payload=json.loads(exc.read(4096))
@@ -92,9 +96,7 @@ class Exchange(Client):
             except Exception:
                 pass
             detail=(f' / OKX {code}' if code else '')+(f'：{msg}' if msg else '')
-            # For POST only: structured 4xx (except 408) proves explicit rejection.
-            # GET 429/5xx remain retryable NetworkError; POST 5xx/408 remain ambiguous.
-            write_rejected=bool(method=='POST' and code and 400<=exc.code<500 and exc.code!=408)
+            write_rejected=bool(method=='POST' and 400<=exc.code<500 and exc.code not in (408,429))
             if write_rejected:
                 raise APIError(f'HTTP {exc.code}{detail}；{suffix}',code,True,exc.code,method,path) from None
             if exc.code in (408,429,500,502,503,504):
@@ -112,7 +114,7 @@ class Exchange(Client):
             raise NetworkError(category+'；'+suffix,method=method,path=path) from None
         except Exception as exc:
             raise APIError('HTTPS连接失败：'+type(exc).__name__+'；若刚提交订单，结果可能未知，请勿重复提交',method=method,path=path) from None
-        if result.get('code')!='0':
+        if str(result.get('code',''))!='0':
             code=str(result.get('code') or '')
             msg=str(result.get('msg') or '')[:160]
             if code=='51603':
@@ -123,11 +125,13 @@ class Exchange(Client):
         if not isinstance(data,list):
             raise APIError('OKX响应结构异常',method=method,path=path)
         for row in data:
-            if isinstance(row,dict) and row.get('sCode') not in (None,'0'):
-                code=str(row.get('sCode') or '')
-                msg=str(row.get('sMsg') or '')[:160]
-                suffix=('：'+msg) if msg else ''
-                raise APIError('OKX订单级错误码 '+code+suffix,code,method=='POST',None,method,path)
+            if isinstance(row,dict):
+                scode=row.get('sCode')
+                if scode is not None and str(scode)!='0':
+                    code=str(scode or '')
+                    msg=str(row.get('sMsg') or '')[:160]
+                    suffix=('：'+msg) if msg else ''
+                    raise APIError('OKX订单级错误码 '+code+suffix,code,method=='POST',None,method,path)
         return data
 
     def get(self,path,params=None,private=False):
@@ -172,7 +176,10 @@ class Exchange(Client):
         return self.get('/api/v5/trade/orders-pending',{'instId':INSTRUMENT},True)
 
     def algos(self):
-        return sum((self.get('/api/v5/trade/orders-algo-pending',{'instId':INSTRUMENT,'ordType':t},True) for t in ('oco','conditional')),[])
+        # Preflight must see every pending algo family, not only TP/SL. Otherwise a
+        # foreign trigger/trailing order on BTC could coexist with this bot unnoticed.
+        return sum((self.get('/api/v5/trade/orders-algo-pending',{'instId':INSTRUMENT,'ordType':t},True)
+                    for t in ('oco','conditional','trigger','move_order_stop')),[])
 
     def order(self,client_id='',order_id=''):
         params={'instId':INSTRUMENT}
