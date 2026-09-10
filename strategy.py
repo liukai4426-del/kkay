@@ -1,9 +1,9 @@
-"""V1.3.2 layered BTC intraday scoring: 4H structure -> 1H environment -> 15m setup -> 5m trigger."""
+"""V1.3.4 mean-reversion scoring with daily EMA zones and 1H/4H countertrend penalties."""
 import math
-from core import indicators
+from core import indicators, ema
 
 SCORE_MAX = 10.0
-NORMAL_THRESHOLD = 4.0
+NORMAL_THRESHOLD = 3.5
 
 
 def _volume_boll_return(rows, current, buy, multiplier=1.3):
@@ -57,13 +57,23 @@ def _environment(current, candle, buy):
     return .5*(int(ema_order)+int(ema200)+int(slope)), False, {'ema_order':ema_order,'ema200':ema200,'slope':slope}
 
 
+def _trend_penalty(current, candle, buy):
+    """Only penalize a clearly established higher-timeframe trend against the intended mean-reversion side."""
+    opposite=(candle['c'] < current['ema200'] and current['ema20'] < current['ema50'] and current['down']) if buy else (candle['c'] > current['ema200'] and current['ema20'] > current['ema50'] and current['up'])
+    return (-1.0 if opposite else 0.0), opposite, {
+        'ema_order': (current['ema20'] < current['ema50']) if buy else (current['ema20'] > current['ema50']),
+        'ema200_side': (candle['c'] < current['ema200']) if buy else (candle['c'] > current['ema200']),
+        'slope': current['down'] if buy else current['up'],
+    }
+
+
 def _rsi_resonance(m, f, buy):
     """RSI earns points only when 5m and 15m hit the same extreme together."""
     return (m['rsi'] <= 30 and f['rsi'] <= 30) if buy else (m['rsi'] >= 70 and f['rsi'] >= 70)
 
 
 def _setup(rows, current, buy):
-    """15m setup keeps detailed components in 0.5 steps and caps correlated evidence at 2.0."""
+    """15m mean-reversion setup keeps the same evidence but caps the module at 1.5."""
     candle=rows[-1]
     boll=candle['l'] <= current['lower'] if buy else candle['h'] >= current['upper']
     volume_boll, volume_ratio=_volume_boll_return(rows,current,buy)
@@ -75,18 +85,18 @@ def _setup(rows, current, buy):
         'kdj':.5*int(kdj),
         'reversal':.5*int(reversal),
     }
-    return min(2.0,sum(components.values())), components, volume_ratio
+    return min(1.5,sum(components.values())), components, volume_ratio
 
 
 def _trigger(rows, current, previous, buy):
-    """5m only times entry; four 0.5 triggers are capped at 1.5."""
+    """5m only times entry; detailed triggers are capped at 1.0 in V1.3.4."""
     candle=rows[-1]
     ema_reclaim=_ema_reclaim(rows,current,previous,buy)
     kdj=current['cross_up'] if buy else current['cross_down']
     reversal=_reversal(rows,buy)
     ema_direction=(candle['c'] > current['ema20'] and current['ema20'] > previous['ema20']) if buy else (candle['c'] < current['ema20'] and current['ema20'] < previous['ema20'])
     components={'ema_reclaim':.5*int(ema_reclaim),'kdj':.5*int(kdj),'reversal':.5*int(reversal),'ema_direction':.5*int(ema_direction)}
-    return min(1.5,sum(components.values())), components
+    return min(1.0,sum(components.values())), components
 
 
 def _swing_points(rows, lookback, radius=3):
@@ -193,35 +203,67 @@ def _ema_dynamic_support(hour, h, ph, price, buy):
     return 0.0, None
 
 
-def _level(total):
-    if total >= 8.5:
-        return '高共振信号'
+def _daily_ema_zone(day, daily_ind, price, buy):
+    """Daily EMA5/10/20 support or resistance. Highest matching weight wins; never stacks above 3."""
+    atr=float(daily_ind['atr'])
+    if not math.isfinite(atr) or atr <= 0 or len(day) < 21:
+        return 0.0, None, {}
+    close=[float(r['c']) for r in day]
+    values={}
+    for period,weight in ((5,1.0),(10,2.0),(20,3.0)):
+        series=ema(close,period)
+        values[period]={'value':series[-1],'previous':series[-2],'weight':weight}
+    tolerance=.20*atr
+    # Check highest-value EMA first so simultaneous proximity never stacks.
+    for period in (20,10,5):
+        item=values[period]; value=item['value']; previous=item['previous']
+        slope_ok=value >= previous if buy else value <= previous
+        side_ok=price >= value-.05*atr if buy else price <= value+.05*atr
+        near=abs(price-value) <= tolerance
+        if slope_ok and side_ok and near:
+            return item['weight'],f'EMA{period}',{'atr':atr,'distance_atr':abs(price-value)/atr,'ema':values}
+    return 0.0,None,{'atr':atr,'ema':values}
+
+
+def _position_multiplier(total):
     if total >= 7.0:
-        return '强信号'
-    if total >= 5.5:
-        return '较强信号'
-    if total >= 4.0:
-        return '普通信号'
+        return 2.0
+    if total >= 5.0:
+        return 1.5
+    if total >= 3.5:
+        return 1.0
+    return 0.0
+
+
+def _level(total):
+    if total >= 7.0:
+        return '三级信号 · 2.0×仓位'
+    if total >= 5.0:
+        return '二级信号 · 1.5×仓位'
+    if total >= 3.5:
+        return '一级信号 · 1.0×仓位'
     return '未达开仓线'
 
 
-def signal(hour, quarter, five=None, threshold=4.0, stop_atr=1.0, four=None):
+def signal(hour, quarter, five=None, threshold=3.5, stop_atr=1.0, four=None, day=None):
     five=quarter if five is None else five
     four=hour if four is None else four
-    h,m,f,q=indicators(hour),indicators(quarter),indicators(five),indicators(four)
-    ph,pm,pf=indicators(hour[:-1]),indicators(quarter[:-1]),indicators(five[:-1])
-    hc=hour[-1]
+    day=four if day is None else day
+    h,m,f,q,d=indicators(hour),indicators(quarter),indicators(five),indicators(four),indicators(day)
+    pf=indicators(five[:-1])
+    hc=hour[-1]; qc=four[-1]
     price=float(quarter[-1]['c'])
     results={}
     for side in ('做多','做空'):
         buy=side=='做多'
-        env,strong_opposite,env_detail=_environment(h,hc,buy)
+        trend_1h,opposite_1h,trend_1h_detail=_trend_penalty(h,hc,buy)
+        trend_4h,opposite_4h,trend_4h_detail=_trend_penalty(q,qc,buy)
         setup,setup_detail,volume_ratio=_setup(quarter,m,buy)
         trigger,trigger_detail=_trigger(five,f,pf,buy)
         structure=_structure_context(hour,quarter,h,m,buy,stop_atr,four,q)
-        ema_support,ema_name=_ema_dynamic_support(hour,h,ph,price,buy)
+        daily_ema,daily_ema_name,daily_ema_detail=_daily_ema_zone(day,d,price,buy)
         rsi_resonance=1.5 if _rsi_resonance(m,f,buy) else 0.0
-        raw=env+structure['score_4h']+structure['score']+ema_support+rsi_resonance+setup+trigger+structure['penalty']
+        raw=daily_ema+structure['score_4h']+structure['score']+rsi_resonance+setup+trigger+structure['penalty']+trend_1h+trend_4h
         total=max(0.0,min(SCORE_MAX,round(raw*2)/2))
         required=float(threshold)
         hard_setup=setup>=.5
@@ -229,43 +271,40 @@ def signal(hour, quarter, five=None, threshold=4.0, stop_atr=1.0, four=None):
         gate=hard_setup and hard_trigger and not structure['blocked']
         eligible=gate and total>=required
         level=_level(total)
+        position_multiplier=_position_multiplier(total) if eligible else 0.0
         if structure['blocked']:
             reason=f'前方强结构距离 {structure["front_r"]:.2f}R < 1R，禁止开仓'
         elif not hard_setup:
-            reason=f'15m Setup {setup:g}/2 < 0.5，禁止开仓'
+            reason=f'15m Setup {setup:g}/1.5 < 0.5，禁止开仓'
         elif not hard_trigger:
-            reason=f'5m Trigger {trigger:g}/1.5 < 0.5，等待入场触发'
+            reason=f'5m Trigger {trigger:g}/1.0 < 0.5，等待入场触发'
         elif eligible:
-            reason=f'{level} · {total:g}/{SCORE_MAX:g} 达标；进入执行与风险检查'
+            reason=f'{level} · {total:g}/{SCORE_MAX:g} 达标；按 {position_multiplier:g}× 仓位进入执行与风险检查'
         else:
             reason=f'{level} · {total:g}/{SCORE_MAX:g}，未达开仓阈值 {required:g}'
         items=[
-            ('1H 趋势环境',env,1.5),
+            ('1D EMA5/10/20 支撑/压力',daily_ema,3.0),
             ('4H 对应支撑/阻力',structure['score_4h'],1.5),
             ('1H 支撑/阻力结构',structure['score_1h'],1.0),
             ('15m 支撑/阻力结构',structure['score_15m'],.5),
-            ('1H EMA20/EMA50 动态支撑/压力',ema_support,.5),
             ('5m + 15m RSI 极值共振',rsi_resonance,1.5),
-            ('15m BOLL 外轨',setup_detail['boll'],.5),
-            ('15m BOLL外破回归 + 成交量≥20均量×1.3',setup_detail['volume_boll'],1.0),
-            ('15m KDJ 转向',setup_detail['kdj'],.5),
-            ('15m 反转K线',setup_detail['reversal'],.5),
-            ('5m EMA20 重新突破',trigger_detail['ema_reclaim'],.5),
-            ('5m KDJ 方向交叉',trigger_detail['kdj'],.5),
-            ('5m 反转K线突破',trigger_detail['reversal'],.5),
-            ('5m EMA20 短线方向确认',trigger_detail['ema_direction'],.5),
+            ('15m Setup（BOLL/量/KDJ/反转，封顶）',setup,1.5),
+            ('5m Trigger（EMA/KDJ/反转，封顶）',trigger,1.0),
+            ('1H 反向趋势惩罚',trend_1h,0),
+            ('4H 反向趋势惩罚',trend_4h,0),
             ('前方结构空间惩罚',structure['penalty'],0),
         ]
         results[side]={
             'total':total,'raw':raw,'gate':gate,'eligible':eligible,'level':level,'required':required,
-            'items':items,'reason':reason,'structure':structure,
-            'layers':{'environment':env,'structure_4h':structure['score_4h'],'structure':structure['score'],
-                      'ema_support':ema_support,'rsi_resonance':rsi_resonance,'setup':setup,'trigger':trigger,
-                      'front_penalty':structure['penalty']},
+            'position_multiplier':position_multiplier,'items':items,'reason':reason,'structure':structure,
+            'layers':{'daily_ema':daily_ema,'structure_4h':structure['score_4h'],'structure':structure['score'],
+                      'rsi_resonance':rsi_resonance,'setup':setup,'trigger':trigger,
+                      'trend_penalty_1h':trend_1h,'trend_penalty_4h':trend_4h,'front_penalty':structure['penalty']},
             'confirmations':{
-                '5m':trigger>=.5,'15m':setup>=.5,'1H':env>0,'4H_structure':structure['score_4h']>0,
-                'strong_opposite':strong_opposite,'rsi_resonance':rsi_resonance>0,'ema_support':ema_name,
-                'volume_ratio_15m':volume_ratio,'environment':env_detail,
+                '5m':trigger>=.5,'15m':setup>=.5,'1H_countertrend':opposite_1h,'4H_countertrend':opposite_4h,
+                'strong_opposite':opposite_1h or opposite_4h,'rsi_resonance':rsi_resonance>0,
+                'daily_ema':daily_ema_name,'daily_ema_detail':daily_ema_detail,
+                'volume_ratio_15m':volume_ratio,'trend_1h':trend_1h_detail,'trend_4h':trend_4h_detail,
                 'setup':setup_detail,'trigger':trigger_detail,'structure':structure,
             },
         }
@@ -277,4 +316,4 @@ def signal(hour, quarter, five=None, threshold=4.0, stop_atr=1.0, four=None):
     else:
         side='观望'
     why=results[side]['reason'] if side!='观望' else ' / '.join(s+': '+r['reason'] for s,r in results.items())
-    return {'q':q,'h':h,'m':m,'f':f,'side':side,'why':why,'scores':results,'threshold':threshold,'score_max':SCORE_MAX}
+    return {'d':d,'q':q,'h':h,'m':m,'f':f,'side':side,'why':why,'scores':results,'threshold':threshold,'score_max':SCORE_MAX}

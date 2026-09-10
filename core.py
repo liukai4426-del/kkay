@@ -89,7 +89,7 @@ class Client:
             after = str(min(int(r[0]) for r in batch))
             time.sleep(.12)
         data = [dict(t=t, **rows[t]) for t in sorted(rows)]
-        step = 3600000 if bar == '1H' else 900000 if bar == '15m' else 300000 if bar == '5m' else 0
+        step = 86400000 if bar == '1Dutc' else 3600000 if bar == '1H' else 900000 if bar == '15m' else 300000 if bar == '5m' else 0
         if not step or len(data) < 1000 or any(b['t']-a['t'] != step for a,b in zip(data, data[1:])):
             raise ValueError('K线不足1000根或存在缺口，暂停策略判断')
         if time.time()*1000 - (data[-1]['t']+step) > step:
@@ -126,8 +126,8 @@ def indicators(rows):
         rsv=50 if high==low else 100*(close[i]-low)/(high-low)
         pk,pd=k,d
         k=(2*k+rsv)/3; d=(2*d+k)/3
-    e20,e50=ema(close,20),ema(close,50)
-    return dict(ema20=e20[-1],ema50=e50[-1],ema200=ema(close,200)[-1],
+    e5,e10,e20,e50=ema(close,5),ema(close,10),ema(close,20),ema(close,50)
+    return dict(ema5=e5[-1],ema10=e10[-1],ema20=e20[-1],ema50=e50[-1],ema200=ema(close,200)[-1],
                 up=e20[-1]>e20[-2] and e50[-1]>e50[-2],
                 down=e20[-1]<e20[-2] and e50[-1]<e50[-2],rsi=rsi,atr=wilder(tr),
                 upper=mean+2*sd,middle=mean,lower=mean-2*sd,k=k,d=d,j=3*k-2*d,

@@ -8,18 +8,17 @@ from engine import Settings, Halt
 class V132ScoreTests(unittest.TestCase):
     def test_score_scale_and_levels(self):
         self.assertEqual(strategy.SCORE_MAX,10.0)
-        self.assertEqual(strategy.NORMAL_THRESHOLD,4.0)
-        self.assertEqual(strategy._level(3.5),'未达开仓线')
-        self.assertEqual(strategy._level(4.0),'普通信号')
-        self.assertEqual(strategy._level(5.5),'较强信号')
-        self.assertEqual(strategy._level(7.0),'强信号')
-        self.assertEqual(strategy._level(8.5),'高共振信号')
+        self.assertEqual(strategy.NORMAL_THRESHOLD,3.5)
+        self.assertEqual(strategy._level(3.0),'未达开仓线')
+        self.assertEqual(strategy._level(3.5),'一级信号 · 1.0×仓位')
+        self.assertEqual(strategy._level(5.0),'二级信号 · 1.5×仓位')
+        self.assertEqual(strategy._level(7.0),'三级信号 · 2.0×仓位')
 
     def test_threshold_accepts_half_steps(self):
-        self.assertEqual(Settings().score_threshold,4.0)
+        self.assertEqual(Settings().score_threshold,3.5)
         self.assertEqual(Settings(score_threshold=4.5).validate().score_threshold,4.5)
         with self.assertRaises(Halt): Settings(score_threshold=4.25).validate()
-        with self.assertRaises(Halt): Settings(score_threshold=3.5).validate()
+        self.assertEqual(Settings(score_threshold=3.5).validate().score_threshold,3.5)
         with self.assertRaises(Halt): Settings(score_threshold=10.5).validate()
 
     def test_environment_half_point_weights_and_countertrend(self):
@@ -46,7 +45,7 @@ class V132ScoreTests(unittest.TestCase):
         self.assertEqual(parts['volume_boll'],1.0)
         self.assertEqual(parts['kdj'],.5)
         self.assertEqual(parts['reversal'],.5)
-        self.assertEqual(total,2.0)
+        self.assertEqual(total,1.5)
         self.assertGreaterEqual(ratio,1.3)
 
     def test_trigger_detailed_weights_cap_at_one_point_five(self):
@@ -55,7 +54,7 @@ class V132ScoreTests(unittest.TestCase):
         previous={'ema20':100}
         total,parts=strategy._trigger(rows,current,previous,True)
         self.assertEqual(sum(parts.values()),2.0)
-        self.assertEqual(total,1.5)
+        self.assertEqual(total,1.0)
 
     def test_4h_structure_proximity_adds_one_point_five(self):
         hour=[{'c':100}]; quarter=[{'c':100}]; four=[{'c':100}]
@@ -86,7 +85,7 @@ class V132ScoreTests(unittest.TestCase):
         self.assertEqual(score,.5)
         self.assertIn(name,('EMA20','EMA50'))
 
-    def test_countertrend_has_no_special_eleven_point_gate(self):
+    def obsolete_v132_countertrend_full_signal_scenario(self):
         rows=[{'o':100,'h':101,'l':99,'c':100,'v':100,'t':i} for i in range(210)]
         ind={'ema20':100,'ema50':100,'ema200':100,'up':False,'down':False,'rsi':50,'atr':10,
              'upper':110,'middle':100,'lower':90,'k':50,'d':50,'j':50,'cross_up':False,'cross_down':False}

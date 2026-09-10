@@ -43,15 +43,15 @@ class Settings:
     cooldown_minutes:int=30
     stop_atr:float=1.0
     reward_r:float=2.0
-    score_threshold:float=4.0
-    # V1.3.3 fixed OKX cost assumptions. fee_bps is maker entry fee.
+    score_threshold:float=3.5
+    # V1.3.4 fixed OKX cost assumptions. fee_bps is maker entry fee.
     fee_bps:float=2.0
     taker_fee_bps:float=5.0
     slippage_bps:float=5.0
 
     def validate(self):
-        if not 4.0<=self.score_threshold<=10.0 or abs(self.score_threshold*2-round(self.score_threshold*2))>1e-9:
-            raise Halt('评分阈值必须是4—10之间、以0.5为步进')
+        if not 3.5<=self.score_threshold<=10.0 or abs(self.score_threshold*2-round(self.score_threshold*2))>1e-9:
+            raise Halt('评分阈值必须是3.5—10之间、以0.5为步进')
         for name,value in asdict(self).items():
             if not isinstance(value,(int,float)) or not math.isfinite(value) or value<=0:
                 raise Halt(name+' 必须是有限正数')
@@ -66,9 +66,9 @@ class Settings:
         if not .6<=self.stop_atr<=3:
             raise Halt('ATR止损倍数范围0.6—3')
         if abs(self.reward_r-2.0)>1e-9:
-            raise Halt('V1.3.3最终止盈固定为2R')
+            raise Halt('V1.3.4最终止盈固定为2R')
         if abs(self.fee_bps-2.0)>1e-9 or abs(self.taker_fee_bps-5.0)>1e-9 or abs(self.slippage_bps-5.0)>1e-9:
-            raise Halt('V1.3.3成本参数固定：Maker 2bps / Taker 5bps / 滑点预算5bps')
+            raise Halt('V1.3.4成本参数固定：Maker 2bps / Taker 5bps / 滑点预算5bps')
         return self
 
 def rounded(value,tick,up=False):
@@ -85,10 +85,12 @@ def _split_tp_sizes(quantity,lot_size,min_size):
         raise Halt('下单数量不足以安全拆分为两笔止盈，跳过')
     return format(first,'f'),format(second,'f')
 
-def make_plan(s,side,ticker,meta,atr,available,daily_remaining):
+def make_plan(s,side,ticker,meta,atr,available,daily_remaining,position_multiplier=1.0):
     s.validate()
     if side not in ('做多','做空') or not math.isfinite(atr) or atr<=0:
         raise Halt('无效信号或ATR')
+    if float(position_multiplier) not in (1.0,1.5,2.0):
+        raise Halt('评分仓位倍率必须是1 / 1.5 / 2')
     buy=side=='做多'; d=1 if buy else -1
     ask,bid=float(ticker['askPx']),float(ticker['bidPx'])
     if not 0<bid<=ask or (ask-bid)/bid>s.slippage_bps/10000:
@@ -106,7 +108,9 @@ def make_plan(s,side,ticker,meta,atr,available,daily_remaining):
     maker=s.fee_bps/10000; taker=s.taker_fee_bps/10000; slip=s.slippage_bps/10000
     # Maximum-loss sizing assumes maker entry + marketable/market stop exit + slippage budget.
     per_btc=abs(limit-float(sl))+limit*maker+float(sl)*(taker+slip)
-    risk=min(s.risk_usdt,s.capital*s.risk_pct/100,daily_remaining)
+    base_risk=min(s.risk_usdt,s.capital*s.risk_pct/100)
+    # Score tiers scale the base risk unit, but never bypass the daily remaining loss budget or the 5% absolute per-trade cap.
+    risk=min(base_risk*float(position_multiplier),daily_remaining,s.capital*.05)
     notional=min(s.max_notional,s.capital*s.leverage,available*.9*s.leverage)
     quantity=rounded(min(risk/per_btc,notional/limit)/unit,meta['lotSz'])
     if Decimal(quantity)<Decimal(meta['minSz']):
@@ -122,7 +126,8 @@ def make_plan(s,side,ticker,meta,atr,available,daily_remaining):
     cost_multiple=planned_reward_distance/expected_roundtrip_cost if expected_roundtrip_cost>0 else math.inf
     return dict(side=side,posSide='long' if buy else 'short',exchange_side='buy' if buy else 'sell',
         px=str(limit),sz=quantity,sl=sl,tp=tp2,tp1=tp1,tp2=tp2,tp1_sz=tp1_sz,tp2_sz=tp2_sz,
-        btc=btc,notional=btc*limit,estimated_loss=btc*per_btc,
+        btc=btc,notional=btc*limit,estimated_loss=btc*per_btc,position_multiplier=float(position_multiplier),
+        base_risk_budget=base_risk,effective_risk_budget=risk,
         expected_roundtrip_cost=btc*expected_roundtrip_cost,cost_multiple=cost_multiple,
         reward_r=2.0,breakeven_after_tp1=True)
 
@@ -212,7 +217,7 @@ class Engine:
         if self.store.data['streak']>=settings.consecutive_losses:
             self.emit('log',f'中国时间本日已连续亏损 {self.store.data["streak"]} 次：仅停止新开仓，次日自动恢复')
         self.candle_lag_count=0; self.candle_paused=False
-        self.emit('log','自动交易启动；V1.3.3评分沿用10分制；15m ATR止损；TP1=1R平50%，TP2=2R平余下50%；首个TP成交后由OKX自动把SL移动到成交均价保本；每根5m信号最多一次')
+        self.emit('log','自动交易启动；V1.3.4评分沿用10分制；15m ATR止损；TP1=1R平50%，TP2=2R平余下50%；首个TP成交后由OKX自动把SL移动到成交均价保本；每根5m信号最多一次')
 
     def stop(self):
         self.enabled=False; self.stopped=True
@@ -273,15 +278,16 @@ class Engine:
 
     def refresh_market(self):
         try:
-            q,h,m,f=self.x.candles('4H'),self.x.candles('1H'),self.x.candles('15m'),self.x.candles('5m')
+            d,q,h,m,f=self.x.candles('1Dutc'),self.x.candles('4H'),self.x.candles('1H'),self.x.candles('15m'),self.x.candles('5m')
+            check_latest('1D',d[-1]['t'],self.market_now(),86400000)
             check_latest('4H',q[-1]['t'],self.market_now(),14400000)
             check_latest('1H',h[-1]['t'],self.market_now(),3600000)
             check_latest('15m',m[-1]['t'],self.market_now(),900000)
             check_latest('5m',f[-1]['t'],self.market_now(),ENTRY_STEP)
         except CandleLag as exc:
             self._handle_candle_lag(exc)
-        value=signal(h,m,f,self.settings.score_threshold if self.settings else 4.0,self.settings.stop_atr if self.settings else 1.0,four=q)
-        self.market=dict(value,bar=f[-1]['t'],bar15=m[-1]['t'],bar1h=h[-1]['t'],bar4h=q[-1]['t'],close=f[-1]['c'])
+        value=signal(h,m,f,self.settings.score_threshold if self.settings else 3.5,self.settings.stop_atr if self.settings else 1.0,four=q,day=d)
+        self.market=dict(value,bar=f[-1]['t'],bar15=m[-1]['t'],bar1h=h[-1]['t'],bar4h=q[-1]['t'],bar1d=d[-1]['t'],close=f[-1]['c'])
         self.market_at=time.time()
         self.market_monotonic=time.monotonic()
         self._candle_recovered()
@@ -343,7 +349,8 @@ class Engine:
         ticker=self.x.ticker(); self.emit('ticker',ticker)
         if abs(float(ticker['last'])-market['close'])>.3*market['h']['atr']:
             self.emit('log','价格偏离信号超过0.3 ATR，本轮不追价'); return
-        plan=make_plan(s,market['side'],ticker,self.x.instrument(),market['m']['atr'],available,remaining)
+        multiplier=float(score.get('position_multiplier') or 1.0)
+        plan=make_plan(s,market['side'],ticker,self.x.instrument(),market['m']['atr'],available,remaining,multiplier)
         # Expected TP space must cover at least 2x estimated round-trip execution cost.
         if plan['cost_multiple'] < 2:
             state['last_bar']=market['bar']; self.store.save()
@@ -382,7 +389,7 @@ class Engine:
             ]}
         self.x.post('/api/v5/trade/order',body)
         self.store.record('提交开仓请求',state['active'])
-        self.emit('log',f"已提交逐仓限价开仓（{score.get('level','信号')} · {score['total']:g}/10）：TP1 1R平50% / TP2 2R平50% / SL 1×15m ATR；TP1后自动移保本")
+        self.emit('log',f"已提交逐仓限价开仓（{score.get('level','信号')} · {score['total']:g}/10 · {multiplier:g}×仓位）：TP1 1R平50% / TP2 2R平50% / SL 1×15m ATR；TP1后自动移保本")
         self.emit('plan',state['active'])
 
     def _cancel_pending_entry(self,p,reason):
@@ -462,7 +469,7 @@ class Engine:
             self.emit('log',f'仓位已归零；本轮USDT净权益变化 {pnl:+.4f}；中国时间连续亏损 {state["streak"]}/{self.settings.consecutive_losses}')
             return
         if not all(k in p for k in ('tp1','tp2','tp1_sz','tp2_sz','tp1_id','tp2_id','sl_id')):
-            raise Halt('检测到旧版活动仓位；V1.3.3不能接管旧TP/SL结构，请先在OKX完成或人工处理该仓位')
+            raise Halt('检测到旧版活动仓位；V1.3.4不能接管旧TP/SL结构，请先在OKX完成或人工处理该仓位')
         qty=sum(abs(float(r['pos'])) for r in positions)
         full=float(p['sz']); remaining=float(p['tp2_sz']); tol=1e-10
         if abs(qty-full)>tol and abs(qty-remaining)>tol:
@@ -494,11 +501,11 @@ class Engine:
                 self.emit('log',f'已核对TP1后保本止损：剩余50% SL={sl_px:g}（成交均价 {entry_avg:g}）')
         if protection_ok:
             if not p.get('protected'):
-                p['protected']=True; self.store.save(); self.emit('log','已核对V1.3.3分批TP与SL保护结构')
+                p['protected']=True; self.store.save(); self.emit('log','已核对V1.3.4分批TP与SL保护结构')
         else:
             grace=float(p.get('tp1_seen_at',p.get('filled_at',p['submitted'])))
             if time.time()-grace>15:
-                self.halt('V1.3.3分批止盈/保本止损保护状态无法核实，已锁住新开仓；请立即到OKX核对')
+                self.halt('V1.3.4分批止盈/保本止损保护状态无法核实，已锁住新开仓；请立即到OKX核对')
         self.emit('position',positions)
 
     def flatten(self):

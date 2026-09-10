@@ -33,13 +33,13 @@ class App:
         self.candle_wait_log=0
         self.log_lines=[]
         self.history_key=None; self.history_curve=[]
-        self.root.title('KAYTRADE 1.3.3 · BTC 策略控制台'); self.root.geometry('1200x920'); self.root.minsize(820,620)
+        self.root.title('KAYTRADE 1.3.4 · BTC 策略控制台'); self.root.geometry('1200x920'); self.root.minsize(820,620)
         theme(root)
         top=ttk.Frame(root,padding=15); top.pack(fill='x')
         mark(top).pack(side='left',padx=(0,12))
         brand=ttk.Frame(top); brand.pack(side='left')
         ttk.Label(brand,text='KAYTRADE',style='Title.TLabel').pack(anchor='w')
-        ttk.Label(brand,text='BTC / USDT   ·   V1.3.3 10分细分结构策略',style='Muted.TLabel').pack(anchor='w')
+        ttk.Label(brand,text='BTC / USDT   ·   V1.3.4 10分细分结构策略',style='Muted.TLabel').pack(anchor='w')
         self.status=tk.StringVar(value='默认停止 · 未连接')
         ttk.Label(top,textvariable=self.status,style='Muted.TLabel').pack(side='right')
         badges=ttk.Frame(root,padding=(15,0)); badges.pack(fill='x')
@@ -106,24 +106,26 @@ class App:
         self.account_view.grid(row=8,column=0,columnspan=2,sticky='nsew',pady=16); connection.rowconfigure(8,weight=1)
         defaults=asdict(Settings())
         # Separate V1.1 risk preferences; preserve all account state and locks.
-        settings_path=folder/'settings-v1.3.3.json'
-        previous_path=folder/'settings-v1.3.2.json'
+        settings_path=folder/'settings-v1.3.4.json'
+        previous_path=folder/'settings-v1.3.3.json'
         legacy_path=folder/'settings-v1.1.json'
         self.settings_path=settings_path
         source=settings_path if settings_path.exists() else previous_path if previous_path.exists() else legacy_path
         if source.exists():
             try:
                 loaded=json.loads(source.read_text())
-                defaults.update({k:v for k,v in loaded.items() if k in defaults})
-                if source==legacy_path:
-                    old_threshold=float(defaults.get('score_threshold',8))
-                    defaults['score_threshold']=max(4.0,min(9.0,round(old_threshold)/2))
+                for k,v in loaded.items():
+                    if k in defaults and (source==settings_path or k!='score_threshold'):
+                        defaults[k]=v
+                if source==settings_path:
+                    value=float(defaults.get('score_threshold',3.5))
+                    defaults['score_threshold']=max(3.5,min(10.0,round(value*2)/2))
                 else:
-                    value=float(defaults.get('score_threshold',4.0))
-                    defaults['score_threshold']=max(4.0,min(10.0,round(value*2)/2))
+                    # V1.3.4 intentionally starts its new score model at the new 3.5 default; preserve other user settings.
+                    defaults['score_threshold']=3.5
             except Exception:
                 pass
-        # V1.3.3 fixed execution economics are not user-editable.
+        # V1.3.4 fixed execution economics are not user-editable.
         defaults['fee_bps']=2.0; defaults['taker_fee_bps']=5.0; defaults['slippage_bps']=5.0; defaults['reward_r']=2.0
         # Consecutive-loss stop is the only fixed risk control in the Risk page.
         defaults['consecutive_losses']=3
@@ -137,7 +139,7 @@ class App:
             parent.columnconfigure(0,weight=1)
         add_fields(risk,'风险设置',[
             ('capital','策略资金预算 USDT'),('max_notional','最大名义仓位 USDT（不是保证金）'),
-            ('risk_usdt','单笔预估亏损上限 USDT'),('risk_pct','单笔风险上限 %（与USDT上限取较小值）'),
+            ('risk_usdt','基础单笔预估亏损 USDT'),('risk_pct','基础单笔风险 %（评分倍率前）'),
             ('daily_loss','中国时间日内权益回撤上限 USDT')])
         self.fields['consecutive_losses']=tk.StringVar(value='3')
         tk.Label(risk,text='中国时间连续亏损停开次数',wraplength=340,bg=PANEL,fg='#dbe6eb',
@@ -149,7 +151,7 @@ class App:
         RoundedButton(risk,text='校验并保存风险设置',command=self.save_settings,variant='accent',width=190).grid(row=8,column=0,columnspan=2,sticky='w')
         add_fields(execution,'交易执行参数',[
             ('leverage','逐仓杠杆 1—10倍'),('cooldown_minutes','平仓后冷却时间 分钟'),
-            ('stop_atr','15分钟 ATR 止损倍数 0.6—3'),('score_threshold','自动开仓评分阈值 4—10（0.5步进）')])
+            ('stop_atr','15分钟 ATR 止损倍数 0.6—3'),('score_threshold','自动开仓评分阈值 3.5—10（0.5步进）')])
         fixed=Card(execution,height=150,fill=PANEL_ALT); fixed.grid(row=5,column=0,columnspan=2,sticky='ew',pady=(18,10))
         card_label(fixed.body,text='固定执行成本',color=MUTED,size=10,bold=True).pack(anchor='w')
         card_label(fixed.body,text='Maker 0.02%   ·   Taker 0.05%   ·   滑点预算 0.05%',size=16,bold=True).pack(anchor='w',pady=(7,4))
@@ -166,7 +168,7 @@ class App:
         self.spark=tk.Canvas(quote.body,width=300,height=72,bg=PANEL,highlightthickness=0)
         self.spark.place(relx=1,y=4,anchor='ne')
         self.spark.create_text(150,36,text='连接后显示行情走势',fill=MUTED,font=('Helvetica',11))
-        self.signal=tk.StringVar(value='V1.3.3 最高10分 · 4H结构 → 1H环境 → 15m Setup → 5m Trigger · 默认≥4.0开仓')
+        self.signal=tk.StringVar(value='V1.3.4 最高10分 · 日线EMA位置 + 结构 + 极值回归 · 1H/4H逆势扣分 · 默认≥3.5开仓')
         ttk.Label(dash,textvariable=self.signal,wraplength=1080,style='Muted.TLabel').pack(anchor='w',pady=(0,10))
         cards=ttk.Frame(dash); cards.pack(fill='x',pady=(0,12))
         self.score_vars={}; self.gate_vars={}; self.score_bars={}
@@ -211,14 +213,14 @@ class App:
         self.score_scroll=WideScrollbar(score_tab,command=self.score_table.yview,width=20)
         self.score_table.configure(yscrollcommand=self.score_scroll.set); self.score_scroll.pack(side='right',fill='y',padx=(5,0))
         self.score_table.pack(fill='both',expand=True)
-        self.matrix=ttk.Treeview(indicator_tab,columns=('h','m','f'),show='tree headings',height=7)
-        self.matrix.heading('#0',text='指标',anchor='w'); self.matrix.heading('h',text='1小时',anchor='w'); self.matrix.heading('m',text='15分钟',anchor='w'); self.matrix.heading('f',text='5分钟',anchor='w')
-        self.matrix.column('#0',width=180,anchor='w'); self.matrix.column('h',width=170,anchor='w'); self.matrix.column('m',width=170,anchor='w'); self.matrix.column('f',width=170,anchor='w')
+        self.matrix=ttk.Treeview(indicator_tab,columns=('d','h','m','f'),show='tree headings',height=7)
+        self.matrix.heading('#0',text='指标',anchor='w'); self.matrix.heading('d',text='1日',anchor='w'); self.matrix.heading('h',text='1小时',anchor='w'); self.matrix.heading('m',text='15分钟',anchor='w'); self.matrix.heading('f',text='5分钟',anchor='w')
+        self.matrix.column('#0',width=150,anchor='w',stretch=True); self.matrix.column('d',width=145,anchor='w',stretch=True); self.matrix.column('h',width=145,anchor='w',stretch=True); self.matrix.column('m',width=145,anchor='w',stretch=True); self.matrix.column('f',width=145,anchor='w',stretch=True)
         self.indicator_scroll=WideScrollbar(indicator_tab,command=self.matrix.yview,width=20)
         self.matrix.configure(yscrollcommand=self.indicator_scroll.set); self.indicator_scroll.pack(side='right',fill='y',padx=(5,0))
         self.matrix.pack(fill='both',expand=True)
-        for field in ('ema20','ema50','ema200','rsi','atr','upper','middle','lower','k','d','j'):
-            self.matrix.insert('', 'end', iid=field,text=field.upper(),values=('—','—','—'))
+        for field in ('ema5','ema10','ema20','ema50','ema200','rsi','atr','upper','middle','lower','k','d','j'):
+            self.matrix.insert('', 'end', iid=field,text=field.upper(),values=('—','—','—','—'))
         self.position=tk.StringVar(value='本程序仓位：无 / 待核对')
         ttk.Label(dash,textvariable=self.position,wraplength=1050).pack(anchor='w',pady=10)
         actions=ttk.Frame(dash); actions.pack(fill='x',pady=8)
@@ -260,7 +262,7 @@ class App:
         self.plan_vars['sl'].set(px('sl'))
         self.plan_vars['tp1'].set(px('tp1'))
         self.plan_vars['tp2'].set(px('tp2'))
-        self.plan_vars['qty'].set(f"{data.get('btc',0):.6f} BTC")
+        self.plan_vars['qty'].set(f"{data.get('btc',0):.6f} BTC · {float(data.get('position_multiplier',1.0)):g}×")
         self.plan_vars['loss'].set(f"{data.get('estimated_loss',0):.2f} USDT")
 
     def emit(self,kind,data):
@@ -356,9 +358,9 @@ class App:
         except Exception as exc:
             messagebox.showerror('设置错误',str(exc)); return
         env='OKX模拟盘' if self.engine.x.demo else '真实账户'
-        summary=f'{env} / BTC-USDT-SWAP / 逐仓{s.leverage}倍\n资金预算{s.capital} USDT，最大名义仓位{s.max_notional} USDT\n单笔风险≤{min(s.risk_usdt,s.capital*s.risk_pct/100)} USDT（估计）\n中国时间日回撤{s.daily_loss} USDT，连亏{s.consecutive_losses}次停止新开仓\n止损{s.stop_atr}×15m ATR，止盈TP1=1R平50%，TP2=2R平余下50%；TP1后SL自动移到成交均价\n每个信号可自动下单，无需逐笔确认。\n使用专用子账户；必须确认当地账户有合约/API资格。\n本版本未经过真实资金/真实Mac验收，不保证盈利或止损成交价。'
+        summary=f'{env} / BTC-USDT-SWAP / 逐仓{s.leverage}倍\n资金预算{s.capital} USDT，最大名义仓位{s.max_notional} USDT\n基础单笔风险≤{min(s.risk_usdt,s.capital*s.risk_pct/100)} USDT；评分仓位倍率1×/1.5×/2×，最终仍受日回撤、最大名义仓位和资金5%绝对风险上限约束\n中国时间日回撤{s.daily_loss} USDT，连亏{s.consecutive_losses}次停止新开仓\n止损{s.stop_atr}×15m ATR，止盈TP1=1R平50%，TP2=2R平余下50%；TP1后SL自动移到成交均价\n每个信号可自动下单，无需逐笔确认。\n使用专用子账户；必须确认当地账户有合约/API资格。\n本版本未经过真实资金/真实Mac验收，不保证盈利或止损成交价。'
         token='LIVE' if not self.engine.x.demo else 'DEMO'
-        typed=simpledialog.askstring('启动全自动授权',summary+f'\n最高10分；最终评分 ≥ {s.score_threshold:g}/10 才进入开仓风控。4–5普通 / 5.5–6.5较强 / 7–8强 / 8.5+高共振；强逆势仅扣1.5分，无额外11分门槛。15m Setup≥0.5、5m Trigger≥0.5；前方结构<1R禁止开仓。\n\n同意上述参数请输入 '+token,parent=self.root)
+        typed=simpledialog.askstring('启动全自动授权',summary+f'\n最高10分；最终评分 ≥ {s.score_threshold:g}/10 才进入开仓风控。3.5–4.5=1×仓位 / 5.0–6.5=1.5× / 7.0–10=2×。1D EMA5/10/20支撑或压力最高分别+1/+2/+3且只取最高；1H与4H明显反向趋势各-1。15m Setup≥0.5、5m Trigger≥0.5；前方结构<1R禁止开仓。\n\n同意上述参数请输入 '+token,parent=self.root)
         if typed==token:
             self.submit('arm',s)
 
@@ -411,7 +413,7 @@ class App:
                     e.connect(); self.engine=e
                     self.network_paused=False; self.recovery_count=0
                     self.history_key=None; self.refresh_history()
-                    self.emit('log','开始加载4H / 1H / 15m / 5m指标历史K线，首次可能需数十秒')
+                    self.emit('log','开始加载1D / 4H / 1H / 15m / 5m指标历史K线，首次可能需数十秒')
                     e.refresh_market()
                 elif kind=='arm':
                     if not self.engine: raise Halt('先连接')
@@ -488,9 +490,9 @@ class App:
                         for a,b in zip(scores['做多']['items'],scores['做空']['items']):
                             self.score_table.insert('','end',text=a[0],values=(a[1],b[1],a[2]))
                     for k in self.matrix.get_children():
-                        self.matrix.item(k,values=(f"{data['h'][k]:,.2f}",f"{data['m'][k]:,.2f}",f"{data['f'][k]:,.2f}"))
+                        self.matrix.item(k,values=(f"{data['d'][k]:,.2f}",f"{data['h'][k]:,.2f}",f"{data['m'][k]:,.2f}",f"{data['f'][k]:,.2f}"))
                 elif kind=='plan':
-                    self.position.set(f"当前计划：{data['side']} · 入场 {data['px']} · SL {data['sl']} · TP1 {data['tp1']} / TP2 {data['tp2']}")
+                    self.position.set(f"当前计划：{data['side']} · {float(data.get('position_multiplier',1.0)):g}×仓位 · 入场 {data['px']} · SL {data['sl']} · TP1 {data['tp1']} / TP2 {data['tp2']}")
                     self.render_plan(data)
                 elif kind=='position':
                     self.position.set('交易所持仓：'+' / '.join(f"{p['posSide']} {p['pos']}张 · 浮盈亏 {p.get('upl','—')} USDT" for p in data))
