@@ -302,9 +302,6 @@ def _reconcile(self):
         self.emit('log', f'[ORDER] DONE：仓位已归零；本轮USDT净权益变化 {pnl:+.4f}；中国时间连续亏损 {state["streak"]}/{self.settings.consecutive_losses}')
         return
 
-    # Any outstanding market-close request owns the position until it is proven
-    # flat. Do not infer TP1 from an intermediate remaining size and never submit a
-    # second close while the first result is unknown/pending.
     for key, requested_key, label in (
         ('emergency_close_id','emergency_close_requested','保护异常安全平仓'),
         ('close_id','close_requested','手动市价平仓'),
@@ -427,6 +424,65 @@ def _flatten(self):
     self._submit_position_close(p, positions, mode='manual', reason='手动平仓')
 
 
+def _record_flat_trade_if_proven(self, p, order):
+    """Record PnL only when an exchange order proves the parent actually filled."""
+    if not order or Decimal(str(order.get('accFillSz') or '0')).copy_abs() <= 0:
+        return
+    equity, _ = self.x.balance()
+    pnl = equity - float(p.get('equity_before', equity))
+    self._reset_streak_day()
+    self.store.data['streak'] = self.store.data.get('streak', 0) + 1 if pnl < 0 else 0
+    self.store.record('人工核对平仓', dict(client_id=p.get('client_id',''), equity_change=pnl,
+                      side=p.get('side',''), px=p.get('px'), sz=p.get('sz'), score=p.get('score')))
+
+
+def _acknowledge(self):
+    """Unlock only after current, historical and position/algo evidence all reconcile."""
+    import engine
+    if self.enabled:
+        raise engine.Halt('先停止自动开仓')
+
+    positions = self.x.positions()
+    pending = self.x.orders()
+    algos = self.x.algos()
+    if positions or pending or algos:
+        raise engine.Halt('账户仍有BTC仓位/普通委托/策略委托；请先在OKX人工处理')
+
+    p = self.store.data.get('active') if self.store else None
+    if p:
+        direct = None
+        try:
+            direct = self.x.order(p.get('client_id',''), p.get('order_id',''))
+        except Exception as exc:
+            if str(getattr(exc,'code','')) != '51603':
+                raise
+
+        history = self.x.recent_orders() if hasattr(self.x, 'recent_orders') else []
+        historical = next((row for row in history if self._same_parent_order(row, p)), None)
+        evidence = direct or historical
+        if evidence:
+            status = str(evidence.get('state') or '')
+            if status not in ('filled','canceled','mmp_canceled'):
+                raise engine.Halt('原开仓订单仍不是终态，不可解除故障锁')
+            self._record_flat_trade_if_proven(p, evidence)
+        else:
+            age = time.time() - float(p.get('submitted', time.time()))
+            if not p.get('order_id') and age < UNKNOWN_WRITE_TIMEOUT:
+                raise engine.Halt(f'开仓POST结果仍在{int(UNKNOWN_WRITE_TIMEOUT)}秒安全核对窗口内；暂不可清除本地占位')
+            if p.get('order_id') and age < KNOWN_ORDER_MISSING_TIMEOUT:
+                raise engine.Halt(f'已取得ordId但仍在{int(KNOWN_ORDER_MISSING_TIMEOUT)}秒核对窗口内；暂不可解除故障锁')
+            self.store.record('人工确认无交易所订单', {
+                'client_id': p.get('client_id',''), 'order_id': p.get('order_id',''),
+                'phase': p.get('phase',''), 'age_seconds': age,
+                'checked': ['orders-pending','orders-history','order-detail','positions','algo-pending'],
+            })
+
+    self.store.data['active'] = None
+    self.store.data['halt'] = ''
+    self.store.save()
+    self.emit('log', '故障锁已解除：已交叉核对当前委托、历史订单、BTC仓位与全部策略委托；每日权益基准、连续亏损计数与信号去重仍保留')
+
+
 def apply():
     import engine
     import exchange
@@ -503,5 +559,6 @@ def apply():
     engine.Engine._submit_position_close = _submit_position_close
     engine.Engine.reconcile = _reconcile
     engine.Engine.flatten = _flatten
+    engine.Engine.acknowledge = _acknowledge
     engine.Engine._execution_halt_once = _halt_once
     engine.Engine._kaytrade_v135_execution_patch_applied = True
