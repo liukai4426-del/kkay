@@ -33,7 +33,7 @@ class App:
         self.candle_wait_log=0
         self.log_lines=[]
         self.history_key=None; self.history_curve=[]
-        self.root.title('OKX Local 1.2.2 · BTC 策略控制台'); self.root.geometry('1200x920'); self.root.minsize(1040,840)
+        self.root.title('OKX Local 1.2.3 · BTC 策略控制台'); self.root.geometry('1200x920'); self.root.minsize(1040,840)
         style=ttk.Style(); style.theme_use('clam')
         style.configure('.',font=('Helvetica',13),background='#101820',foreground='#e5eef5')
         style.configure('TEntry',fieldbackground='#192832',foreground='#e5eef5',padding=7,insertcolor='white')
@@ -58,7 +58,7 @@ class App:
         mark(top).pack(side='left',padx=(0,12))
         brand=ttk.Frame(top); brand.pack(side='left')
         ttk.Label(brand,text='OKX Local',style='Title.TLabel').pack(anchor='w')
-        ttk.Label(brand,text='BTC / USDT   ·   V1.2.2 稳定性修复版',style='Muted.TLabel').pack(anchor='w')
+        ttk.Label(brand,text='BTC / USDT   ·   V1.2.3 评分机制版',style='Muted.TLabel').pack(anchor='w')
         self.status=tk.StringVar(value='默认停止 · 未连接')
         ttk.Label(top,textvariable=self.status,style='Muted.TLabel').pack(side='right')
         badges=ttk.Frame(root,padding=(15,0)); badges.pack(fill='x')
@@ -151,7 +151,7 @@ class App:
         self.spark=tk.Canvas(quote.body,width=300,height=72,bg=PANEL,highlightthickness=0)
         self.spark.place(relx=1,y=4,anchor='ne')
         self.spark.create_text(150,36,text='连接后显示行情走势',fill=MUTED,font=('Helvetica',11))
-        self.signal=tk.StringVar(value='极值反转评分 · 等待已收盘1小时/15分钟K线')
+        self.signal=tk.StringVar(value='V1.2.3 10分制 · 等待已收盘1小时/15分钟/5分钟K线')
         ttk.Label(dash,textvariable=self.signal,wraplength=1080,style='Muted.TLabel').pack(anchor='w',pady=(0,10))
         cards=ttk.Frame(dash); cards.pack(fill='x',pady=(0,12))
         self.score_vars={}; self.gate_vars={}; self.score_bars={}
@@ -174,14 +174,14 @@ class App:
         score_scroll=ttk.Scrollbar(score_tab,orient='vertical',command=self.score_table.yview)
         self.score_table.configure(yscrollcommand=score_scroll.set); score_scroll.pack(side='right',fill='y')
         self.score_table.pack(fill='both',expand=True)
-        self.matrix=ttk.Treeview(indicator_tab,columns=('h','m'),show='tree headings',height=7)
-        self.matrix.heading('#0',text='指标'); self.matrix.heading('h',text='1小时'); self.matrix.heading('m',text='15分钟')
-        self.matrix.column('#0',width=180); self.matrix.column('h',width=200); self.matrix.column('m',width=200)
+        self.matrix=ttk.Treeview(indicator_tab,columns=('h','m','f'),show='tree headings',height=7)
+        self.matrix.heading('#0',text='指标'); self.matrix.heading('h',text='1小时'); self.matrix.heading('m',text='15分钟'); self.matrix.heading('f',text='5分钟')
+        self.matrix.column('#0',width=180); self.matrix.column('h',width=170); self.matrix.column('m',width=170); self.matrix.column('f',width=170)
         scroll=ttk.Scrollbar(indicator_tab,orient='vertical',command=self.matrix.yview)
         self.matrix.configure(yscrollcommand=scroll.set); scroll.pack(side='right',fill='y')
         self.matrix.pack(fill='both',expand=True)
         for field in ('ema20','ema50','ema200','rsi','atr','upper','middle','lower','k','d','j'):
-            self.matrix.insert('', 'end', iid=field,text=field.upper(),values=('—','—'))
+            self.matrix.insert('', 'end', iid=field,text=field.upper(),values=('—','—','—'))
         self.position=tk.StringVar(value='本程序仓位：无 / 待核对')
         ttk.Label(dash,textvariable=self.position,wraplength=1050).pack(anchor='w',pady=10)
         actions=ttk.Frame(dash); actions.pack(fill='x',pady=8)
@@ -287,7 +287,7 @@ class App:
         env='OKX模拟盘' if self.engine.x.demo else '真实账户'
         summary=f'{env} / BTC-USDT-SWAP / 逐仓{s.leverage}倍\n资金预算{s.capital} USDT，最大名义仓位{s.max_notional} USDT\n单笔风险≤{min(s.risk_usdt,s.capital*s.risk_pct/100)} USDT（估计）\nUTC日回撤{s.daily_loss} USDT，连亏{s.consecutive_losses}次停止新开仓\n止损{s.stop_atr}×ATR，止盈{s.reward_r}R\n每个信号可自动下单，无需逐笔确认。\n使用专用子账户；必须确认当地账户有合约/API资格。\n本版本未经过真实资金/真实Mac验收，不保证盈利或止损成交价。'
         token='LIVE' if not self.engine.x.demo else 'DEMO'
-        typed=simpledialog.askstring('启动全自动授权',summary+f'\nRSI双周期硬条件 + 评分 ≥ {s.score_threshold:g}/10\n\n同意上述参数请输入 '+token,parent=self.root)
+        typed=simpledialog.askstring('启动全自动授权',summary+f'\n10分制最终评分 ≥ {s.score_threshold:g}/10；RSI不再是硬门槛，1H强逆势会扣分。\n\n同意上述参数请输入 '+token,parent=self.root)
         if typed==token:
             self.submit('arm',s)
 
@@ -322,7 +322,7 @@ class App:
                     self.emit('network',f'恢复核对 {self.recovery_count}/2 · 不开仓')
                     if self.recovery_count<2: continue
                     if self.engine.store.data['active']: self.engine.reconcile()
-                    self.engine.store.data['last_bar']=int(self.engine.market_now()//900)*900000-900000
+                    self.engine.store.data['last_bar']=int(self.engine.market_now()//300)*300000-300000
                     self.engine.store.save()
                     self.network_paused=False
                     self.emit('log','网络已恢复并核对账户，仅恢复观察；请核对解除故障锁后重新授权，不补发错过的订单')
@@ -339,7 +339,7 @@ class App:
                     e.connect(); self.engine=e
                     self.network_paused=False; self.recovery_count=0
                     self.history_key=None; self.refresh_history()
-                    self.emit('log','开始加载指标历史K线，首次可能需数十秒')
+                    self.emit('log','开始加载1H / 15m / 5m指标历史K线，首次可能需数十秒')
                     e.refresh_market()
                 elif kind=='arm':
                     if not self.engine: raise Halt('先连接')
@@ -403,7 +403,7 @@ class App:
                         self.spark.create_line(*points,fill=GREEN,width=2)
                     self.spark.create_text(294,70,anchor='se',text='本次连接 · 最近行情采样',fill=MUTED,font=('Helvetica',9))
                 elif kind=='market':
-                    self.signal.set(time.strftime('%m-%d %H:%M',time.localtime((data['bar']+900000)/1000))+' 已收盘｜'+data['side']+'｜'+data['why'])
+                    self.signal.set(time.strftime('%m-%d %H:%M',time.localtime((data['bar']+300000)/1000))+' 5m已收盘｜'+data['side']+'｜'+data['why'])
                     for side,score in data.get('scores',{}).items():
                         self.score_vars[side].set(f"{score['total']} / 10")
                         self.score_bars[side]['value']=score['total']
@@ -414,7 +414,7 @@ class App:
                         for a,b in zip(scores['做多']['items'],scores['做空']['items']):
                             self.score_table.insert('','end',text=a[0],values=(a[1],b[1],a[2]))
                     for k in self.matrix.get_children():
-                        self.matrix.item(k,values=(f"{data['h'][k]:,.2f}",f"{data['m'][k]:,.2f}"))
+                        self.matrix.item(k,values=(f"{data['h'][k]:,.2f}",f"{data['m'][k]:,.2f}",f"{data['f'][k]:,.2f}"))
                 elif kind=='plan': self.position.set('本次计划：'+json.dumps(data,ensure_ascii=False))
                 elif kind=='position':
                     self.position.set('交易所持仓：'+' / '.join(f"{p['posSide']} {p['pos']}张 · 浮盈亏 {p.get('upl','—')} USDT" for p in data))
