@@ -3,8 +3,10 @@ import copy
 import json
 import math
 import time
+import uuid
 from dataclasses import asdict
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -19,9 +21,7 @@ class DailyRiskStop(RuntimeError):
 
 
 def _validate_settings(self):
-    """V1.3.5 validation with score threshold widened from 3.5-10 to 1-10."""
     from engine import Halt
-
     if not 1.0 <= self.score_threshold <= 10.0 or abs(self.score_threshold * 2 - round(self.score_threshold * 2)) > 1e-9:
         raise Halt('评分阈值必须是1—10之间、以0.5为步进')
     for name, value in asdict(self).items():
@@ -55,12 +55,10 @@ def _widgets(root):
 
 
 def _is_explicit_rejection(exc):
-    """Only a parsed POST rejection may prove that an exchange write was not accepted."""
     return bool(getattr(exc, 'write_rejected', False))
 
 
 def _score_tier(total, eligible=False):
-    """Make the advertised 1-10 threshold range internally consistent."""
     total = float(total)
     if total >= 7.0:
         return 2.0, '三级信号 · 2.0×仓位'
@@ -72,7 +70,6 @@ def _score_tier(total, eligible=False):
 
 
 def _remove_15m_setup_gate(original_signal, strategy_module):
-    """Return a signal wrapper where 15m Setup remains scored but never vetoes an entry."""
     def signal(*args, **kwargs):
         result = original_signal(*args, **kwargs)
         scores = result.get('scores', {})
@@ -90,22 +87,14 @@ def _remove_15m_setup_gate(original_signal, strategy_module):
             score['eligible'] = eligible
             score['level'] = level
             score['position_multiplier'] = multiplier if eligible else 0.0
-
             if blocked:
                 score['reason'] = f'前方强结构距离 {structure.get("front_r", 0):.2f}R < 1R，禁止开仓'
             elif not hard_trigger:
                 score['reason'] = f'5m Trigger {trigger:g}/1.0 < 0.5，等待入场触发'
             elif eligible:
-                score['reason'] = (
-                    f"{level} · {total:g}/{result.get('score_max', 10):g} 达标；"
-                    f"按 {multiplier:g}× 仓位进入执行与风险检查"
-                )
+                score['reason'] = f'{level} · {total:g}/{result.get("score_max", 10):g} 达标；按 {multiplier:g}× 仓位进入执行与风险检查'
             else:
-                score['reason'] = (
-                    f"{level} · {total:g}/{result.get('score_max', 10):g}，"
-                    f"未达开仓阈值 {required:g}"
-                )
-
+                score['reason'] = f'{level} · {total:g}/{result.get("score_max", 10):g}，未达开仓阈值 {required:g}'
         qualified = [side for side, score in scores.items() if score.get('eligible')]
         if len(qualified) == 1:
             selected = qualified[0]
@@ -114,11 +103,8 @@ def _remove_15m_setup_gate(original_signal, strategy_module):
         else:
             selected = '观望'
         result['side'] = selected
-        result['why'] = scores[selected]['reason'] if selected != '观望' else ' / '.join(
-            side + ': ' + score.get('reason', '') for side, score in scores.items()
-        )
+        result['why'] = scores[selected]['reason'] if selected != '观望' else ' / '.join(side + ': ' + score.get('reason', '') for side, score in scores.items())
         return result
-
     return signal
 
 
@@ -127,9 +113,7 @@ def _china_day():
 
 
 def _daily(self, equity):
-    """Latch a daily new-entry stop without turning it into a permanent fault lock."""
     import engine
-
     if not math.isfinite(equity) or equity <= 0:
         raise engine.Halt('账户权益无效')
     state = self.store.data
@@ -139,10 +123,8 @@ def _daily(self, equity):
     peak = float(state.get('peak') or equity)
     state['peak'] = max(equity, peak)
     self.store.save()
-
     if state.get('daily_stop_day') == day:
         raise DailyRiskStop('中国时间本日已达到权益回撤上限；停止新开仓，原有TP/SL继续生效，次日自动恢复')
-
     remaining = self.settings.daily_loss - max(0.0, state['peak'] - equity)
     if remaining <= 0:
         state['daily_stop_day'] = day
@@ -152,33 +134,22 @@ def _daily(self, equity):
 
 
 def _check_latest(bar, timestamp, now, step):
-    """Use OKX candle start timestamps; distinguish normal close settlement from true lag."""
     import candles
-
     expected = candles.expected_bar(now, step)
     if timestamp == expected:
         return
-
     latest_close = datetime.fromtimestamp((timestamp + step) / 1000, timezone.utc).strftime('%H:%M:%S UTC')
     expected_close = datetime.fromtimestamp((expected + step) / 1000, timezone.utc).strftime('%H:%M:%S UTC')
     current = datetime.fromtimestamp(now, timezone.utc).strftime('%H:%M:%S UTC')
     boundary = expected + step
-
     if timestamp == expected - step and 0 <= now * 1000 - boundary <= 45000:
-        raise candles.CandlePending(
-            f'{bar} 刚收盘，等待OKX确认最新K线：上一根已确认收盘 {latest_close}，'
-            f'本应确认收盘 {expected_close}，交易所时间 {current}；最多等待45秒，不使用未确认K线'
-        )
-
+        raise candles.CandlePending(f'{bar} 刚收盘，等待OKX确认最新K线：上一根已确认收盘 {latest_close}，本应确认收盘 {expected_close}，交易所时间 {current}；最多等待45秒，不使用未确认K线')
     lag = max(0.0, (expected - timestamp) / 1000)
-    raise candles.CandleLag(
-        f'{bar} K线持续过期/时间异常：上一根已确认收盘 {latest_close}，'
-        f'本应确认收盘 {expected_close}，交易所时间 {current}，落后 {lag:.0f}秒；不使用旧信号'
-    )
+    raise candles.CandleLag(f'{bar} K线持续过期/时间异常：上一根已确认收盘 {latest_close}，本应确认收盘 {expected_close}，交易所时间 {current}，落后 {lag:.0f}秒；不使用旧信号')
 
 
 def _market_split_tp_post(original_post):
-    """Force split TP to market and validate every successful trade-order acknowledgement."""
+    """Force Split TP to market and verify every /trade/order success response."""
     def post(self, path, body):
         payload = body
         if path == '/api/v5/trade/order' and isinstance(body, dict) and body.get('attachAlgoOrds'):
@@ -188,59 +159,44 @@ def _market_split_tp_post(original_post):
                 for item in tps:
                     item['tpOrdKind'] = 'condition'
                     item['tpOrdPx'] = '-1'
-
         reply = original_post(self, path, payload)
         if path != '/api/v5/trade/order':
             return reply
-
         import exchange
         row = reply[0] if isinstance(reply, list) and reply else None
         if not isinstance(row, dict):
-            raise exchange.APIError(
-                'OKX交易请求响应为空/结构异常；写入结果需核对，禁止重复提交',
-                method='POST', path=path)
-        order_id = str(row.get('ordId') or '')
-        if not order_id:
-            raise exchange.APIError(
-                'OKX交易请求响应缺少ordId；写入结果需核对，禁止重复提交',
-                method='POST', path=path)
+            raise exchange.APIError('OKX交易请求响应为空/结构异常；写入结果需核对，禁止重复提交', method='POST', path=path)
+        if not str(row.get('ordId') or ''):
+            raise exchange.APIError('OKX交易请求响应缺少ordId；写入结果需核对，禁止重复提交', method='POST', path=path)
         sent_client = str(payload.get('clOrdId') or '') if isinstance(payload, dict) else ''
         returned_client = str(row.get('clOrdId') or '')
         if sent_client and returned_client and sent_client != returned_client:
-            raise exchange.APIError(
-                'OKX交易请求返回的clOrdId与本地请求不一致；写入结果需核对，禁止重复提交',
-                method='POST', path=path)
+            raise exchange.APIError('OKX交易请求返回的clOrdId与本地请求不一致；写入结果需核对，禁止重复提交', method='POST', path=path)
         return reply
     return post
 
 
 def apply():
-    """Apply the V1.3.5 refinements once, before the desktop UI is instantiated."""
     import app
     import candles
     import engine
     import exchange
     import strategy
-
     if getattr(engine.Engine, '_kaytrade_v135_patch_applied', False):
         return
 
     engine.Settings.validate = _validate_settings
-
     original_strategy_signal = strategy.signal
     relaxed_signal = _remove_15m_setup_gate(original_strategy_signal, strategy)
     strategy.signal = relaxed_signal
     engine.signal = relaxed_signal
-
     candles.check_latest = _check_latest
     engine.check_latest = _check_latest
-
     original_exchange_post = exchange.Exchange.post
     exchange.Exchange.post = _market_split_tp_post(original_exchange_post)
 
     original_app_init = app.App.__init__
     original_app_stop = app.App.stop
-
     def app_init(self, *args, **kwargs):
         original_app_init(self, *args, **kwargs)
         try:
@@ -259,21 +215,16 @@ def apply():
                     widget.configure(text=NEW_THRESHOLD_LABEL)
             except Exception:
                 pass
-
     def app_stop(self):
-        # Mark stopped synchronously before the worker processes the stop task so
-        # a concurrent 5-second startup-buffer finally block cannot re-enable entry.
         if getattr(self, 'engine', None):
             self.engine.stopped = True
             self.engine.enabled = False
             self.engine.startup_buffer_until = 0.0
         return original_app_stop(self)
-
     app.App.__init__ = app_init
     app.App.stop = app_stop
 
     engine.Engine.daily = _daily
-
     original_engine_init = engine.Engine.__init__
     original_connect = engine.Engine.connect
     original_arm = engine.Engine.arm
@@ -326,19 +277,11 @@ def apply():
         p = self.store.data.get('active') if self.store else None
         cleared = False
         if isinstance(p, dict) and not p.get('order_id') and not p.get('filled') and getattr(exc, 'path', '') == '/api/v5/trade/order':
-            snapshot = {
-                'client_id': p.get('client_id', ''),
-                'side': p.get('side', ''),
-                'score': p.get('score'),
-                'submitted': p.get('submitted'),
-                'code': str(getattr(exc, 'code', '') or ''),
-                'reason': str(exc),
-            }
+            snapshot = {'client_id':p.get('client_id',''),'side':p.get('side',''),'score':p.get('score'),'submitted':p.get('submitted'),'code':str(getattr(exc,'code','') or ''),'reason':str(exc)}
             self.store.data['active'] = None
             self.store.save()
             self.store.record('OKX明确拒绝开仓', snapshot)
             cleared = True
-
         self.enabled = False
         self.startup_buffer_until = 0.0
         code = str(getattr(exc, 'code', '') or '')
@@ -377,21 +320,54 @@ def apply():
     def reconcile(self):
         result = original_reconcile(self)
         p = self.store.data.get('active') if self.store else None
-        if p and p.get('protected') and p.get('filled') and not p.get('market_tp_verified') and not p.get('tp1_done'):
+        if not p:
+            return result
+
+        # Verify market Split TP once the base engine has confirmed protection.
+        if p.get('protected') and p.get('filled') and not p.get('market_tp_verified') and not p.get('tp1_done'):
             algos = self.x.algos()
             by_id = {a.get('algoClOrdId'): a for a in algos if isinstance(a, dict) and a.get('state') == 'live'}
             t1 = by_id.get(p.get('tp1_id')); t2 = by_id.get(p.get('tp2_id'))
-            if not t1 or not t2:
-                return result
-            if str(t1.get('tpOrdPx') or '') != '-1' or str(t2.get('tpOrdPx') or '') != '-1':
-                self.halt('V1.3.5检测到TP不是市价执行；已锁住新开仓，请立即核对OKX保护单')
-                return result
-            p['market_tp_verified'] = True
-            self.store.save()
-            self.emit('log', '已核对TP1/TP2均为触发后市价止盈（tpOrdPx=-1），SL为市价止损；分批保护结构有效')
+            if t1 and t2:
+                if str(t1.get('tpOrdPx') or '') != '-1' or str(t2.get('tpOrdPx') or '') != '-1':
+                    self.halt('V1.3.5检测到TP不是市价执行；已锁住新开仓，请立即核对OKX保护单')
+                else:
+                    p['market_tp_verified'] = True
+                    self.store.save()
+                    self.emit('log', '已核对TP1/TP2均为触发后市价止盈（tpOrdPx=-1），SL为市价止损；分批保护结构有效')
+
+        # If a fully filled position has no verifiable protection after the base
+        # 15-second grace, don't leave it naked. Persist one emergency close ID
+        # BEFORE POST and never retry it automatically, regardless of outcome.
+        halt_reason = str(self.store.data.get('halt') or '')
+        if (p.get('filled') and '保护状态无法核实' in halt_reason and
+                not p.get('close_id') and not p.get('partial_close_id') and not p.get('emergency_close_id')):
+            positions = self.x.positions()
+            same = [r for r in positions if r.get('mgnMode') == 'isolated' and r.get('posSide') == p.get('posSide') and Decimal(str(r.get('pos') or '0')) != 0]
+            if len(same) == 1:
+                size = abs(Decimal(str(same[0].get('pos') or '0')))
+                if size > 0 and size <= Decimal(str(p.get('sz') or '0')):
+                    close_id = 'ec' + uuid.uuid4().hex[:28]
+                    p['emergency_close_id'] = close_id
+                    p['emergency_close_requested'] = time.time()
+                    p['emergency_close_reason'] = halt_reason
+                    self.store.save()
+                    body = {'instId':engine.INSTRUMENT,'tdMode':'isolated','posSide':p['posSide'],
+                            'side':'sell' if p['posSide']=='long' else 'buy','ordType':'market',
+                            'sz':format(size,'f'),'clOrdId':close_id}
+                    reply = self.x.post('/api/v5/trade/order', body)
+                    p['emergency_close_order_id'] = str(reply[0].get('ordId') or '')
+                    p['emergency_close_ack_at'] = time.time()
+                    self.store.save()
+                    self.store.record('保护异常自动安全平仓请求', {'client_id':p.get('client_id'),'close_id':close_id,'ordId':p['emergency_close_order_id'],'size':format(size,'f')})
+                    self.emit('log', '成交仓位的TP/SL保护超过15秒仍无法核实：已发送一次市价安全平仓；不会自动重复发送，请继续核对OKX')
         return result
 
     def flatten(self):
+        if self.store:
+            p = self.store.data.get('active')
+            if isinstance(p, dict) and (p.get('partial_close_id') or p.get('emergency_close_id')):
+                raise engine.Halt('已有自动安全平仓请求，禁止再发送第二笔手动平仓；请先在OKX核对结果')
         try:
             return original_flatten(self)
         except Exception as exc:
@@ -401,12 +377,7 @@ def apply():
                     rejected_id = p.get('close_id')
                     p.pop('close_id', None)
                     p.pop('close_requested', None)
-                    p['last_close_rejection'] = {
-                        'time': time.time(),
-                        'code': str(getattr(exc, 'code', '') or ''),
-                        'message': str(exc),
-                        'client_id': rejected_id,
-                    }
+                    p['last_close_rejection'] = {'time':time.time(),'code':str(getattr(exc,'code','') or ''),'message':str(exc),'client_id':rejected_id}
                     self.store.save()
                     self.store.record('手动平仓被OKX明确拒绝', p['last_close_rejection'])
                     self.emit('log', '手动市价平仓被OKX明确拒绝；未创建平仓单，已释放本地close_id，可在修正原因后再次手动提交')
