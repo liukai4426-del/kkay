@@ -1,10 +1,10 @@
-name: Apply KAYTRADE V1.3.2 UI Patch
+name: Apply KAYTRADE V1.3.2 Score Scroll Fix
 on:
   push:
     branches:
       - codex/v1-3-2-strategy
     paths:
-      - v132_scrollbar_patch.py
+      - v132_score_scroll_fix.py
       - .github/workflows/apply-v132-source.yml
 permissions:
   contents: write
@@ -16,14 +16,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Apply functional wide-scrollbar patch
-        run: python v132_scrollbar_patch.py
+      - name: Apply score detail scroll fix
+        run: python v132_score_scroll_fix.py
       - name: Syntax check
         run: python -m py_compile visual.py app.py desktop.py
-      - name: Commit V1.3.2 scrolling fix
+      - name: Commit V1.3.2 score scrolling fix
         run: |
           git config user.name "liukai4426-del"
           git config user.email "liukai4426@gmail.com"
-          git add visual.py app.py desktop.py
-          git commit -m "ui: fix V1.3.2 detail scrolling"
+          git add visual.py desktop.py
+          git commit -m "ui: repair V1.3.2 score detail scrolling"
           git push origin HEAD:codex/v1-3-2-strategy
