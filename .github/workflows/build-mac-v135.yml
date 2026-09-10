@@ -9,11 +9,13 @@ on:
       - app.py
       - desktop.py
       - v135_patch.py
+      - v135_execution_patch.py
       - test_engine.py
       - test_v134.py
       - test_v135.py
       - test_v135_execution.py
       - test_v135_safety2.py
+      - test_v135_order_state.py
       - RELEASE-1.3.5.md
       - .github/workflows/build-mac-v135.yml
   workflow_dispatch:
@@ -30,9 +32,11 @@ jobs:
         with:
           python-version: '3.13'
       - name: Compile V1.3.5 execution path
-        run: python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py desktop.py v135_patch.py test_v135_execution.py test_v135_safety2.py
-      - name: Run strategy and execution safety tests
+        run: python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py desktop.py v135_patch.py v135_execution_patch.py test_v135_execution.py test_v135_safety2.py test_v135_order_state.py
+      - name: Run preserved strategy and execution safety tests
         run: python -m unittest -v test_engine test_candles test_v134 test_v135 test_v135_execution test_v135_safety2
+      - name: Run hardened order-state tests in isolated process
+        run: python -m unittest -v test_v135_order_state
       - name: Verify V1.3.5 wiring
         run: |
           python - <<'PY'
@@ -40,13 +44,16 @@ jobs:
           import strategy
           assert strategy.SCORE_MAX == 10.0
           assert strategy.NORMAL_THRESHOLD == 3.5
-          e=Path('engine.py').read_text(); x=Path('exchange.py').read_text(); p=Path('v135_patch.py').read_text()
+          e=Path('engine.py').read_text(); x=Path('exchange.py').read_text(); p=Path('v135_patch.py').read_text(); xp=Path('v135_execution_patch.py').read_text(); d=Path('desktop.py').read_text()
           for token in ("state['active']['order_id']=order_id","_lookup_parent_order","51603：OKX暂未找到该订单"):
               assert token in e, token
-          for token in ("self.code=str(code or '')", "self.write_rejected=bool", "OKX订单级错误码"):
+          for token in ("self.code=str(code or '')", "self.write_rejected=bool", "OKX订单级错误码", "move_order_stop"):
               assert token in x, token
           for token in ("STARTUP_BUFFER_SECONDS = 5.0","_remove_15m_setup_gate","DailyRiskStop","tpOrdPx'] = '-1'","_is_explicit_rejection","emergency_close_id","不进入51603订单核对"):
               assert token in p, token
+          for token in ('UNKNOWN_WRITE_TIMEOUT = 60.0','SUBMIT_UNKNOWN','FLATTEN_WAIT','CLOSE_SENT','CANCEL_SENT','CLOSING_EMERGENCY','emergency_close_blocked'):
+              assert token in xp, token
+          assert 'apply_v135_execution_patch' in d
           print('PASS: V1.3.5 strategy/order/API safety wiring')
           PY
 
@@ -67,8 +74,9 @@ jobs:
         run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0'
       - name: Re-run execution tests on Intel Mac
         run: |
-          python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py desktop.py v135_patch.py test_v135_execution.py test_v135_safety2.py
+          python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py desktop.py v135_patch.py v135_execution_patch.py test_v135_execution.py test_v135_safety2.py test_v135_order_state.py
           python -m unittest -v test_engine test_candles test_v122 test_v132 test_v133 test_v134 test_v135 test_v135_execution test_v135_safety2
+          python -m unittest -v test_v135_order_state
       - name: Create application icon
         run: python build_icon.py
       - name: Build Intel application
