@@ -54,6 +54,14 @@ def smoke_test():
                 assert ui.score_bars['做多'].color == app.GREEN
                 assert ui.score_bars['做空'].color == app.RED
                 assert int(ui.score_bars['做空'].cget('highlightthickness')) == 0
+                assert ui.score_scroll.winfo_width() >= 18
+                assert ui.indicator_scroll.winfo_width() >= 18
+                extra=[]
+                for i in range(24): extra.append(ui.score_table.insert('','end',text=f'滚动测试 {i}',values=(0,0,0)))
+                root.update(); ui.score_table.yview('moveto',1.0); root.update()
+                assert ui.score_table.yview()[0] > 0, 'Score detail table did not scroll'
+                ui.score_table.yview('moveto',0.0)
+                for iid in extra: ui.score_table.delete(iid)
                 from engine import Store
                 from history import summarize
                 ledger=Store(Path(folder)/'fake-account.json')

@@ -14,7 +14,7 @@ from exchange import Exchange, NetworkError
 from engine import Engine, Settings, Halt
 from history import summarize
 from candles import CandlePending
-from visual import theme, Card, Tabs, mark, RoundedButton, RoundedEntry, RoundedCombobox, AnimatedScoreBar, ScoreTable, label as card_label, BG, PANEL, PANEL_ALT, FIELD, MUTED, GREEN, RED
+from visual import theme, Card, Tabs, mark, RoundedButton, RoundedEntry, RoundedCombobox, AnimatedScoreBar, ScoreTable, WideScrollbar, label as card_label, BG, PANEL, PANEL_ALT, FIELD, MUTED, GREEN, RED
 
 DATA=Path.home()/'Library'/'Application Support'/'OKXLocal'
 
@@ -168,14 +168,14 @@ class App:
         self.score_table=ScoreTable(score_tab,columns=('long','short','max'),show='tree headings',height=8)
         for key,title in (('#0','已收盘K线 · 评分条件'),('long','做多得分'),('short','做空得分'),('max','最高分')):
             self.score_table.heading(key,text=title,anchor='w'); self.score_table.column(key,width=300 if key=='#0' else 130,anchor='w')
-        score_scroll=ttk.Scrollbar(score_tab,orient='vertical',command=self.score_table.yview)
-        self.score_table.configure(yscrollcommand=score_scroll.set); score_scroll.pack(side='right',fill='y')
+        self.score_scroll=WideScrollbar(score_tab,command=self.score_table.yview,width=20)
+        self.score_table.configure(yscrollcommand=self.score_scroll.set); self.score_scroll.pack(side='right',fill='y',padx=(5,0))
         self.score_table.pack(fill='both',expand=True)
         self.matrix=ttk.Treeview(indicator_tab,columns=('h','m','f'),show='tree headings',height=7)
         self.matrix.heading('#0',text='指标',anchor='w'); self.matrix.heading('h',text='1小时',anchor='w'); self.matrix.heading('m',text='15分钟',anchor='w'); self.matrix.heading('f',text='5分钟',anchor='w')
         self.matrix.column('#0',width=180,anchor='w'); self.matrix.column('h',width=170,anchor='w'); self.matrix.column('m',width=170,anchor='w'); self.matrix.column('f',width=170,anchor='w')
-        scroll=ttk.Scrollbar(indicator_tab,orient='vertical',command=self.matrix.yview)
-        self.matrix.configure(yscrollcommand=scroll.set); scroll.pack(side='right',fill='y')
+        self.indicator_scroll=WideScrollbar(indicator_tab,command=self.matrix.yview,width=20)
+        self.matrix.configure(yscrollcommand=self.indicator_scroll.set); self.indicator_scroll.pack(side='right',fill='y',padx=(5,0))
         self.matrix.pack(fill='both',expand=True)
         for field in ('ema20','ema50','ema200','rsi','atr','upper','middle','lower','k','d','j'):
             self.matrix.insert('', 'end', iid=field,text=field.upper(),values=('—','—','—'))
