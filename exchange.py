@@ -82,11 +82,12 @@ class Exchange(Client):
             with self.opener.open(req,timeout=10) as response:
                 result=json.load(response)
         except urllib.error.HTTPError as exc:
-            # A completed HTTP 4xx response (except timeout/rate-limit semantics) is
-            # an explicit server-side rejection even if the body is HTML or omits an
-            # OKX code. This distinction is critical: deterministic rejections may
-            # release a pre-submit placeholder; network/5xx uncertainty never may.
-            suffix='只读请求失败，不会下单' if method=='GET' else '写入请求被拒绝' if 400<=exc.code<500 and exc.code not in (408,429) else '写入结果需核对，禁止重复提交'
+            # 408/429 and conflict-style 409/425 responses are kept ambiguous for
+            # trading writes. A conflict can mean the server has state related to
+            # this request, so fail closed and reconcile instead of assuming reject.
+            ambiguous_http={408,409,425,429}
+            rejected_http=400<=exc.code<500 and exc.code not in ambiguous_http
+            suffix='只读请求失败，不会下单' if method=='GET' else '写入请求被拒绝' if rejected_http else '写入结果需核对，禁止重复提交'
             code=''; msg=''
             try:
                 payload=json.loads(exc.read(4096))
@@ -96,7 +97,7 @@ class Exchange(Client):
             except Exception:
                 pass
             detail=(f' / OKX {code}' if code else '')+(f'：{msg}' if msg else '')
-            write_rejected=bool(method=='POST' and 400<=exc.code<500 and exc.code not in (408,429))
+            write_rejected=bool(method=='POST' and rejected_http)
             if write_rejected:
                 raise APIError(f'HTTP {exc.code}{detail}；{suffix}',code,True,exc.code,method,path) from None
             if exc.code in (408,429,500,502,503,504):
@@ -196,6 +197,11 @@ class Exchange(Client):
 
     def recent_orders(self):
         return self.get('/api/v5/trade/orders-history',{'instType':'SWAP','instId':INSTRUMENT,'limit':'100'},True)
+
+    def fills(self):
+        # Fills expose both ordId and clOrdId and can appear even when the order
+        # detail/history route is temporarily unable to resolve a recent order.
+        return self.get('/api/v5/trade/fills',{'instType':'SWAP','instId':INSTRUMENT,'limit':'100'},True)
 
     def ticker(self):
         r=self.get('/api/v5/market/ticker',{'instId':INSTRUMENT})[0]
