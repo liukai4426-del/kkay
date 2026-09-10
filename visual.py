@@ -53,14 +53,11 @@ class Card(tk.Canvas):
 
     def resize(self,event):
         w,h=event.width,event.height
-        self.delete('surface'); self.delete('shadow'); self.delete('shine')
-        r=min(20,max(10,h//3))
-        shadow=[r+3,5,w-r+1,5,w-1,5,w-1,r+3,w-1,h-r,w-1,h-1,w-r+1,h-1,r+3,h-1,3,h-1,3,h-r,3,r+3,3,5]
+        self.delete('surface')
+        r=min(20,max(8,h//3))
         points=[r,1,w-r,1,w-1,1,w-1,r,w-1,h-r,w-1,h-1,w-r,h-1,r,h-1,1,h-1,1,h-r,1,r,1,1]
-        self.create_polygon(shadow,smooth=True,splinesteps=24,fill='#05090c',outline='',tags='shadow')
-        self.create_polygon(points,smooth=True,splinesteps=24,fill=self.fill,outline='#22323a',width=1,tags='surface')
-        self.create_line(r+4,3,max(r+5,w-r-4),3,fill='#2a3b43',width=1,tags='shine')
-        self.tag_lower('shadow'); self.tag_lower('surface'); self.tag_raise('shine')
+        self.create_polygon(points,smooth=True,splinesteps=24,fill=self.fill,outline='',tags='surface')
+        self.tag_lower('surface')
         self.itemconfigure(self.window,width=max(1,w-36),height=max(1,h-32))
 
 
@@ -128,6 +125,10 @@ class RoundedButton(tk.Canvas):
         'neutral':('#1a2931','#223640','#2a414c',TEXT),
         'accent':('#0b7f61','#0da97d','#096f55','#ecfff8'),
         'danger':('#8b3347','#aa4056','#712b3b','#fff1f4'),
+        # Page tabs: unselected tabs visually return to the flat V1.3.2 header,
+        # while only the selected tab gets a rounded highlight.
+        'tab':(BG,'#10181e','#10181e',MUTED),
+        'tab_active':('#15382e','#184338','#12352d',GREEN),
     }
 
     def __init__(self,parent,text,command=None,variant='neutral',width=None,height=42,radius=14,font=None,**kwargs):
@@ -534,7 +535,7 @@ def mark(parent):
 
 
 class Tabs(tk.Frame):
-    """Rounded page navigation avoids Aqua ttk notebook artifacts."""
+    """V1.3.2-style flat page navigation with a rounded highlight only on the selected tab."""
     def __init__(self,parent,**kwargs):
         super().__init__(parent,bg=BG,bd=0,highlightthickness=0,**kwargs)
         self.nav=tk.Frame(self,bg=BG,bd=0,highlightthickness=0)
@@ -543,7 +544,7 @@ class Tabs(tk.Frame):
 
     def add(self,page,text):
         index=len(self.pages); self.pages.append(page)
-        button=RoundedButton(self.nav,text=text,command=lambda i=index:self.select(i),variant='neutral',
+        button=RoundedButton(self.nav,text=text,command=lambda i=index:self.select(i),variant='tab',
                              width=max(108,52+len(text)*18),height=38,radius=12,font=('Helvetica',11,'bold'))
         button.pack(side='left',padx=(0,7))
         self.buttons.append(button)
@@ -554,7 +555,7 @@ class Tabs(tk.Frame):
         index=page if isinstance(page,int) else self.pages.index(page)
         for p in self.pages:p.pack_forget()
         self.pages[index].pack(fill='both',expand=True); self.pages[index].lift(); self.active=index
-        for i,b in enumerate(self.buttons):b.configure(variant='accent' if i==index else 'neutral')
+        for i,b in enumerate(self.buttons):b.configure(variant='tab_active' if i==index else 'tab')
         self.event_generate('<<NotebookTabChanged>>')
         self.after_idle(lambda:self.repaint(self.pages[index]))
 
