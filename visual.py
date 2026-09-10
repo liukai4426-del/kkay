@@ -65,3 +65,31 @@ def mark(parent):
     c.create_oval(3,3,45,45,fill='#12362b',outline='#245044')
     c.create_line(14,30,23,18,30,26,36,15,fill=GREEN,width=3,joinstyle='round')
     return c
+
+class Tabs(tk.Frame):
+    """Plain page navigation avoids Aqua ttk notebook painting artifacts."""
+    def __init__(self,parent,**kwargs):
+        super().__init__(parent,bg=BG,**kwargs)
+        self.nav=tk.Frame(self,bg=BG)
+        self.nav.pack(fill='x',pady=(0,10))
+        self.pages=[]; self.buttons=[]; self.active=None
+
+    def add(self,page,text):
+        index=len(self.pages)
+        self.pages.append(page)
+        button=tk.Label(self.nav,text=text,bg=BG,fg=MUTED,font=('Helvetica',13),padx=20,pady=10,cursor='hand2')
+        button.pack(side='left',padx=(0,6))
+        button.bind('<Button-1>',lambda event:self.select(index))
+        self.buttons.append(button)
+        if self.active is None:self.select(index)
+
+    def select(self,page=None):
+        if page is None:return str(self.pages[self.active])
+        index=page if isinstance(page,int) else self.pages.index(page)
+        for p in self.pages:p.pack_forget()
+        self.pages[index].pack(fill='both',expand=True)
+        self.pages[index].lift()
+        self.active=index
+        for i,b in enumerate(self.buttons):
+            b.configure(bg='#15382e' if i==index else BG,fg=GREEN if i==index else MUTED)
+        self.event_generate('<<NotebookTabChanged>>')

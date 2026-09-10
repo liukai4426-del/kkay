@@ -13,7 +13,7 @@ from core import HOSTS, INSTRUMENT
 from exchange import Exchange, NetworkError
 from engine import Engine, Settings, Halt
 from history import summarize
-from visual import theme, Card, mark, BG, PANEL, MUTED, GREEN, RED
+from visual import theme, Card, Tabs, mark, BG, PANEL, MUTED, GREEN, RED
 
 DATA=Path.home()/'Library'/'Application Support'/'OKXLocal'
 
@@ -69,7 +69,7 @@ class App:
         ttk.Label(badges,textvariable=self.equity,padding=8).pack(side='right')
         note='本机执行 · 逐仓 / 单策略仓位 / 每单TP+SL · 测试版，尚未完成账户端到端验收'
         ttk.Label(root,text=note,padding=(15,5)).pack(fill='x')
-        book=ttk.Notebook(root); book.pack(fill='both',expand=True,padx=15,pady=10)
+        book=Tabs(root); book.pack(fill='both',expand=True,padx=15,pady=10)
         self.book=book
         # Raise the selected pane explicitly: Aqua Tk can leave a newly mapped
         # notebook pane behind its siblings even while inputs report mapped.
@@ -163,7 +163,7 @@ class App:
             card_label(card,variable=self.score_vars[side],size=28,color=color,bold=True).pack(anchor='w')
             self.score_bars[side]=ttk.Progressbar(card,maximum=10,style=('Long' if side=='做多' else 'Short')+'.Horizontal.TProgressbar'); self.score_bars[side].pack(fill='x',pady=5)
             card_label(card,variable=self.gate_vars[side],color=MUTED,size=10).pack(anchor='w')
-        detail=ttk.Notebook(dash); detail.pack(fill='both',expand=True)
+        detail=Tabs(dash); detail.pack(fill='both',expand=True)
         score_tab=ttk.Frame(detail); indicator_tab=ttk.Frame(detail)
         detail.add(score_tab,text='评分明细'); detail.add(indicator_tab,text='指标数值')
         self.score_table=ttk.Treeview(score_tab,columns=('long','short','max'),show='tree headings',height=7)
