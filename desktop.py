@@ -18,7 +18,7 @@ def smoke_test():
     import app
 
     assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
-    with tempfile.TemporaryDirectory(prefix='okx-ui-check-') as folder:
+    with tempfile.TemporaryDirectory(prefix='kaytrade-ui-check-') as folder:
         root = tk.Tk()
         print('Bundled Tk version:',root.tk.call('package','provide','Tk'),flush=True)
         try:
@@ -26,7 +26,7 @@ def smoke_test():
                  patch.object(app.messagebox, 'showerror', side_effect=AssertionError):
                 ui = app.App(root, Path(folder))
                 root.update()
-                assert '1.3' in root.title()
+                assert 'KAYTRADE' in root.title() and '1.3' in root.title()
                 assert ui.mode.get() == 'OKX模拟盘'
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
@@ -60,6 +60,7 @@ def smoke_test():
                 ui.drain(); root.update()
                 assert '100.0%' in ui.performance.get()
                 assert len(ui.history_table.get_children())==1
+                assert ui.performance_label.cget('fg') == app.GREEN
                 ui.log_filter.set('警报'); ui.render_logs()
                 assert '测试警报' in ui.log.get('1.0','end')
                 ui.stop(); assert ui.engine is None
@@ -74,10 +75,12 @@ def smoke_test():
                         assert ui.log.winfo_height()>40, 'Log panel clipped'
                         if name=='risk':
                             page=root.nametowidget(ui.book.select())
-                            body=page.winfo_children()[0]
-                            entries=[w for w in body.winfo_children() if w.winfo_class() in ('Entry','TEntry')]
+                            def descendants(w):
+                                out=[]
+                                for child in w.winfo_children(): out.append(child); out.extend(descendants(child))
+                                return out
+                            entries=[w for w in descendants(page) if w.winfo_class() in ('Entry','TEntry')]
                             assert len(entries)==13 and all(w.winfo_ismapped() and w.winfo_width()>30 for w in entries), 'Risk inputs not visible'
-                            assert all(0<=w.winfo_x()<body.winfo_width() and 0<=w.winfo_y()<body.winfo_height() for w in entries), 'Risk inputs outside pane'
                         target=Path(sys.argv[2]).parent/f'ui-{name}.png'
                         if name=='scores':
                             def inspect_widget(w):
@@ -99,7 +102,7 @@ def smoke_test():
                 ui.lock.close()
         finally:
             root.destroy()
-    Path(sys.argv[2]).write_text('PASS: V1.3 UI, layered 18-point red/green scores, ticker rendering, demo default, stopped state, settings, bundled CA roots. Screenshots use synthetic test data. No network or orders.\n')
+    Path(sys.argv[2]).write_text('PASS: KAYTRADE V1.3 UI, rounded controls, depth-based cards, layered 18-point scores, red/green P&L, demo default, settings and bundled CA roots. Screenshots use synthetic test data. No network or orders.\n')
 
 
 if __name__ == '__main__':

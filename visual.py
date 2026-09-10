@@ -77,7 +77,11 @@ class RoundedButton(tk.Canvas):
         self.radius=radius; self.button_height=height; self.font=font or ('Helvetica',12,'bold')
         estimated=max(112,32+len(text)*14)
         self.button_width=width or estimated
-        bg=kwargs.pop('bg',parent.cget('bg') if hasattr(parent,'cget') else BG)
+        try:
+            parent_bg=parent.cget('bg')
+        except Exception:
+            parent_bg=BG
+        bg=kwargs.pop('bg',parent_bg)
         super().__init__(parent,width=self.button_width,height=height,bg=bg,highlightthickness=0,borderwidth=0,cursor='hand2',**kwargs)
         self.bind('<Enter>',self._enter); self.bind('<Leave>',self._leave)
         self.bind('<ButtonPress-1>',self._press); self.bind('<ButtonRelease-1>',self._release)

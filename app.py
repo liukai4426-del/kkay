@@ -14,7 +14,7 @@ from exchange import Exchange, NetworkError
 from engine import Engine, Settings, Halt
 from history import summarize
 from candles import CandlePending
-from visual import theme, Card, Tabs, mark, BG, PANEL, MUTED, GREEN, RED
+from visual import theme, Card, Tabs, mark, RoundedButton, label as card_label, BG, PANEL, PANEL_ALT, FIELD, MUTED, GREEN, RED
 
 DATA=Path.home()/'Library'/'Application Support'/'OKXLocal'
 
@@ -33,31 +33,12 @@ class App:
         self.candle_wait_log=0
         self.log_lines=[]
         self.history_key=None; self.history_curve=[]
-        self.root.title('OKX Local 1.3 · BTC 策略控制台'); self.root.geometry('1200x920'); self.root.minsize(1040,840)
-        style=ttk.Style(); style.theme_use('clam')
-        style.configure('.',font=('Helvetica',13),background='#101820',foreground='#e5eef5')
-        style.configure('TEntry',fieldbackground='#192832',foreground='#e5eef5',padding=7,insertcolor='white')
-        style.configure('TCombobox',fieldbackground='#192832',foreground='#e5eef5',padding=5)
-        style.map('TCombobox',fieldbackground=[('readonly','#192832')],foreground=[('readonly','#e5eef5')])
-        style.configure('Treeview',background='#15212b',fieldbackground='#15212b',foreground='#dce7ee',rowheight=23,borderwidth=0)
-        style.configure('Horizontal.TProgressbar',troughcolor='#0d1921',background='#18e7a4',bordercolor='#0d1921',lightcolor='#18e7a4',darkcolor='#18e7a4',thickness=7)
-        style.configure('Treeview.Heading',background='#20303c',foreground='#95aab7',font=('Helvetica',11,'bold'))
-        style.map('Treeview',background=[('selected','#254b53')],foreground=[('selected','#ffffff')])
-        style.configure('TNotebook',background='#101820',borderwidth=0)
-        style.map('TNotebook.Tab',background=[('selected','#203a40'),('!selected','#17232e')],foreground=[('selected','#41e5af'),('!selected','#9caebb')])
-        style.configure('Card.TFrame',background='#172630')
-        style.configure('Card.TLabel',background='#172630',foreground='#a5b7c3')
-        style.configure('Score.TLabel',background='#172630',foreground='#41e5af',font=('Helvetica',25,'bold'))
-        style.configure('Accent.TButton',background='#205844',foreground='#7bffd0')
-        style.configure('Danger.TButton',background='#532e39',foreground='#ffb4b4')
-        style.configure('TButton',padding=8,background='#224255',foreground='white')
-        style.configure('Title.TLabel',font=('Helvetica',23,'bold'),foreground='#41e5af')
-        style.configure('TNotebook.Tab',padding=(18,10))
+        self.root.title('KAYTRADE 1.3 · BTC 策略控制台'); self.root.geometry('1200x920'); self.root.minsize(1040,840)
         theme(root)
         top=ttk.Frame(root,padding=15); top.pack(fill='x')
         mark(top).pack(side='left',padx=(0,12))
         brand=ttk.Frame(top); brand.pack(side='left')
-        ttk.Label(brand,text='OKX Local',style='Title.TLabel').pack(anchor='w')
+        ttk.Label(brand,text='KAYTRADE',style='Title.TLabel').pack(anchor='w')
         ttk.Label(brand,text='BTC / USDT   ·   V1.3 分层结构策略版',style='Muted.TLabel').pack(anchor='w')
         self.status=tk.StringVar(value='默认停止 · 未连接')
         ttk.Label(top,textvariable=self.status,style='Muted.TLabel').pack(side='right')
@@ -69,41 +50,48 @@ class App:
         self.env_label.pack(side='left')
         ttk.Label(badges,textvariable=self.network,padding=8).pack(side='left')
         ttk.Label(badges,textvariable=self.equity,padding=8).pack(side='right')
-        note='本机执行 · 逐仓 / 单策略仓位 / 每单TP+SL · 测试版，尚未完成账户端到端验收'
+        note='KAYTRADE · 本机执行 · 逐仓 / 单策略仓位 / 每单TP+SL · 测试版，尚未完成账户端到端验收'
         ttk.Label(root,text=note,padding=(15,5)).pack(fill='x')
         book=Tabs(root); book.pack(fill='both',expand=True,padx=15,pady=10)
         self.book=book
         # Raise the selected pane explicitly: Aqua Tk can leave a newly mapped
         # notebook pane behind its siblings even while inputs report mapped.
         book.bind('<<NotebookTabChanged>>',lambda event: root.nametowidget(book.select()).lift() if book.select() else None)
-        connection=ttk.Frame(book,padding=16); risk=ttk.Frame(book,padding=16); dash=ttk.Frame(book,padding=16)
-        book.add(connection,text='连接设置'); book.add(risk,text='风险参数'); book.add(dash,text='交易总览')
-        risk_body=tk.Frame(risk,bg=BG)
-        risk_body.pack(fill='both',expand=True)
-        risk=risk_body
-        history_tab=ttk.Frame(book,padding=16); book.add(history_tab,text='历史收益')
-        ttk.Label(history_tab,text='收益与胜率 / 本程序已平仓轮次',style='Title.TLabel').pack(anchor='w')
+        connection_page=ttk.Frame(book,padding=8); risk_page=ttk.Frame(book,padding=8); dash=ttk.Frame(book,padding=16)
+        book.add(connection_page,text='连接设置'); book.add(risk_page,text='风险参数'); book.add(dash,text='交易总览')
+        connection_surface=Card(connection_page,height=650); connection_surface.pack(fill='both',expand=True,pady=(0,4))
+        connection=connection_surface.body
+        risk_surface=Card(risk_page,height=650); risk_surface.pack(fill='both',expand=True,pady=(0,4))
+        risk=risk_surface.body
+        history_tab=ttk.Frame(book,padding=8); book.add(history_tab,text='历史收益')
+        history_summary=Card(history_tab,height=118); history_summary.pack(fill='x',pady=(0,10))
+        card_label(history_summary.body,text='历史收益 / 本程序已平仓轮次',color=MUTED,size=11,bold=True).pack(anchor='w')
         self.performance=tk.StringVar(value='等待连接账户 · 暂无记录')
-        ttk.Label(history_tab,textvariable=self.performance,font=('Helvetica',17),padding=(0,15)).pack(anchor='w')
-        ttk.Label(history_tab,text='收益口径：账户USDT权益变化估算，含费用/资金费；入出金和其他交易也会影响结果。\n胜率 = 盈利轮次 ÷ 全部已平仓轮次（含持平）；未成交订单与未平仓交易不计入。',wraplength=950).pack(anchor='w')
-        self.chart=tk.Canvas(history_tab,height=160,bg='#101d26',highlightthickness=0)
-        self.chart.pack(fill='x',pady=14); self.chart.bind('<Configure>',lambda event:self.draw_curve())
-        self.history_table=ttk.Treeview(history_tab,columns=('side','pnl','total','id'),show='tree headings',height=9)
+        self.performance_label=card_label(history_summary.body,variable=self.performance,size=19,bold=True)
+        self.performance_label.pack(anchor='w',pady=(6,2))
+        card_label(history_summary.body,text='盈利绿色 · 亏损红色 · 累计收益同样按正负显示',color=MUTED,size=10).pack(anchor='w')
+        history_chart=Card(history_tab,height=205); history_chart.pack(fill='x',pady=(0,10))
+        self.chart=tk.Canvas(history_chart.body,height=155,bg=PANEL,highlightthickness=0,borderwidth=0)
+        self.chart.pack(fill='both',expand=True); self.chart.bind('<Configure>',lambda event:self.draw_curve())
+        history_table_surface=Card(history_tab,height=300); history_table_surface.pack(fill='both',expand=True)
+        history_body=history_table_surface.body
+        self.history_table=ttk.Treeview(history_body,columns=('side','pnl','total','id'),show='tree headings',height=9)
         for key,title,width in (('#0','平仓记录时间（UTC）',210),('side','方向',80),('pnl','权益变化 USDT',140),('total','累计 USDT',140),('id','本程序订单号',240)):
-            self.history_table.heading(key,text=title); self.history_table.column(key,width=width)
-        hs=ttk.Scrollbar(history_tab,orient='vertical',command=self.history_table.yview)
+            self.history_table.heading(key,text=title,anchor='w'); self.history_table.column(key,width=width,anchor='w')
+        hs=ttk.Scrollbar(history_body,orient='vertical',command=self.history_table.yview)
         self.history_table.configure(yscrollcommand=hs.set); hs.pack(side='right',fill='y')
         self.history_table.pack(fill='both',expand=True)
-        self.history_table.tag_configure('win',foreground='#41e5af'); self.history_table.tag_configure('loss',foreground='#ff8b9d')
+        self.history_table.tag_configure('win',foreground=GREEN); self.history_table.tag_configure('loss',foreground=RED); self.history_table.tag_configure('flat',foreground=MUTED)
         self.host=tk.StringVar(value=HOSTS[0]); self.mode=tk.StringVar(value='OKX模拟盘')
         self.key=tk.StringVar(); self.secret=tk.StringVar(); self.phrase=tk.StringVar()
         self.connection_widgets=[]
+        tk.Label(connection,text='账户连接',bg=PANEL,fg='#eef5f7',font=('Helvetica',20,'bold'),anchor='w',bd=0).grid(row=0,column=0,columnspan=2,sticky='ew',pady=(0,12))
         rows=[('账户官方域名',self.host,HOSTS),('环境',self.mode,('OKX模拟盘','真实账户')),
               ('API Key',self.key,None),('Secret Key',self.secret,None),('Passphrase',self.phrase,None)]
         for i,(label,var,values) in enumerate(rows):
-            ttk.Label(connection,text=label).grid(row=i,column=0,sticky='w',pady=8)
+            ttk.Label(connection,text=label,style='Card.TLabel').grid(row=i+1,column=0,sticky='w',pady=8)
             widget=ttk.Combobox(connection,textvariable=var,values=values,state='readonly',width=48) if values else ttk.Entry(connection,textvariable=var,show='•',width=50)
-            widget.grid(row=i,column=1,sticky='ew',padx=12,pady=8); self.connection_widgets.append(widget)
+            widget.grid(row=i+1,column=1,sticky='ew',padx=12,pady=8); self.connection_widgets.append(widget)
         connection.columnconfigure(1,weight=1)
         text=('密钥仅保存在此次运行内存中，退出后需重新填写；不会发送给GPT/Gemini。\n'
               '使用专用交易子账户，不要与手动交易/其他机器人共用BTC仓位。\n'
@@ -111,9 +99,9 @@ class App:
               '模拟与真实账户密钥不可混用。地区/产品不支持时停止，不绕过限制。\n'
               '“测试连接”只读取账户与持仓，不下单。程序不接入原Sites网页。')
         ttk.Label(connection,text=text,wraplength=800,justify='left').grid(row=6,column=0,columnspan=2,sticky='w',pady=20)
-        ttk.Button(connection,text='测试连接（只读）',command=self.connect).grid(row=7,column=1,sticky='w')
-        ttk.Button(connection,text='网络自检（不下单）',command=self.diagnose).grid(row=7,column=0,sticky='w')
-        self.account_view=tk.Text(connection,height=9,wrap='word',bg='#0b1118',fg='#c8e5f5',font=('Menlo',12))
+        RoundedButton(connection,text='网络自检（不下单）',command=self.diagnose,variant='neutral',width=170).grid(row=7,column=0,sticky='w',pady=4)
+        RoundedButton(connection,text='测试连接（只读）',command=self.connect,variant='accent',width=170).grid(row=7,column=1,sticky='w',padx=12,pady=4)
+        self.account_view=tk.Text(connection,height=9,wrap='word',bg=PANEL_ALT,fg='#c8e5f5',font=('Menlo',12),bd=0,highlightthickness=0,padx=12,pady=10)
         self.account_view.grid(row=8,column=0,columnspan=2,sticky='nsew',pady=16); connection.rowconfigure(8,weight=1)
         defaults=asdict(Settings())
         # Separate V1.1 risk preferences; preserve all account state and locks.
@@ -129,6 +117,7 @@ class App:
             except Exception:
                 pass
         self.fields={}
+        tk.Label(risk,text='风险与执行参数',bg=PANEL,fg='#eef5f7',font=('Helvetica',20,'bold'),anchor='w',bd=0).grid(row=0,column=0,columnspan=4,sticky='ew',pady=(0,8))
         labels={'capital':'策略资金预算 USDT','max_notional':'最大名义仓位 USDT（不是保证金）',
                 'leverage':'逐仓杠杆 1—10倍','risk_usdt':'单笔预估亏损上限 USDT',
                 'risk_pct':'单笔预估亏损上限 %（取较小值）','daily_loss':'中国时间日内权益回撤上限 USDT',
@@ -137,17 +126,16 @@ class App:
                 'fee_bps':'单边手续费预算 bps（10=0.1%）','slippage_bps':'价差 / 市价退出滑点预算 bps',
                 'score_threshold':'自动开仓评分阈值 8—18（默认8）'}
         for i,(name,label) in enumerate(labels.items()):
-            col=0 if i<7 else 2; row=i%7
-            tk.Label(risk,text=label,wraplength=260,bg=BG,fg='#e5eef5',font=('Helvetica',13)).grid(row=row,column=col,sticky='w',padx=6,pady=12)
+            col=0 if i<7 else 2; row=i%7+1
+            tk.Label(risk,text=label,wraplength=260,bg=PANEL,fg='#dbe6eb',font=('Helvetica',13),bd=0,highlightthickness=0).grid(row=row,column=col,sticky='w',padx=6,pady=10)
             v=tk.StringVar(value=str(defaults[name])); self.fields[name]=v
-            tk.Entry(risk,textvariable=v,width=12,bg='#192832',fg='#e5eef5',insertbackground='white',font=('Helvetica',14),highlightthickness=1,highlightbackground='#49606c',relief='flat').grid(row=row,column=col+1,padx=8,pady=12,ipady=7)
-        ttk.Label(risk,text='停止后修改，下次启动生效。运行时不更改已有止盈止损。\n日亏损包含浮动盈亏/资金费及资金出入影响；达到上限暂停新开仓，不保证按上限成交。\n同一时间仅一个BTC仓位；单个TP目标全平，无分批止盈。',wraplength=850).grid(row=7,column=0,columnspan=4,sticky='w',pady=18)
-        ttk.Button(risk,text='校验并保存设置（不含密钥）',command=self.save_settings).grid(row=8,column=0,columnspan=4,sticky='w')
+            tk.Entry(risk,textvariable=v,width=12,bg=FIELD,fg='#e5eef5',insertbackground='#e5eef5',font=('Helvetica',14),highlightthickness=0,bd=0,relief='flat').grid(row=row,column=col+1,padx=8,pady=10,ipady=8)
+        ttk.Label(risk,text='停止后修改，下次启动生效。运行时不更改已有止盈止损。\n日亏损包含浮动盈亏/资金费及资金出入影响；达到上限暂停新开仓，不保证按上限成交。\n同一时间仅一个BTC仓位；单个TP目标全平，无分批止盈。',wraplength=850,style='Card.TLabel').grid(row=8,column=0,columnspan=4,sticky='w',pady=16)
+        RoundedButton(risk,text='校验并保存设置',command=self.save_settings,variant='accent',width=170).grid(row=9,column=0,columnspan=4,sticky='w')
         self.price=tk.StringVar(value='等待行情')
         self.updated=tk.StringVar(value='尚未连接 · 价格以交易所返回为准')
         quote=Card(dash,height=112); quote.pack(fill='x',pady=(0,10))
         self.quote=quote
-        from visual import label as card_label
         card_label(quote.body,text='BTC-USDT-SWAP',color=MUTED,size=11).pack(anchor='w')
         card_label(quote.body,variable=self.price,size=32,bold=True).pack(anchor='w')
         card_label(quote.body,variable=self.updated,color=MUTED,size=10).pack(anchor='w')
@@ -174,13 +162,13 @@ class App:
         detail.add(score_tab,text='评分明细'); detail.add(indicator_tab,text='指标数值')
         self.score_table=ttk.Treeview(score_tab,columns=('long','short','max'),show='tree headings',height=8)
         for key,title in (('#0','已收盘K线 · 评分条件'),('long','做多得分'),('short','做空得分'),('max','最高分')):
-            self.score_table.heading(key,text=title); self.score_table.column(key,width=300 if key=='#0' else 130)
+            self.score_table.heading(key,text=title,anchor='w'); self.score_table.column(key,width=300 if key=='#0' else 130,anchor='w')
         score_scroll=ttk.Scrollbar(score_tab,orient='vertical',command=self.score_table.yview)
         self.score_table.configure(yscrollcommand=score_scroll.set); score_scroll.pack(side='right',fill='y')
         self.score_table.pack(fill='both',expand=True)
         self.matrix=ttk.Treeview(indicator_tab,columns=('h','m','f'),show='tree headings',height=7)
-        self.matrix.heading('#0',text='指标'); self.matrix.heading('h',text='1小时'); self.matrix.heading('m',text='15分钟'); self.matrix.heading('f',text='5分钟')
-        self.matrix.column('#0',width=180); self.matrix.column('h',width=170); self.matrix.column('m',width=170); self.matrix.column('f',width=170)
+        self.matrix.heading('#0',text='指标',anchor='w'); self.matrix.heading('h',text='1小时',anchor='w'); self.matrix.heading('m',text='15分钟',anchor='w'); self.matrix.heading('f',text='5分钟',anchor='w')
+        self.matrix.column('#0',width=180,anchor='w'); self.matrix.column('h',width=170,anchor='w'); self.matrix.column('m',width=170,anchor='w'); self.matrix.column('f',width=170,anchor='w')
         scroll=ttk.Scrollbar(indicator_tab,orient='vertical',command=self.matrix.yview)
         self.matrix.configure(yscrollcommand=scroll.set); scroll.pack(side='right',fill='y')
         self.matrix.pack(fill='both',expand=True)
@@ -189,17 +177,16 @@ class App:
         self.position=tk.StringVar(value='本程序仓位：无 / 待核对')
         ttk.Label(dash,textvariable=self.position,wraplength=1050).pack(anchor='w',pady=10)
         actions=ttk.Frame(dash); actions.pack(fill='x',pady=8)
-        ttk.Button(actions,text='▶  启动自动交易',command=self.arm,style='Accent.TButton').pack(side='left',padx=3)
-        ttk.Button(actions,text='停止新开仓',command=self.stop).pack(side='left',padx=3)
-        ttk.Button(actions,text='仅平本程序仓位',command=self.flatten,style='Danger.TButton').pack(side='left',padx=3)
-        ttk.Button(actions,text='核对后解除故障锁',command=self.ack).pack(side='left',padx=3)
+        self.trade_button=RoundedButton(actions,text='▶  启动自动交易',command=self.toggle_auto,variant='accent',width=190); self.trade_button.pack(side='left',padx=3)
+        RoundedButton(actions,text='仅平本程序仓位',command=self.flatten,variant='danger',width=180).pack(side='left',padx=3)
+        RoundedButton(actions,text='核对后解除故障锁',command=self.ack,variant='neutral',width=180).pack(side='left',padx=3)
         ttk.Label(dash,text='规则策略 · 未调用GPT/Gemini · 断网/睡眠后不开新仓，已生效的交易所保护单保留。',wraplength=900,font=('Helvetica',10)).pack(anchor='w',pady=4)
         filterbar=ttk.Frame(root,padding=(15,0)); filterbar.pack(fill='x')
         ttk.Label(filterbar,text='运行日志').pack(side='left')
         self.log_filter=tk.StringVar(value='全部')
         selector=ttk.Combobox(filterbar,textvariable=self.log_filter,values=('全部','警报'),state='readonly',width=10)
         selector.pack(side='right'); selector.bind('<<ComboboxSelected>>',lambda event:self.render_logs())
-        self.log=tk.Text(root,height=3,bg=PANEL,fg='#a9d8bf',font=('Menlo',11),wrap='word',state='disabled',relief='flat',highlightthickness=1,highlightbackground='#223038',padx=12,pady=8)
+        self.log=tk.Text(root,height=3,bg=PANEL,fg='#a9d8bf',font=('Menlo',11),wrap='word',state='disabled',relief='flat',highlightthickness=0,bd=0,padx=12,pady=8)
         self.log.tag_configure('alarm',foreground='#ff9d96'); self.log.tag_configure('log',foreground='#9acbb9')
         self.log.pack(fill='x',padx=15,pady=(0,12))
         # Reserve the footer before allocating the flexible content area.
@@ -267,8 +254,9 @@ class App:
         low=min(values); high=max(values); span=max(high-low,1e-8)
         coords=[]
         for i,value in enumerate(values): coords.extend((30+i*w/(len(values)-1),130-(value-low)/span*h))
-        self.chart.create_line(*coords,fill='#41e5af',width=2)
-        self.chart.create_text(30,10,anchor='nw',text=f'累计权益变化估算：{values[-1]:+.4f} USDT',fill='#cfe9e0')
+        final=values[-1]; color=GREEN if final>0 else RED if final<0 else MUTED
+        self.chart.create_line(*coords,fill=color,width=2)
+        self.chart.create_text(30,10,anchor='nw',text=f'累计权益变化估算：{final:+.4f} USDT',fill=color)
 
     def refresh_history(self):
         if not self.engine or not self.engine.store: return
@@ -276,6 +264,19 @@ class App:
         key=(str(path),path.stat().st_mtime_ns if path.exists() else 0)
         if key!=self.history_key:
             self.emit('history',summarize(path)); self.history_key=key
+
+    def toggle_auto(self):
+        if self.engine and self.engine.enabled:
+            self.stop()
+        else:
+            self.arm()
+
+    def update_trade_button(self):
+        button=getattr(self,'trade_button',None)
+        if not button:
+            return
+        running=bool(self.engine and self.engine.enabled)
+        button.configure(text='■  停止新开仓' if running else '▶  启动自动交易',variant='danger' if running else 'accent')
 
     def arm(self):
         if not self.engine:
@@ -298,6 +299,7 @@ class App:
     def stop(self):
         if self.engine:
             self.engine.enabled=False  # immediate flag, even while a read request is pending
+        self.update_trade_button()
         self.tasks.put(('stop',None))
 
     def flatten(self):
@@ -382,17 +384,19 @@ class App:
         try:
             while True:
                 kind,data=self.events.get_nowait()
-                if kind=='done': self.busy=False
+                if kind=='done': self.busy=False; self.update_trade_button()
                 elif kind=='history':
                     rate='—' if data['win_rate'] is None else f"{data['win_rate']:.1f}%"
                     self.performance.set(f"累计 {data['total']:+.4f} USDT   |   胜率 {rate}   |   已平 {data['count']}轮   盈 {data['wins']} / 亏 {data['losses']} / 平 {data['breakeven']}")
+                    self.performance_label.configure(fg=GREEN if data['total']>0 else RED if data['total']<0 else MUTED)
                     self.history_curve=data['curve']; self.draw_curve()
                     for item in self.history_table.get_children(): self.history_table.delete(item)
                     for row in reversed(data['rows']):
-                        self.history_table.insert('','end',text=row['time'][:19].replace('T',' '),values=(row['side'],f"{row['pnl']:+.4f}",f"{row['cumulative']:+.4f}",row['client_id']),tags=('win' if row['pnl']>=0 else 'loss',))
+                        tag='win' if row['pnl']>0 else 'loss' if row['pnl']<0 else 'flat'
+                        self.history_table.insert('','end',text=row['time'][:19].replace('T',' '),values=(row['side'],f"{row['pnl']:+.4f}",f"{row['cumulative']:+.4f}",row['client_id']),tags=(tag,))
                     if data['skipped']: self.emit('log',f"历史记录有 {data['skipped']} 行损坏，已跳过；统计可能不完整")
                 elif kind=='network': self.network.set('网络：'+data)
-                elif kind=='status': self.status.set(data)
+                elif kind=='status': self.status.set(data); self.update_trade_button()
                 elif kind=='candle_wait': self.signal.set(str(data))
                 elif kind=='ticker':
                     self.price.set(f"{float(data['last']):,.2f} USDT")
@@ -438,7 +442,7 @@ class App:
                         f.write(line+'\n')
                     os.chmod(self.folder/'events.log',0o600)
                     if kind=='alarm':
-                        self.status.set('故障锁定：停止新开仓'); self.root.bell()
+                        self.status.set('故障锁定：停止新开仓'); self.update_trade_button(); self.root.bell()
         except queue.Empty:
             pass
         self.root.after(150,self.drain)

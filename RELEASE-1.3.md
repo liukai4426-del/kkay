@@ -12,3 +12,11 @@
 - V1.2.2 的K线、网络、仓位和保护单 fail-closed 安全机制继续保留。
 
 测试版仍未完成真实资金端到端验收，不保证盈利、限价成交或止损成交价格。
+
+## KAYTRADE UI refresh
+- Product name is KAYTRADE; the existing OKXLocal Application Support folder is intentionally retained so settings, locks and history are not orphaned.
+- All visible action buttons use rounded controls; start/stop is a single green/red state button.
+- Cards and inputs use tonal depth instead of light outlines.
+- Score detail and indicator tables are left aligned.
+- Connection, risk and history pages use the same card language as the trading overview.
+- Historical profit is green, loss is red, and cumulative performance/curve follows the total sign.
