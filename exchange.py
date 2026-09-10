@@ -14,18 +14,20 @@ from core import Client, HOSTS, INSTRUMENT
 from candles import CandleCache
 
 class APIError(RuntimeError):
-    def __init__(self,message,code='',deterministic=False,http_status=None):
+    def __init__(self,message,code='',deterministic=False,http_status=None,method='',path=''):
         super().__init__(message)
         self.code=str(code or '')
-        # deterministic=True means OKX explicitly rejected the request and no
-        # ambiguous transport outcome remains. Callers may safely clear a
-        # pre-submit placeholder, but must never infer this for network errors.
         self.deterministic=bool(deterministic)
         self.http_status=http_status
+        self.method=str(method or '')
+        self.path=str(path or '')
+        # Only an explicit POST rejection may prove that a write was not accepted.
+        # Read/query errors must never clear an ambiguous pre-submit placeholder.
+        self.write_rejected=bool(self.deterministic and self.method=='POST')
 
 class NetworkError(APIError):
-    def __init__(self,message,code='',http_status=None):
-        super().__init__(message,code,False,http_status)
+    def __init__(self,message,code='',http_status=None,method='',path=''):
+        super().__init__(message,code,False,http_status,method,path)
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
@@ -61,15 +63,15 @@ class Exchange(Client):
     def _request_once(self, method, path, params=None, private=False):
         allowed={'/api/v5/trade/order','/api/v5/trade/cancel-order','/api/v5/account/set-leverage'}
         if method not in ('GET','POST') or (method=='POST' and path not in allowed):
-            raise APIError('不允许此写入操作')
+            raise APIError('不允许此写入操作',method=method,path=path)
         if not path.startswith('/api/v5/') or '?' in path:
-            raise APIError('非法路径')
+            raise APIError('非法路径',method=method,path=path)
         target=path+('?' + urllib.parse.urlencode(params) if method=='GET' and params else '')
         raw=json.dumps(params,separators=(',',':')) if method=='POST' else ''
         headers={'Content-Type':'application/json','User-Agent':'OKXMac/1.0','Accept':'application/json'}
         if private:
             if not all((self.key,self.secret,self.phrase)):
-                raise APIError('请填写API Key、Secret、Passphrase')
+                raise APIError('请填写API Key、Secret、Passphrase',method=method,path=path)
             timestamp=datetime.fromtimestamp(self.server_now(),timezone.utc).isoformat(timespec='milliseconds').replace('+00:00','Z')
             signature=base64.b64encode(hmac.new(self.secret.encode(),(timestamp+method+target+raw).encode(),hashlib.sha256).digest()).decode()
             headers.update({'OK-ACCESS-KEY':self.key,'OK-ACCESS-SIGN':signature,
@@ -80,7 +82,7 @@ class Exchange(Client):
             with self.opener.open(req,timeout=10) as response:
                 result=json.load(response)
         except urllib.error.HTTPError as exc:
-            suffix='只读请求失败，不会下单' if method=='GET' else '写入请求被拒绝' if 400<=exc.code<500 and exc.code!=408 else '写入结果需核对，禁止重复提交'
+            suffix='只读请求失败，不会下单' if method=='GET' else '写入请求被拒绝' if 400<=exc.code<500 and exc.code not in (408,) else '写入结果需核对，禁止重复提交'
             code=''; msg=''
             try:
                 payload=json.loads(exc.read(4096))
@@ -90,15 +92,14 @@ class Exchange(Client):
             except Exception:
                 pass
             detail=(f' / OKX {code}' if code else '')+(f'：{msg}' if msg else '')
-            # 4xx (except request-timeout) with a structured OKX response is an
-            # explicit rejection. 5xx/408 remain ambiguous because the write may
-            # have reached the matching engine before the transport failed.
-            deterministic=bool(code and 400<=exc.code<500 and exc.code!=408)
-            if deterministic:
-                raise APIError(f'HTTP {exc.code}{detail}；{suffix}',code,True,exc.code) from None
+            # For POST only: structured 4xx (except 408) proves explicit rejection.
+            # GET 429/5xx remain retryable NetworkError; POST 5xx/408 remain ambiguous.
+            write_rejected=bool(method=='POST' and code and 400<=exc.code<500 and exc.code!=408)
+            if write_rejected:
+                raise APIError(f'HTTP {exc.code}{detail}；{suffix}',code,True,exc.code,method,path) from None
             if exc.code in (408,429,500,502,503,504):
-                raise NetworkError(f'HTTP {exc.code}{detail}；{suffix}',code,exc.code) from None
-            raise APIError(f'HTTP {exc.code}{detail}；{suffix}',code,False,exc.code) from None
+                raise NetworkError(f'HTTP {exc.code}{detail}；{suffix}',code,exc.code,method,path) from None
+            raise APIError(f'HTTP {exc.code}{detail}；{suffix}',code,False,exc.code,method,path) from None
         except (urllib.error.URLError, TimeoutError, ssl.SSLError, OSError) as exc:
             cause=exc.reason if isinstance(exc,urllib.error.URLError) else exc
             category=('TLS证书验证失败' if isinstance(cause,ssl.SSLCertVerificationError) else
@@ -106,26 +107,27 @@ class Exchange(Client):
                       'DNS解析失败' if isinstance(cause,socket.gaierror) else
                       '连接超时' if isinstance(cause,TimeoutError) else '网络连接失败')
             suffix='只读请求失败，不会下单' if method=='GET' else '写入结果未知，请在OKX核对，禁止重复提交'
-            error=APIError if isinstance(cause,ssl.SSLCertVerificationError) else NetworkError
-            raise error(category+'；'+suffix) from None
+            if isinstance(cause,ssl.SSLCertVerificationError):
+                raise APIError(category+'；'+suffix,method=method,path=path) from None
+            raise NetworkError(category+'；'+suffix,method=method,path=path) from None
         except Exception as exc:
-            raise APIError('HTTPS连接失败：'+type(exc).__name__+'；若刚提交订单，结果可能未知，请勿重复提交') from None
+            raise APIError('HTTPS连接失败：'+type(exc).__name__+'；若刚提交订单，结果可能未知，请勿重复提交',method=method,path=path) from None
         if result.get('code')!='0':
             code=str(result.get('code') or '')
             msg=str(result.get('msg') or '')[:160]
             if code=='51603':
-                raise APIError('OKX错误码 51603：订单不存在或暂未可查询',code,True)
+                raise APIError('OKX错误码 51603：订单不存在或暂未可查询',code,False,None,method,path)
             suffix=('：'+msg) if msg else ''
-            raise APIError('OKX错误码 '+code+suffix,code,True)
+            raise APIError('OKX错误码 '+code+suffix,code,method=='POST',None,method,path)
         data=result.get('data')
         if not isinstance(data,list):
-            raise APIError('OKX响应结构异常')
+            raise APIError('OKX响应结构异常',method=method,path=path)
         for row in data:
             if isinstance(row,dict) and row.get('sCode') not in (None,'0'):
                 code=str(row.get('sCode') or '')
                 msg=str(row.get('sMsg') or '')[:160]
                 suffix=('：'+msg) if msg else ''
-                raise APIError('OKX订单级错误码 '+code+suffix,code,True)
+                raise APIError('OKX订单级错误码 '+code+suffix,code,method=='POST',None,method,path)
         return data
 
     def get(self,path,params=None,private=False):
@@ -182,7 +184,7 @@ class Exchange(Client):
             raise APIError('订单查询缺少ordId/clOrdId')
         rows=self.get('/api/v5/trade/order',params,True)
         if not rows:
-            raise APIError('OKX错误码 51603：订单不存在或暂未可查询','51603',True)
+            raise APIError('OKX错误码 51603：订单不存在或暂未可查询','51603')
         return rows[0]
 
     def recent_orders(self):
