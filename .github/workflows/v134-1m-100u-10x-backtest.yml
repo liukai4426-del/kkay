@@ -1,0 +1,45 @@
+name: KAYTRADE V1.3.4 One-Month BTC 100U 10x Backtest
+on:
+  push:
+    branches:
+      - analysis/v134-1m-100u-10x-backtest-20260911
+    paths:
+      - analysis_v134_1m_100u_10x.py
+      - .github/workflows/v134-1m-100u-10x-backtest.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backtest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Verify V1.3.4 backtest wiring
+        run: |
+          python -m py_compile strategy.py core.py engine.py analysis_v134_1m_100u_10x.py
+          python - <<'PY'
+          import strategy
+          import analysis_v134_1m_100u_10x as b
+          assert strategy.SCORE_MAX == 10.0
+          assert strategy.NORMAL_THRESHOLD == 3.5
+          assert b.S.capital == 100.0 and b.S.leverage == 10 and b.S.max_notional == 1000.0
+          assert b.S.reward_r == 2.0
+          assert b.S.fee_bps == 2.0 and b.S.taker_fee_bps == 5.0 and b.S.slippage_bps == 5.0
+          print('V1.3.4 one-month runner verified')
+          PY
+      - name: Run BTC one-month backtest
+        run: python analysis_v134_1m_100u_10x.py | tee v134_1m_100u_10x_console.txt
+      - name: Upload report and trades
+        uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.3.4-1M-100U-10x-Backtest
+          path: |
+            v134_1m_100u_10x_report.json
+            v134_1m_100u_10x_trades.csv
+            v134_1m_100u_10x_console.txt
+          if-no-files-found: error
+          retention-days: 14
