@@ -1,4 +1,4 @@
-"""V1.2.3 closed-candle reversal score: 10 points, no RSI hard gate."""
+"""V1.2.3 closed-candle reversal score: natural 12-point maximum, no RSI hard gate."""
 import math
 from core import indicators
 
@@ -55,6 +55,7 @@ def signal(hour, quarter, five=None, threshold=7):
         volume_boll, volume_ratio = _volume_boll_return(quarter, m, buy)
         kdj_point = mf['kdj']
         ema_point = ff['ema']
+        reversal_point = mf['reversal']
 
         strong_opposite = (
             hc['c'] < h['ema200'] and h['ema20'] < h['ema50'] and h['down']
@@ -67,9 +68,11 @@ def signal(hour, quarter, five=None, threshold=7):
             directional_environment = hf['confirmed'] or h['rsi'] >= 55 or hc['c'] <= h['ema20']
         hour_support = (not strong_opposite) and directional_environment
 
-        # Rebalanced to preserve a true 10-point maximum: 5m = +1,
-        # 5m+15m = +2. 1H remains an environment/penalty layer.
-        if ff['confirmed'] and mf['confirmed']:
+        # Natural cumulative scoring: timeframe confluence is stair-stepped once.
+        # 5m = +1; 5m+15m = +2; 5m+15m+1H environment = +3.
+        if ff['confirmed'] and mf['confirmed'] and hour_support:
+            multi = 3
+        elif ff['confirmed'] and mf['confirmed']:
             multi = 2
         elif ff['confirmed']:
             multi = 1
@@ -82,14 +85,15 @@ def signal(hour, quarter, five=None, threshold=7):
             ('15m BOLL外破回归 + 成交量≥20均量×1.3', 2 * int(volume_boll), 2),
             ('15m KDJ J值 + K/D交叉确认', int(kdj_point), 1),
             ('5m 重新穿越 EMA20', int(ema_point), 1),
-            ('5m / 15m 多周期确认', multi, 2),
+            ('15m 反转K线确认', int(reversal_point), 1),
+            ('5m / 15m / 1H 多周期确认', multi, 3),
             ('1H 强逆势惩罚', -2 * int(strong_opposite), 0),
         ]
         raw = sum(item[1] for item in items)
-        total = max(0, min(10, raw))
+        total = max(0, min(12, raw))
         eligible = total >= threshold
-        reason = (f'评分 {total}/10 达标；仍需执行风控检查' if eligible
-                  else f'评分 {total}/10，未达 {threshold:g}')
+        reason = (f'评分 {total}/12 达标；仍需执行风控检查' if eligible
+                  else f'评分 {total}/12，未达 {threshold:g}')
         results[side] = dict(total=total, raw=raw, gate=True, eligible=eligible,
                              items=items, reason=reason,
                              confirmations={'5m': ff['confirmed'], '15m': mf['confirmed'],

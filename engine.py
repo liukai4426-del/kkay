@@ -47,8 +47,8 @@ class Settings:
     slippage_bps:float=5
 
     def validate(self):
-        if int(self.score_threshold)!=self.score_threshold or not 7<=self.score_threshold<=10:
-            raise Halt('评分阈值必须是7—10的整数')
+        if int(self.score_threshold)!=self.score_threshold or not 7<=self.score_threshold<=12:
+            raise Halt('评分阈值必须是7—12的整数')
         for name,value in asdict(self).items():
             if not isinstance(value,(int,float)) or not math.isfinite(value) or value<=0:
                 raise Halt(name+' 必须是有限正数')
@@ -317,7 +317,7 @@ class Engine:
                 'slTriggerPx':plan['sl'],'slOrdPx':'-1','tpTriggerPxType':'last','slTriggerPxType':'last'}]}
         self.x.post('/api/v5/trade/order',body)
         self.store.record('提交开仓请求',state['active'])
-        self.emit('log',f"已提交逐仓FOK开仓请求（评分 {score['total']}/10），附带TP/SL；尚不代表成交或保护单生效")
+        self.emit('log',f"已提交逐仓FOK开仓请求（评分 {score['total']}/12），附带TP/SL；尚不代表成交或保护单生效")
         self.emit('plan',state['active'])
 
     def reconcile(self):

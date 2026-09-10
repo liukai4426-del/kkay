@@ -42,10 +42,10 @@ class Scores(unittest.TestCase):
         with patch('strategy.indicators',side_effect=indicators), patch('strategy._period',side_effect=periods), patch('strategy._volume_boll_return',side_effect=volumes):
             return signal(hour,quarter,quarter,threshold)
 
-    def test_full_long_scores_ten(self):
-        r=self.score(full=True); self.assertEqual(r['scores']['做多']['total'],10); self.assertEqual(r['side'],'做多')
-    def test_full_short_scores_ten(self):
-        r=self.score(buy=False,full=True); self.assertEqual(r['scores']['做空']['total'],10); self.assertEqual(r['side'],'做空')
+    def test_full_long_scores_twelve(self):
+        r=self.score(full=True); self.assertEqual(r['scores']['做多']['total'],12); self.assertEqual(r['side'],'做多')
+    def test_full_short_scores_twelve(self):
+        r=self.score(buy=False,full=True); self.assertEqual(r['scores']['做空']['total'],12); self.assertEqual(r['side'],'做空')
     def test_rsi_is_points_not_gate(self):
         r=self.score(full=False,rsi_extreme=False)
         self.assertTrue(r['scores']['做多']['gate']); self.assertEqual(r['scores']['做多']['items'][0][1],0)
@@ -58,8 +58,8 @@ class Scores(unittest.TestCase):
         m=dict(rsi=19,lower=90,upper=110); f=dict(rsi=50); p={}
         rows=[dict(o=100,h=101,l=99,c=100),dict(o=95,h=100,l=89,c=96)]
         hfeat=dict(kdj=False,ema=False,reversal=False,confirmed=False)
-        mfeat=dict(kdj=True,ema=False,reversal=False,confirmed=True)
-        ffeat=dict(kdj=False,ema=False,reversal=True,confirmed=True)
+        mfeat=dict(kdj=False,ema=False,reversal=False,confirmed=True)
+        ffeat=dict(kdj=False,ema=False,reversal=False,confirmed=True)
         off=dict(kdj=False,ema=False,reversal=False,confirmed=False)
         with patch('strategy.indicators',side_effect=[h,m,f,p,p,p]), patch('strategy._period',side_effect=[hfeat,mfeat,ffeat,off,off,off]), patch('strategy._volume_boll_return',side_effect=[(False,1.0),(False,1.0)]):
             r=signal(rows,rows,rows,7)
@@ -68,16 +68,16 @@ class Scores(unittest.TestCase):
         r=self.score(full=True,strong_opposite=True)
         items=dict((name,pts) for name,pts,_ in r['scores']['做多']['items'])
         self.assertEqual(items['1H 强逆势惩罚'],-2)
-        self.assertEqual(r['scores']['做多']['total'],8)
+        self.assertEqual(r['scores']['做多']['total'],9)
     def test_integer_points_and_bounds(self):
         for buy in (True,False):
             row=self.score(buy=buy,full=True)['scores']['做多' if buy else '做空']
-            self.assertGreaterEqual(row['total'],0); self.assertLessEqual(row['total'],10)
+            self.assertGreaterEqual(row['total'],0); self.assertLessEqual(row['total'],12)
             self.assertTrue(all(isinstance(i[1],int) for i in row['items']))
     def test_defaults(self):
         s=Settings(); self.assertEqual((s.score_threshold,s.stop_atr,s.reward_r),(7,1.0,1.5))
     def test_threshold_validation(self):
-        for n in (0,6,7.5,11):
+        for n in (0,6,7.5,13):
             with self.assertRaises(Halt): replace(Settings(),score_threshold=n).validate()
 
 class Network(unittest.TestCase):

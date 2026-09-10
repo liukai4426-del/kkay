@@ -131,7 +131,7 @@ class App:
                 'consecutive_losses':'连续亏损停机次数','cooldown_minutes':'平仓后冷却时间 分钟',
                 'stop_atr':'15分钟ATR止损倍数 0.6—3','reward_r':'止盈距离 / 止损距离 1—5',
                 'fee_bps':'单边手续费预算 bps（10=0.1%）','slippage_bps':'FOK限价偏移 / SL滑点预算 bps',
-                'score_threshold':'自动开仓评分阈值 7—10（整数）'}
+                'score_threshold':'自动开仓评分阈值 7—12（默认7）'}
         for i,(name,label) in enumerate(labels.items()):
             col=0 if i<7 else 2; row=i%7
             tk.Label(risk,text=label,wraplength=260,bg=BG,fg='#e5eef5',font=('Helvetica',13)).grid(row=row,column=col,sticky='w',padx=6,pady=12)
@@ -151,7 +151,7 @@ class App:
         self.spark=tk.Canvas(quote.body,width=300,height=72,bg=PANEL,highlightthickness=0)
         self.spark.place(relx=1,y=4,anchor='ne')
         self.spark.create_text(150,36,text='连接后显示行情走势',fill=MUTED,font=('Helvetica',11))
-        self.signal=tk.StringVar(value='V1.2.3 10分制 · 等待已收盘1小时/15分钟/5分钟K线')
+        self.signal=tk.StringVar(value='V1.2.3 自然累计最高12分 · ≥7开仓 · 等待已收盘1小时/15分钟/5分钟K线')
         ttk.Label(dash,textvariable=self.signal,wraplength=1080,style='Muted.TLabel').pack(anchor='w',pady=(0,10))
         cards=ttk.Frame(dash); cards.pack(fill='x',pady=(0,12))
         self.score_vars={}; self.gate_vars={}; self.score_bars={}
@@ -160,15 +160,15 @@ class App:
             card=surface.body
             color=GREEN if side=='做多' else RED
             card_label(card,text=side+' / LONG' if side=='做多' else side+' / SHORT',color=color,size=11,bold=True).pack(anchor='w')
-            self.score_vars[side]=tk.StringVar(value='— / 10')
+            self.score_vars[side]=tk.StringVar(value='— / 12')
             self.gate_vars[side]=tk.StringVar(value='等待评分；不是胜率')
             card_label(card,variable=self.score_vars[side],size=28,color=color,bold=True).pack(anchor='w')
-            self.score_bars[side]=ttk.Progressbar(card,maximum=10,style=('Long' if side=='做多' else 'Short')+'.Horizontal.TProgressbar'); self.score_bars[side].pack(fill='x',pady=5)
+            self.score_bars[side]=ttk.Progressbar(card,maximum=12,style=('Long' if side=='做多' else 'Short')+'.Horizontal.TProgressbar'); self.score_bars[side].pack(fill='x',pady=5)
             card_label(card,variable=self.gate_vars[side],color=MUTED,size=10).pack(anchor='w')
         detail=Tabs(dash); detail.pack(fill='both',expand=True)
         score_tab=ttk.Frame(detail); indicator_tab=ttk.Frame(detail)
         detail.add(score_tab,text='评分明细'); detail.add(indicator_tab,text='指标数值')
-        self.score_table=ttk.Treeview(score_tab,columns=('long','short','max'),show='tree headings',height=7)
+        self.score_table=ttk.Treeview(score_tab,columns=('long','short','max'),show='tree headings',height=8)
         for key,title in (('#0','已收盘K线 · 评分条件'),('long','做多得分'),('short','做空得分'),('max','最高分')):
             self.score_table.heading(key,text=title); self.score_table.column(key,width=300 if key=='#0' else 130)
         score_scroll=ttk.Scrollbar(score_tab,orient='vertical',command=self.score_table.yview)
@@ -287,7 +287,7 @@ class App:
         env='OKX模拟盘' if self.engine.x.demo else '真实账户'
         summary=f'{env} / BTC-USDT-SWAP / 逐仓{s.leverage}倍\n资金预算{s.capital} USDT，最大名义仓位{s.max_notional} USDT\n单笔风险≤{min(s.risk_usdt,s.capital*s.risk_pct/100)} USDT（估计）\nUTC日回撤{s.daily_loss} USDT，连亏{s.consecutive_losses}次停止新开仓\n止损{s.stop_atr}×15m ATR，止盈{s.reward_r}R（同一15m ATR风险距离）\n每个信号可自动下单，无需逐笔确认。\n使用专用子账户；必须确认当地账户有合约/API资格。\n本版本未经过真实资金/真实Mac验收，不保证盈利或止损成交价。'
         token='LIVE' if not self.engine.x.demo else 'DEMO'
-        typed=simpledialog.askstring('启动全自动授权',summary+f'\n10分制最终评分 ≥ {s.score_threshold:g}/10；RSI不再是硬门槛，1H强逆势会扣分。\n\n同意上述参数请输入 '+token,parent=self.root)
+        typed=simpledialog.askstring('启动全自动授权',summary+f'\n自然累计最高12分；最终评分 ≥ {s.score_threshold:g}/12 即进入开仓风控；RSI不再是硬门槛，1H强逆势会扣分。\n\n同意上述参数请输入 '+token,parent=self.root)
         if typed==token:
             self.submit('arm',s)
 
@@ -405,7 +405,7 @@ class App:
                 elif kind=='market':
                     self.signal.set(time.strftime('%m-%d %H:%M',time.localtime((data['bar']+300000)/1000))+' 5m已收盘｜'+data['side']+'｜'+data['why'])
                     for side,score in data.get('scores',{}).items():
-                        self.score_vars[side].set(f"{score['total']} / 10")
+                        self.score_vars[side].set(f"{score['total']} / 12")
                         self.score_bars[side]['value']=score['total']
                         self.gate_vars[side].set(score['reason'])
                     for item in self.score_table.get_children(): self.score_table.delete(item)

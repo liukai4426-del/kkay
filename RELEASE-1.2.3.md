@@ -1,34 +1,29 @@
 # OKX Local V1.2.3
 
-## Current scoring revision
+## Expanded natural scoring
 
-V1.2.3 remains a 10-point scoring system with a default automatic-entry threshold of 7/10.
+V1.2.3 no longer compresses the score back to 10. The positive signal weights are kept at their natural values, for a theoretical maximum of 12 points. The default automatic-entry threshold remains exactly 7 points.
 
 - 15m + 1H RSI extreme combination: +2.
 - 15m Bollinger touch + RSI oversold/overbought: +2.
-- 15m Bollinger outer-band rejection back inside the band + current volume >= 1.3x the prior 20-bar average: +2.
+- 15m Bollinger rejection back inside the band + current volume >= 1.3x the prior 20-bar average: +2.
 - 15m KDJ J-value + K/D cross: +1.
 - 5m EMA20 reclaim/break: +1.
-- Multi-timeframe confirmation: 5m = +1; 5m + 15m = +2 maximum.
-- 1H strong opposite trend: -2.
-- RSI is not a hard gate; exactly 7 is eligible for the separate safety/risk checks.
+- 15m reversal candle: +1.
+- Multi-timeframe confirmation, counted once: 5m = +1; 5m + 15m = +2; 5m + 15m + 1H environment = +3.
+- Strong opposite 1H trend: -2.
+- Final score is clamped to 0-12. Exactly 7 remains eligible for the separate safety/risk checks.
 
-The volume rule requires rejection back inside the Bollinger band. A high-volume candle that continues closing outside the band is not scored as a reversal.
+The volume rule only scores a rejection that returns inside the Bollinger band. A high-volume candle that keeps closing outside the band is not treated as a reversal.
 
 ## ATR risk revision
 
-- Opening SL distance now uses the latest closed 15m ATR rather than 1H ATR.
+- Opening SL distance uses the latest closed 15m ATR.
 - Default stop distance is 1.0 x 15m ATR for new/default settings.
-- TP remains reward-R based (default 1.5R), so it is derived from the same 15m ATR stop distance.
-- Existing saved user risk settings are preserved; the app does not silently overwrite a previously saved stop multiplier.
+- TP remains reward-R based (default 1.5R), derived from the same 15m ATR stop distance.
+- Existing saved user risk settings are preserved.
 
-## Timeframes
-
-- 5m: entry confirmation and signal-deduplication boundary.
-- 15m: primary reversal structure, volume confirmation and ATR risk reference.
-- 1H: market environment and strong-opposite penalty.
-
-## Safety behavior retained from V1.2.2
+## Safety behavior retained
 
 Closed-candle checks, exchange-clock calibration, CandlePending/CandleLag/CandleStale behavior, unknown-order/position/protection fail-closed locks, isolated margin checks, FOK entry behavior and attached exchange TP/SL remain unchanged. A high score never overrides those safety checks.
 

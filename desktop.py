@@ -47,8 +47,8 @@ def smoke_test():
                     ui.emit('ticker',{'last':last})
                 ui.emit('alarm','测试警报：无网络、无订单')
                 ui.drain(); root.update()
-                assert len(ui.score_table.get_children()) == 7
-                assert ui.score_vars['做多'].get().endswith('/ 10')
+                assert len(ui.score_table.get_children()) == 8
+                assert ui.score_vars['做多'].get().endswith('/ 12')
                 assert ui.price.get()=='79,045.00 USDT'
                 assert len(ui.price_history)==4
                 assert 'Short' in str(ui.score_bars['做空']['style'])
