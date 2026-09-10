@@ -1,0 +1,29 @@
+name: KAYTRADE V1.3 Three-Month BTC Backtest Fast
+on:
+  push:
+    branches:
+      - analysis/v13-3m-backtest-20260910-run
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Validate V1.3 source tests
+        run: python -m unittest -v test_v13 test_engine test_candles test_v122
+      - name: Run optimized exact three-month replay
+        run: python analysis_v13_backtest_fast.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.3-3M-Backtest-Fast
+          path: |
+            v13_backtest_report.json
+            v13_backtest_trades.csv
+          if-no-files-found: error
+          retention-days: 14
