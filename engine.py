@@ -18,6 +18,7 @@ class Halt(RuntimeError):
 
 HALT_PREFIX='已有故障锁：'
 HALT_SUFFIX='。先人工核对并解除故障锁'
+ENTRY_STEP=300000
 
 def normalize_halt_reason(reason):
     text=str(reason or '').strip()
@@ -183,7 +184,7 @@ class Engine:
             raise Halt('连续亏损已达上限')
         self.enabled=True; self.stopped=False; self.poll_at=time.monotonic()
         self.candle_lag_count=0; self.candle_paused=False
-        self.emit('log','自动交易启动；逐仓、单仓位、每单TP/SL、每根15m信号最多一次')
+        self.emit('log','自动交易启动；5m入场、15m结构、1H环境；最终评分达阈值才允许进入风控；每根5m信号最多一次')
 
     def stop(self):
         self.enabled=False; self.stopped=True
@@ -229,13 +230,14 @@ class Engine:
 
     def refresh_market(self):
         try:
-            h,m=self.x.candles('1H'),self.x.candles('15m')
+            h,m,f=self.x.candles('1H'),self.x.candles('15m'),self.x.candles('5m')
             check_latest('1H',h[-1]['t'],self.market_now(),3600000)
             check_latest('15m',m[-1]['t'],self.market_now(),900000)
+            check_latest('5m',f[-1]['t'],self.market_now(),ENTRY_STEP)
         except CandleLag as exc:
             self._handle_candle_lag(exc)
-        value=signal(h,m,self.settings.score_threshold if self.settings else 7)
-        self.market=dict(value,bar=m[-1]['t'],close=m[-1]['c'])
+        value=signal(h,m,f,self.settings.score_threshold if self.settings else 7)
+        self.market=dict(value,bar=f[-1]['t'],bar15=m[-1]['t'],bar1h=h[-1]['t'],close=f[-1]['c'])
         self.market_at=time.time()
         self.market_monotonic=time.monotonic()
         self._candle_recovered()
@@ -258,11 +260,11 @@ class Engine:
                 if self.enabled:
                     equity,_=self.x.balance()
                     self.daily(equity)
-                expected=int(self.market_now()//900)*900000-900000
+                expected=int(self.market_now()//300)*ENTRY_STEP-ENTRY_STEP
                 if not self.market or self.market['bar']!=expected:
                     self.refresh_market()
                 return
-        expected=int(self.market_now()//900)*900000-900000
+        expected=int(self.market_now()//300)*ENTRY_STEP-ENTRY_STEP
         if not self.market or self.market['bar']!=expected:
             self.refresh_market()
         if not self.enabled:
@@ -276,19 +278,19 @@ class Engine:
             return
         if self.x.positions() or self.x.orders() or self.x.algos():
             raise Halt('出现非本程序仓位或挂单，停止自动开仓')
-        expected=int(self.market_now()//900)*900000-900000
+        expected=int(self.market_now()//300)*ENTRY_STEP-ENTRY_STEP
         if not self.market or self.market['bar']!=expected:
             self.refresh_market()
         market=self.market
-        self._verify_latest('15m',market['bar'],900000)
+        self._verify_latest('5m',market['bar'],ENTRY_STEP)
         age=time.monotonic()-self.market_monotonic if hasattr(self,'market_monotonic') else time.time()-self.market_at
-        if age>900:
-            self._handle_candle_lag(CandleLag('15m 策略缓存超过15分钟未刷新；本轮不使用旧信号'))
+        if age>300:
+            self._handle_candle_lag(CandleLag('5m 策略缓存超过5分钟未刷新；本轮不使用旧信号'))
         if market['side']=='观望' or state['last_bar']==market['bar']:
             return
-        # Score and gate are independently rechecked at the execution boundary.
+        # Score and threshold are independently rechecked at the execution boundary.
         score=market.get('scores',{}).get(market['side'])
-        if not score or not score['gate'] or score['total']<s.score_threshold:
+        if not score or not score.get('gate',True) or score['total']<s.score_threshold:
             return
         ticker=self.x.ticker(); self.emit('ticker',ticker)
         if abs(float(ticker['last'])-market['close'])>.3*market['h']['atr']:
@@ -302,11 +304,12 @@ class Engine:
             raise Halt('逐仓杠杆回读不一致')
         if not self.enabled:
             return
-        self._verify_latest('15m',market['bar'],900000)
+        self._verify_latest('5m',market['bar'],ENTRY_STEP)
         cid='mac'+uuid.uuid4().hex[:28]; aid='sl'+uuid.uuid4().hex[:28]
         # Persist BEFORE sending so network ambiguity and crashes cannot cause duplicate orders.
         state['last_bar']=market['bar']
-        state['active']=dict(plan,client_id=cid,algo_id=aid,submitted=time.time(),equity_before=equity,filled=False)
+        state['active']=dict(plan,client_id=cid,algo_id=aid,submitted=time.time(),equity_before=equity,filled=False,
+                             score=score['total'],score_items=score.get('items',[]))
         self.store.save()
         body={'instId':INSTRUMENT,'tdMode':'isolated','side':plan['exchange_side'],'posSide':plan['posSide'],
             'ordType':'fok','px':plan['px'],'sz':plan['sz'],'clOrdId':cid,
@@ -314,7 +317,7 @@ class Engine:
                 'slTriggerPx':plan['sl'],'slOrdPx':'-1','tpTriggerPxType':'last','slTriggerPxType':'last'}]}
         self.x.post('/api/v5/trade/order',body)
         self.store.record('提交开仓请求',state['active'])
-        self.emit('log','已提交逐仓FOK开仓请求，附带TP/SL；尚不代表成交或保护单生效')
+        self.emit('log',f"已提交逐仓FOK开仓请求（评分 {score['total']}/10），附带TP/SL；尚不代表成交或保护单生效")
         self.emit('plan',state['active'])
 
     def reconcile(self):
@@ -346,7 +349,7 @@ class Engine:
             pnl=equity-p['equity_before']
             state['streak']=state['streak']+1 if pnl<0 else 0
             state['active']=None; state['last_close']=time.time(); self.store.save()
-            self.store.record('仓位归零',dict(client_id=p['client_id'],equity_change=pnl,side=p['side'],px=p['px'],sz=p['sz']))
+            self.store.record('仓位归零',dict(client_id=p['client_id'],equity_change=pnl,side=p['side'],px=p['px'],sz=p['sz'],score=p.get('score')))
             self.emit('log',f'仓位已归零；本轮USDT权益变化 {pnl:+.4f}（含费用/资金费及外部资金变化）')
             return
         qty=sum(abs(float(r['pos'])) for r in positions)
@@ -396,6 +399,6 @@ class Engine:
                 equity,_=self.x.balance()
                 pnl=equity-p['equity_before']
                 self.store.data['streak']=self.store.data['streak']+1 if pnl<0 else 0
-                self.store.record('人工核对平仓',dict(client_id=p['client_id'],equity_change=pnl,side=p['side'],px=p['px'],sz=p['sz']))
+                self.store.record('人工核对平仓',dict(client_id=p['client_id'],equity_change=pnl,side=p['side'],px=p['px'],sz=p['sz'],score=p.get('score')))
         self.store.data['active']=None; self.store.data['halt']=''; self.store.save()
         self.emit('log','故障锁已解除；每日权益基准、连续亏损计数与信号去重仍保留')
