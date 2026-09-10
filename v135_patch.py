@@ -59,6 +59,18 @@ def _is_explicit_rejection(exc):
     return bool(getattr(exc, 'write_rejected', False))
 
 
+def _score_tier(total, eligible=False):
+    """Make the advertised 1-10 threshold range internally consistent."""
+    total = float(total)
+    if total >= 7.0:
+        return 2.0, '三级信号 · 2.0×仓位'
+    if total >= 5.0:
+        return 1.5, '二级信号 · 1.5×仓位'
+    if total >= 1.0:
+        return 1.0, '一级信号 · 1.0×仓位'
+    return (1.0 if eligible else 0.0), '未达最低可选评分'
+
+
 def _remove_15m_setup_gate(original_signal, strategy_module):
     """Return a signal wrapper where 15m Setup remains scored but never vetoes an entry."""
     def signal(*args, **kwargs):
@@ -73,9 +85,11 @@ def _remove_15m_setup_gate(original_signal, strategy_module):
             total = float(score.get('total', 0.0) or 0.0)
             required = float(score.get('required', result.get('threshold', 3.5)) or 0.0)
             eligible = gate and total >= required
+            multiplier, level = _score_tier(total, eligible)
             score['gate'] = gate
             score['eligible'] = eligible
-            score['position_multiplier'] = strategy_module._position_multiplier(total) if eligible else 0.0
+            score['level'] = level
+            score['position_multiplier'] = multiplier if eligible else 0.0
 
             if blocked:
                 score['reason'] = f'前方强结构距离 {structure.get("front_r", 0):.2f}R < 1R，禁止开仓'
@@ -83,12 +97,12 @@ def _remove_15m_setup_gate(original_signal, strategy_module):
                 score['reason'] = f'5m Trigger {trigger:g}/1.0 < 0.5，等待入场触发'
             elif eligible:
                 score['reason'] = (
-                    f"{score.get('level', '信号')} · {total:g}/{result.get('score_max', 10):g} 达标；"
-                    f"按 {score['position_multiplier']:g}× 仓位进入执行与风险检查"
+                    f"{level} · {total:g}/{result.get('score_max', 10):g} 达标；"
+                    f"按 {multiplier:g}× 仓位进入执行与风险检查"
                 )
             else:
                 score['reason'] = (
-                    f"{score.get('level', '信号')} · {total:g}/{result.get('score_max', 10):g}，"
+                    f"{level} · {total:g}/{result.get('score_max', 10):g}，"
                     f"未达开仓阈值 {required:g}"
                 )
 
@@ -179,9 +193,6 @@ def _market_split_tp_post(original_post):
         if path != '/api/v5/trade/order':
             return reply
 
-        # A HTTP/OKX success without a usable ordId is not proof of failure.
-        # Treat response-integrity problems as UNKNOWN, preserving the caller's
-        # pre-write idempotency marker and forbidding an automatic retry.
         import exchange
         row = reply[0] if isinstance(reply, list) and reply else None
         if not isinstance(row, dict):
@@ -214,26 +225,21 @@ def apply():
     if getattr(engine.Engine, '_kaytrade_v135_patch_applied', False):
         return
 
-    # 1) Execution threshold can be selected from 1 to 10, preserving 0.5-point steps.
     engine.Settings.validate = _validate_settings
 
-    # 2) 15m Setup remains part of score but no longer vetoes an entry.
     original_strategy_signal = strategy.signal
     relaxed_signal = _remove_15m_setup_gate(original_strategy_signal, strategy)
     strategy.signal = relaxed_signal
     engine.signal = relaxed_signal
 
-    # 3) Preserve confirmed-candle safety but distinguish normal <=45s settlement from real lag.
     candles.check_latest = _check_latest
     engine.check_latest = _check_latest
 
-    # 4) V1.3.5 requires market exits. In OKX split-TP mode, both condition TP
-    # legs use tpOrdPx=-1 while the SL already uses slOrdPx=-1. The wrapper also
-    # validates ordId/clOrdId for parent, partial-close and manual-close orders.
     original_exchange_post = exchange.Exchange.post
     exchange.Exchange.post = _market_split_tp_post(original_exchange_post)
 
     original_app_init = app.App.__init__
+    original_app_stop = app.App.stop
 
     def app_init(self, *args, **kwargs):
         original_app_init(self, *args, **kwargs)
@@ -254,9 +260,18 @@ def apply():
             except Exception:
                 pass
 
-    app.App.__init__ = app_init
+    def app_stop(self):
+        # Mark stopped synchronously before the worker processes the stop task so
+        # a concurrent 5-second startup-buffer finally block cannot re-enable entry.
+        if getattr(self, 'engine', None):
+            self.engine.stopped = True
+            self.engine.enabled = False
+            self.engine.startup_buffer_until = 0.0
+        return original_app_stop(self)
 
-    # 5) Daily drawdown is a day-level stop, not a permanent fault lock.
+    app.App.__init__ = app_init
+    app.App.stop = app_stop
+
     engine.Engine.daily = _daily
 
     original_engine_init = engine.Engine.__init__
@@ -310,10 +325,7 @@ def apply():
     def _handle_explicit_rejection(self, exc):
         p = self.store.data.get('active') if self.store else None
         cleared = False
-        # The parent order placeholder is written immediately before POST. If
-        # OKX explicitly rejects that POST and no ordId/fill exists, there is no
-        # exchange order to reconcile and keeping active would create a 51603 loop.
-        if isinstance(p, dict) and not p.get('order_id') and not p.get('filled'):
+        if isinstance(p, dict) and not p.get('order_id') and not p.get('filled') and getattr(exc, 'path', '') == '/api/v5/trade/order':
             snapshot = {
                 'client_id': p.get('client_id', ''),
                 'side': p.get('side', ''),
@@ -365,8 +377,6 @@ def apply():
     def reconcile(self):
         result = original_reconcile(self)
         p = self.store.data.get('active') if self.store else None
-        # Verify once, immediately after the base engine has confirmed the full
-        # protection set. This catches an accidental regression back to limit TP.
         if p and p.get('protected') and p.get('filled') and not p.get('market_tp_verified') and not p.get('tp1_done'):
             algos = self.x.algos()
             by_id = {a.get('algoClOrdId'): a for a in algos if isinstance(a, dict) and a.get('state') == 'live'}
@@ -385,10 +395,6 @@ def apply():
         try:
             return original_flatten(self)
         except Exception as exc:
-            # Manual close persists close_id before POST to prevent duplicates.
-            # If OKX explicitly rejects that POST, the close order definitely was
-            # not created, so release only close_id and let the user retry after
-            # fixing the cause. Unknown network/write outcomes keep close_id.
             if _is_explicit_rejection(exc) and self.store:
                 p = self.store.data.get('active')
                 if isinstance(p, dict) and p.get('close_id'):
