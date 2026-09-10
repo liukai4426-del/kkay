@@ -1,0 +1,27 @@
+name: KAYTRADE V1.3 Trade Component Audit
+on:
+  push:
+    branches:
+      - analysis/v13-3m-backtest-20260910-run
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Run executed-trade component audit
+        run: python analysis_v13_trade_components.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.3-Trade-Components
+          path: |
+            v13_trade_component_report.json
+            v13_trade_components.csv
+          if-no-files-found: error
+          retention-days: 14
