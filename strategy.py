@@ -1,319 +1,377 @@
-"""V1.3.4 mean-reversion scoring with daily EMA zones and 1H/4H countertrend penalties."""
+"""KAYTRADE V1.3.6: 5m-led trend pullback/breakout scoring with Bollinger confirmation."""
 import math
 from core import indicators, ema
 
-SCORE_MAX = 10.0
-NORMAL_THRESHOLD = 3.5
+SCORE_MAX = 13.0
+ENTRY_SCORE_MAX = 10.0
+DEFAULT_THRESHOLD = 6.0
+FIVE_MAX = 6.0
+FIFTEEN_MAX = 4.0
 
 
-def _volume_boll_return(rows, current, buy, multiplier=1.3):
-    """15m rejection: current candle returns inside Bollinger on >=1.3x prior-20 volume."""
-    if len(rows) < 21:
-        return False, 0.0
+def _round_half(value):
+    return round(float(value) * 2) / 2
+
+
+def _volume_ratio(rows, lookback=20):
+    if len(rows) < lookback + 1:
+        return 0.0
     history=[]
-    for row in rows[-21:-1]:
+    for row in rows[-lookback-1:-1]:
         try:
-            value=float(row['v'])
-        except (KeyError, TypeError, ValueError):
-            return False, 0.0
+            value=float(row.get('v',0))
+        except (TypeError, ValueError):
+            return 0.0
         if not math.isfinite(value) or value < 0:
-            return False, 0.0
+            return 0.0
         history.append(value)
-    try:
-        current_volume=float(rows[-1]['v'])
-    except (KeyError, TypeError, ValueError):
-        return False, 0.0
-    average=sum(history)/len(history)
-    if not math.isfinite(current_volume) or current_volume < 0 or average <= 0:
-        return False, 0.0
-    candle=rows[-1]
-    returned=(candle['l'] <= current['lower'] and candle['c'] > current['lower']) if buy else (candle['h'] >= current['upper'] and candle['c'] < current['upper'])
-    ratio=current_volume/average
-    return returned and ratio >= multiplier, ratio
+    average=sum(history)/len(history) if history else 0.0
+    current=float(rows[-1].get('v',0) or 0)
+    return current/average if average > 0 and math.isfinite(current) and current >= 0 else 0.0
 
 
-def _reversal(rows, buy):
-    if len(rows) < 2:
-        return False
-    c, prev=rows[-1],rows[-2]
-    return (c['c'] > c['o'] and c['c'] > prev['h']) if buy else (c['c'] < c['o'] and c['c'] < prev['l'])
-
-
-def _ema_reclaim(rows, current, previous, buy):
-    if len(rows) < 2:
-        return False
-    c, prev=rows[-1],rows[-2]
-    return (prev['c'] <= previous['ema20'] and c['c'] > current['ema20']) if buy else (prev['c'] >= previous['ema20'] and c['c'] < current['ema20'])
-
-
-def _environment(current, candle, buy):
-    """1H direction uses three independent 0.5-point confirmations; strong countertrend is -1.5 only."""
-    strong_opposite=(candle['c'] < current['ema200'] and current['ema20'] < current['ema50'] and current['down']) if buy else (candle['c'] > current['ema200'] and current['ema20'] > current['ema50'] and current['up'])
-    if strong_opposite:
-        return -1.5, True, {'ema_order':False,'ema200':False,'slope':False}
-    ema_order=current['ema20'] > current['ema50'] if buy else current['ema20'] < current['ema50']
-    ema200=candle['c'] > current['ema200'] if buy else candle['c'] < current['ema200']
-    slope=current['up'] if buy else current['down']
-    return .5*(int(ema_order)+int(ema200)+int(slope)), False, {'ema_order':ema_order,'ema200':ema200,'slope':slope}
-
-
-def _trend_penalty(current, candle, buy):
-    """Only penalize a clearly established higher-timeframe trend against the intended mean-reversion side."""
-    opposite=(candle['c'] < current['ema200'] and current['ema20'] < current['ema50'] and current['down']) if buy else (candle['c'] > current['ema200'] and current['ema20'] > current['ema50'] and current['up'])
-    return (-1.0 if opposite else 0.0), opposite, {
-        'ema_order': (current['ema20'] < current['ema50']) if buy else (current['ema20'] > current['ema50']),
-        'ema200_side': (candle['c'] < current['ema200']) if buy else (candle['c'] > current['ema200']),
-        'slope': current['down'] if buy else current['up'],
-    }
-
-
-def _rsi_resonance(m, f, buy):
-    """RSI earns points only when 5m and 15m hit the same extreme together."""
-    return (m['rsi'] <= 30 and f['rsi'] <= 30) if buy else (m['rsi'] >= 70 and f['rsi'] >= 70)
-
-
-def _setup(rows, current, buy):
-    """15m mean-reversion setup keeps the same evidence but caps the module at 1.5."""
-    candle=rows[-1]
-    boll=candle['l'] <= current['lower'] if buy else candle['h'] >= current['upper']
-    volume_boll, volume_ratio=_volume_boll_return(rows,current,buy)
-    kdj=(current['j'] <= 30 and current['cross_up']) if buy else (current['j'] >= 70 and current['cross_down'])
-    reversal=_reversal(rows,buy)
-    components={
-        'boll':.5*int(boll),
-        'volume_boll':1.0*int(volume_boll),
-        'kdj':.5*int(kdj),
-        'reversal':.5*int(reversal),
-    }
-    return min(1.5,sum(components.values())), components, volume_ratio
-
-
-def _trigger(rows, current, previous, buy):
-    """5m only times entry; detailed triggers are capped at 1.0 in V1.3.4."""
-    candle=rows[-1]
-    ema_reclaim=_ema_reclaim(rows,current,previous,buy)
-    kdj=current['cross_up'] if buy else current['cross_down']
-    reversal=_reversal(rows,buy)
-    ema_direction=(candle['c'] > current['ema20'] and current['ema20'] > previous['ema20']) if buy else (candle['c'] < current['ema20'] and current['ema20'] < previous['ema20'])
-    components={'ema_reclaim':.5*int(ema_reclaim),'kdj':.5*int(kdj),'reversal':.5*int(reversal),'ema_direction':.5*int(ema_direction)}
-    return min(1.0,sum(components.values())), components
-
-
-def _swing_points(rows, lookback, radius=3):
+def _swing_points(rows, lookback=120, radius=2):
     start=max(0,len(rows)-lookback)
     points=[]
     for i in range(start+radius,len(rows)-radius):
-        left=rows[i-radius:i]; right=rows[i+1:i+radius+1]; row=rows[i]
-        low=row['l']; high=row['h']
-        if low <= min(r['l'] for r in left+right) and (low < min(r['l'] for r in left) or low < min(r['l'] for r in right)):
-            points.append({'kind':'support','price':float(low),'i':i})
-        if high >= max(r['h'] for r in left+right) and (high > max(r['h'] for r in left) or high > max(r['h'] for r in right)):
-            points.append({'kind':'resistance','price':float(high),'i':i})
+        left=rows[i-radius:i]
+        right=rows[i+1:i+radius+1]
+        row=rows[i]
+        low=float(row['l']); high=float(row['h'])
+        left_l=min(float(r['l']) for r in left); right_l=min(float(r['l']) for r in right)
+        left_h=max(float(r['h']) for r in left); right_h=max(float(r['h']) for r in right)
+        if low <= min(left_l,right_l) and (low < left_l or low < right_l):
+            points.append({'kind':'support','price':low,'i':i})
+        if high >= max(left_h,right_h) and (high > left_h or high > right_h):
+            points.append({'kind':'resistance','price':high,'i':i})
     return points
 
 
-def _zones(rows, atr, lookback):
+def _zones(rows, atr, lookback=120):
+    atr=float(atr)
     if not math.isfinite(atr) or atr <= 0:
         return []
     tolerance=.25*atr
     clusters=[]
-    for p in _swing_points(rows,lookback):
-        same=[z for z in clusters if z['kind']==p['kind'] and abs(z['center']-p['price']) <= tolerance]
-        if same:
-            z=min(same,key=lambda x:abs(x['center']-p['price']))
-            z['points'].append(p); z['center']=sum(x['price'] for x in z['points'])/len(z['points']); z['last_i']=max(z['last_i'],p['i'])
+    for point in _swing_points(rows,lookback):
+        matches=[z for z in clusters if z['kind']==point['kind'] and abs(z['center']-point['price'])<=tolerance]
+        if matches:
+            zone=min(matches,key=lambda z:abs(z['center']-point['price']))
+            zone['points'].append(point)
+            zone['center']=sum(p['price'] for p in zone['points'])/len(zone['points'])
+            zone['last_i']=max(zone['last_i'],point['i'])
         else:
-            clusters.append({'kind':p['kind'],'center':p['price'],'points':[p],'last_i':p['i']})
+            clusters.append({'kind':point['kind'],'center':point['price'],'points':[point],'last_i':point['i']})
     out=[]
-    for z in clusters:
-        tests=len(z['points'])
+    for zone in clusters:
+        tests=len(zone['points'])
         if tests < 2:
             continue
-        center=z['center']; after=rows[z['last_i']+1:]
-        broken=any(r['c'] < center-.3*atr for r in after) if z['kind']=='support' else any(r['c'] > center+.3*atr for r in after)
+        center=zone['center']
+        later=rows[zone['last_i']+1:]
+        broken=(any(float(r['c']) < center-.30*atr for r in later) if zone['kind']=='support'
+                else any(float(r['c']) > center+.30*atr for r in later))
         if broken:
             continue
-        age=max(0,len(rows)-1-z['last_i']); recency=max(0.0,1.0-age/max(1,lookback))
-        out.append({'kind':z['kind'],'price':center,'tests':tests,'age':age,'recency':recency,'strong':tests>=3 and recency>=.25})
+        age=max(0,len(rows)-1-zone['last_i'])
+        recency=max(0.0,1.0-age/max(1,lookback))
+        out.append({'kind':zone['kind'],'price':center,'tests':tests,'age':age,
+                    'recency':recency,'strong':tests>=3 and recency>=.25})
     return out
 
 
 def _nearest(zones, price, kind, ahead=None):
     candidates=[]
-    for z in zones:
-        if z['kind'] != kind:
+    for zone in zones:
+        if zone['kind'] != kind:
             continue
-        if ahead=='above' and z['price'] <= price:
+        if ahead=='above' and zone['price'] <= price:
             continue
-        if ahead=='below' and z['price'] >= price:
+        if ahead=='below' and zone['price'] >= price:
             continue
-        candidates.append(z)
+        candidates.append(zone)
     return min(candidates,key=lambda z:abs(z['price']-price)) if candidates else None
 
 
-def _structure_context(hour, quarter, h, m, buy, stop_atr=1.0, four=None, q=None):
-    """Score favorable 1H/15m/4H zones; preserve V1.3 forward 1H/15m safety filter."""
-    price=float(quarter[-1]['c'])
-    hz=_zones(hour,float(h['atr']),120)
-    mz=_zones(quarter,float(m['atr']),160)
-    qz=_zones(four,float(q['atr']),180) if four is not None and q is not None else []
-    favorable='support' if buy else 'resistance'
-    opposite='resistance' if buy else 'support'
-    hnear=_nearest(hz,price,favorable); mnear=_nearest(mz,price,favorable); qnear=_nearest(qz,price,favorable)
-    hdist=abs(hnear['price']-price)/h['atr'] if hnear else math.inf
-    mdist=abs(mnear['price']-price)/m['atr'] if mnear else math.inf
-    qdist=abs(qnear['price']-price)/q['atr'] if qnear and q else math.inf
-    h_score=1.0 if hnear and hdist <= .25 else 0.0
-    m_score=.5 if mnear and mdist <= .25 else 0.0
-    q_score=1.5 if qnear and qdist <= .25 else 0.0
-    overlap=bool(hnear and mnear and hdist<=.25 and mdist<=.25 and abs(hnear['price']-mnear['price']) <= max(.25*h['atr'],.25*m['atr']))
-    ahead='above' if buy else 'below'
-    forward=[]
-    for tf,zones in (('1H',hz),('15m',mz)):
-        z=_nearest([item for item in zones if item.get('strong')],price,opposite,ahead)
-        if z:
-            forward.append((abs(z['price']-price),tf,z))
-    front=min(forward,key=lambda x:x[0]) if forward else None
-    risk=float(m['atr'])*float(stop_atr)
-    front_r=front[0]/risk if front and risk>0 else math.inf
-    blocked=front_r < 1.0
-    penalty=-1.0 if 1.0 <= front_r < 1.3 else 0.0
-    warning=1.3 <= front_r < 1.5
-    return {
-        'score':min(1.5,h_score+m_score),'score_1h':h_score,'score_15m':m_score,'score_4h':q_score,
-        'penalty':penalty,'blocked':blocked,'warning':warning,'front_r':front_r,
-        'favorable_4h':qnear,'favorable_1h':hnear,'favorable_15m':mnear,
-        'front':({'timeframe':front[1],**front[2]} if front else None),
-        'overlap':overlap,'zones_4h':qz,'zones_1h':hz,'zones_15m':mz,
+def _pullback_reclaim(rows, current, buy):
+    """Recent 5m pullback touches EMA20/EMA50 zone, stays structurally intact, then closes back through EMA20."""
+    if len(rows) < 210:
+        return False, {}
+    close=[float(r['c']) for r in rows]
+    e20=ema(close,20); e50=ema(close,50)
+    atr=float(current['atr']); tolerance=.25*atr; damage=.35*atr
+    start=max(0,len(rows)-5)
+    touched=False; closest=math.inf
+    for i in range(start,len(rows)-1):
+        row=rows[i]
+        low=float(row['l']); high=float(row['h'])
+        lo=min(e20[i],e50[i]); hi=max(e20[i],e50[i])
+        distance=0.0 if low <= hi and high >= lo else min(abs(low-hi),abs(high-lo))
+        closest=min(closest,distance/max(atr,1e-12))
+        if low <= hi+tolerance and high >= lo-tolerance:
+            touched=True
+    recent=rows[start:]
+    if buy:
+        intact=min(float(r['l']) for r in recent) >= min(e50[start:])-damage
+        reclaimed=float(rows[-1]['c']) > e20[-1]
+    else:
+        intact=max(float(r['h']) for r in recent) <= max(e50[start:])+damage
+        reclaimed=float(rows[-1]['c']) < e20[-1]
+    return bool(touched and intact and reclaimed), {'touched':touched,'intact':intact,'reclaimed':reclaimed,'closest_atr':closest}
+
+
+def _breakout_trigger(rows, buy, lookback=3):
+    if len(rows) < lookback+1:
+        return False, {}
+    current=rows[-1]; prior=rows[-lookback-1:-1]
+    if buy:
+        level=max(float(r['h']) for r in prior)
+        passed=float(current['c']) > level and float(current['c']) > float(current['o'])
+    else:
+        level=min(float(r['l']) for r in prior)
+        passed=float(current['c']) < level and float(current['c']) < float(current['o'])
+    return passed, {'level':level,'close':float(current['c']),'lookback':lookback}
+
+
+def _bollinger_score(rows, current, previous, buy, intraday='5m'):
+    width=float(current['upper'])-float(current['lower'])
+    prev_width=float(previous['upper'])-float(previous['lower'])
+    mid_up=float(current['middle']) > float(previous['middle'])
+    mid_down=float(current['middle']) < float(previous['middle'])
+    close=float(rows[-1]['c']); atr=max(float(current['atr']),1e-12)
+    recent=rows[-5:-1] if len(rows)>=5 else rows[:-1]
+    if buy:
+        touched_mid=any(float(r['l']) <= float(current['middle'])+.25*atr for r in recent)
+        trend_pullback=mid_up and close >= float(current['middle']) and touched_mid
+        expansion=mid_up and close >= float(current['upper']) and width >= prev_width*1.02
+        regime=mid_up and close >= float(current['middle']) and width >= prev_width*.95
+    else:
+        touched_mid=any(float(r['h']) >= float(current['middle'])-.25*atr for r in recent)
+        trend_pullback=mid_down and close <= float(current['middle']) and touched_mid
+        expansion=mid_down and close <= float(current['lower']) and width >= prev_width*1.02
+        regime=mid_down and close <= float(current['middle']) and width >= prev_width*.95
+    passed=(trend_pullback or expansion) if intraday=='5m' else regime
+    return bool(passed), {'trend_pullback':trend_pullback,'expansion':expansion,'regime':regime,
+                          'width_ratio':width/prev_width if prev_width>0 else math.inf,
+                          'middle':float(current['middle'])}
+
+
+def _ema_alignment(current, previous, buy, strict_5m=False):
+    if buy:
+        order=(current['ema5']>current['ema10']>current['ema20']) if strict_5m else current['ema20']>current['ema50']
+        slope=current['ema20']>previous['ema20']
+    else:
+        order=(current['ema5']<current['ema10']<current['ema20']) if strict_5m else current['ema20']<current['ema50']
+        slope=current['ema20']<previous['ema20']
+    return bool(order and slope), {'order':order,'slope':slope}
+
+
+def _momentum(current, previous, buy):
+    if buy:
+        rsi_ok=current['rsi']>=50 and current['rsi']>=previous['rsi']
+        kdj_ok=current['cross_up'] or current['k']>current['d']
+    else:
+        rsi_ok=current['rsi']<=50 and current['rsi']<=previous['rsi']
+        kdj_ok=current['cross_down'] or current['k']<current['d']
+    return bool(rsi_ok and kdj_ok), {'rsi_ok':rsi_ok,'kdj_ok':kdj_ok,'rsi':current['rsi']}
+
+
+def _five_score(rows, current, previous, buy):
+    reclaim,reclaim_detail=_pullback_reclaim(rows,current,buy)
+    breakout,breakout_detail=_breakout_trigger(rows,buy)
+    boll,boll_detail=_bollinger_score(rows,current,previous,buy,'5m')
+    ema_ok,ema_detail=_ema_alignment(current,previous,buy,True)
+    momentum,momentum_detail=_momentum(current,previous,buy)
+    volume_ratio=_volume_ratio(rows)
+    score=(2.0 if reclaim else 0.0)+(2.0 if breakout else 0.0)+(1.0 if boll else 0.0)+(.5 if ema_ok else 0.0)+(.5 if momentum else 0.0)
+    return min(FIVE_MAX,score), {
+        'pullback_reclaim':reclaim,'pullback_detail':reclaim_detail,
+        'breakout_trigger':breakout,'breakout_detail':breakout_detail,
+        'boll':boll,'boll_detail':boll_detail,'ema':ema_ok,'ema_detail':ema_detail,
+        'momentum':momentum,'momentum_detail':momentum_detail,
+        'volume_confirm':volume_ratio>=1.2,'volume_ratio':volume_ratio,
+        'components':{
+            'pullback_reclaim':2.0 if reclaim else 0.0,
+            'breakout_trigger':2.0 if breakout else 0.0,
+            'boll':1.0 if boll else 0.0,
+            'ema':.5 if ema_ok else 0.0,
+            'momentum':.5 if momentum else 0.0,
+        },
     }
 
 
-def _ema_dynamic_support(hour, h, ph, price, buy):
-    """1H EMA20/EMA50 dynamic support/resistance; multiple EMA hits still score only 0.5."""
-    atr=float(h['atr'])
-    if not math.isfinite(atr) or atr <= 0:
-        return 0.0, None
-    tolerance=.20*atr
-    candidates=(('EMA20',float(h['ema20']),float(ph['ema20'])),('EMA50',float(h['ema50']),float(ph['ema50'])))
-    for name,value,previous in candidates:
-        slope_ok=value>previous if buy else value<previous
-        close_ok=price >= value-.05*atr if buy else price <= value+.05*atr
-        if slope_ok and close_ok and abs(price-value) <= tolerance:
-            return .5, name
-    return 0.0, None
+def _fifteen_market_structure(rows, buy):
+    points=_swing_points(rows,100,2)
+    supports=[p for p in points if p['kind']=='support'][-2:]
+    resistances=[p for p in points if p['kind']=='resistance'][-2:]
+    if len(supports)<2 or len(resistances)<2:
+        return False, {'supports':supports,'resistances':resistances}
+    if buy:
+        passed=supports[-1]['price']>supports[-2]['price'] and resistances[-1]['price']>resistances[-2]['price']
+    else:
+        passed=supports[-1]['price']<supports[-2]['price'] and resistances[-1]['price']<resistances[-2]['price']
+    return passed, {'supports':supports,'resistances':resistances}
 
 
-def _daily_ema_zone(day, daily_ind, price, buy):
-    """Daily EMA5/10/20 support or resistance. Highest matching weight wins; never stacks above 3."""
-    atr=float(daily_ind['atr'])
-    if not math.isfinite(atr) or atr <= 0 or len(day) < 21:
-        return 0.0, None, {}
-    close=[float(r['c']) for r in day]
-    values={}
-    for period,weight in ((5,1.0),(10,2.0),(20,3.0)):
-        series=ema(close,period)
-        values[period]={'value':series[-1],'previous':series[-2],'weight':weight}
-    tolerance=.20*atr
-    # Check highest-value EMA first so simultaneous proximity never stacks.
-    for period in (20,10,5):
-        item=values[period]; value=item['value']; previous=item['previous']
-        slope_ok=value >= previous if buy else value <= previous
-        side_ok=price >= value-.05*atr if buy else price <= value+.05*atr
-        near=abs(price-value) <= tolerance
-        if slope_ok and side_ok and near:
-            return item['weight'],f'EMA{period}',{'atr':atr,'distance_atr':abs(price-value)/atr,'ema':values}
-    return 0.0,None,{'atr':atr,'ema':values}
+def _fifteen_position(rows, current, buy):
+    price=float(rows[-1]['c']); atr=float(current['atr'])
+    zones=_zones(rows,atr,120)
+    kind='support' if buy else 'resistance'
+    nearest=_nearest(zones,price,kind)
+    distance=abs(nearest['price']-price)/atr if nearest and atr>0 else math.inf
+    return bool(nearest and distance<=.35), {'nearest':nearest,'distance_atr':distance,'zones':zones}
 
 
-def _position_multiplier(total):
-    if total >= 7.0:
-        return 2.0
-    if total >= 5.0:
-        return 1.5
-    if total >= 3.5:
-        return 1.0
-    return 0.0
+def _fifteen_score(rows, current, previous, buy):
+    structure,structure_detail=_fifteen_market_structure(rows,buy)
+    position,position_detail=_fifteen_position(rows,current,buy)
+    boll,boll_detail=_bollinger_score(rows,current,previous,buy,'15m')
+    ema_ok,ema_detail=_ema_alignment(current,previous,buy,False)
+    momentum,momentum_detail=_momentum(current,previous,buy)
+    score=(1.0 if structure else 0.0)+(.5 if position else 0.0)+(1.0 if boll else 0.0)+(1.0 if ema_ok else 0.0)+(.5 if momentum else 0.0)
+    return min(FIFTEEN_MAX,score), {
+        'structure':structure,'structure_detail':structure_detail,
+        'position':position,'position_detail':position_detail,
+        'boll':boll,'boll_detail':boll_detail,'ema':ema_ok,'ema_detail':ema_detail,
+        'momentum':momentum,'momentum_detail':momentum_detail,
+        'components':{
+            'structure':1.0 if structure else 0.0,
+            'position':.5 if position else 0.0,
+            'boll':1.0 if boll else 0.0,
+            'ema':1.0 if ema_ok else 0.0,
+            'momentum':.5 if momentum else 0.0,
+        },
+    }
+
+
+def _trend_adjust(rows, current, previous, buy, weight):
+    candle=rows[-1]
+    bullish=current['ema20']>current['ema50'] and float(candle['c'])>current['ema200'] and current['ema20']>previous['ema20']
+    bearish=current['ema20']<current['ema50'] and float(candle['c'])<current['ema200'] and current['ema20']<previous['ema20']
+    if not bullish and not bearish:
+        return 0.0,'中性',{'bullish':False,'bearish':False}
+    aligned=(bullish and buy) or (bearish and not buy)
+    return (float(weight) if aligned else -float(weight)),('顺势' if aligned else '逆势'),{'bullish':bullish,'bearish':bearish}
+
+
+def _forward_structure(hour, quarter, h, m, buy, stop_atr=1.0):
+    price=float(quarter[-1]['c'])
+    hz=_zones(hour,float(h['atr']),120)
+    mz=_zones(quarter,float(m['atr']),160)
+    opposite='resistance' if buy else 'support'
+    ahead='above' if buy else 'below'
+    candidates=[]
+    for timeframe,zones in (('1H',hz),('15m',mz)):
+        strong=[z for z in zones if z.get('strong')]
+        zone=_nearest(strong,price,opposite,ahead)
+        if zone:
+            candidates.append((abs(zone['price']-price),timeframe,zone))
+    front=min(candidates,key=lambda item:item[0]) if candidates else None
+    risk=float(m['atr'])*float(stop_atr)
+    front_r=front[0]/risk if front and risk>0 else math.inf
+    return {
+        'blocked':front_r<1.0,
+        'warning':1.0<=front_r<1.5,
+        'front_r':front_r,
+        'front':({'timeframe':front[1],**front[2]} if front else None),
+        'zones_1h':hz,'zones_15m':mz,
+    }
 
 
 def _level(total):
-    if total >= 7.0:
-        return '三级信号 · 2.0×仓位'
-    if total >= 5.0:
-        return '二级信号 · 1.5×仓位'
-    if total >= 3.5:
-        return '一级信号 · 1.0×仓位'
+    if total >= 10:
+        return '高共振信号'
+    if total >= 8:
+        return '强信号'
+    if total >= DEFAULT_THRESHOLD:
+        return '普通信号'
     return '未达开仓线'
 
 
-def signal(hour, quarter, five=None, threshold=3.5, stop_atr=1.0, four=None, day=None):
+def _position_multiplier(total):
+    """V1.3.6 deliberately keeps all qualified entries at the configured base risk (1x)."""
+    return 1.0
+
+
+def signal(hour, quarter, five=None, threshold=DEFAULT_THRESHOLD, stop_atr=1.0, four=None, day=None):
     five=quarter if five is None else five
     four=hour if four is None else four
     day=four if day is None else day
-    h,m,f,q,d=indicators(hour),indicators(quarter),indicators(five),indicators(four),indicators(day)
-    pf=indicators(five[:-1])
-    hc=hour[-1]; qc=four[-1]
-    price=float(quarter[-1]['c'])
+    h=indicators(hour); ph=indicators(hour[:-1])
+    m=indicators(quarter); pm=indicators(quarter[:-1])
+    f=indicators(five); pf=indicators(five[:-1])
+    q=indicators(four); pq=indicators(four[:-1])
+    d=indicators(day)
+    required=float(threshold)
     results={}
     for side in ('做多','做空'):
         buy=side=='做多'
-        trend_1h,opposite_1h,trend_1h_detail=_trend_penalty(h,hc,buy)
-        trend_4h,opposite_4h,trend_4h_detail=_trend_penalty(q,qc,buy)
-        setup,setup_detail,volume_ratio=_setup(quarter,m,buy)
-        trigger,trigger_detail=_trigger(five,f,pf,buy)
-        structure=_structure_context(hour,quarter,h,m,buy,stop_atr,four,q)
-        daily_ema,daily_ema_name,daily_ema_detail=_daily_ema_zone(day,d,price,buy)
-        rsi_resonance=1.5 if _rsi_resonance(m,f,buy) else 0.0
-        raw=daily_ema+structure['score_4h']+structure['score']+rsi_resonance+setup+trigger+structure['penalty']+trend_1h+trend_4h
-        total=max(0.0,min(SCORE_MAX,round(raw*2)/2))
-        required=float(threshold)
-        hard_setup=setup>=.5
-        hard_trigger=trigger>=.5
-        gate=hard_setup and hard_trigger and not structure['blocked']
-        eligible=gate and total>=required
+        five_score,five_detail=_five_score(five,f,pf,buy)
+        fifteen_score,fifteen_detail=_fifteen_score(quarter,m,pm,buy)
+        trend_1h,state_1h,detail_1h=_trend_adjust(hour,h,ph,buy,1.0)
+        trend_4h,state_4h,detail_4h=_trend_adjust(four,q,pq,buy,2.0)
+        base=_round_half(five_score+fifteen_score)
+        trend=_round_half(trend_1h+trend_4h)
+        total=max(0.0,min(SCORE_MAX,_round_half(base+trend)))
+        structure=_forward_structure(hour,quarter,h,m,buy,stop_atr)
+        mandatory=bool(five_detail['pullback_reclaim'] and five_detail['breakout_trigger'])
+        five_gate=five_score>=4.0
+        gate=mandatory and five_gate and not structure['blocked']
+        eligible=bool(gate and total>=required)
         level=_level(total)
-        position_multiplier=_position_multiplier(total) if eligible else 0.0
-        if structure['blocked']:
-            reason=f'前方强结构距离 {structure["front_r"]:.2f}R < 1R，禁止开仓'
-        elif not hard_setup:
-            reason=f'15m Setup {setup:g}/1.5 < 0.5，禁止开仓'
-        elif not hard_trigger:
-            reason=f'5m Trigger {trigger:g}/1.0 < 0.5，等待入场触发'
-        elif eligible:
-            reason=f'{level} · {total:g}/{SCORE_MAX:g} 达标；按 {position_multiplier:g}× 仓位进入执行与风险检查'
+        if not five_detail['pullback_reclaim']:
+            reason='5m回调收回未成立，禁止开仓'
+        elif not five_detail['breakout_trigger']:
+            reason='5m突破触发未成立，禁止开仓'
+        elif not five_gate:
+            reason=f'5m入场分 {five_score:g}/6 < 4，禁止开仓'
+        elif structure['blocked']:
+            reason=f'前方强结构仅 {structure["front_r"]:.2f}R < 1R，禁止开仓'
+        elif total < required:
+            reason=f'入场分 {base:g}/10 · 趋势修正 {trend:+g} · 最终 {total:g}/13，未达阈值 {required:g}'
         else:
-            reason=f'{level} · {total:g}/{SCORE_MAX:g}，未达开仓阈值 {required:g}'
+            caution=' · 前方结构空间偏紧' if structure['warning'] else ''
+            reason=f'{level} · 入场分 {base:g}/10 · 趋势修正 {trend:+g} · 最终 {total:g}/13 达标{caution}'
+        c5=five_detail['components']; c15=fifteen_detail['components']
         items=[
-            ('1D EMA5/10/20 支撑/压力',daily_ema,3.0),
-            ('4H 对应支撑/阻力',structure['score_4h'],1.5),
-            ('1H 支撑/阻力结构',structure['score_1h'],1.0),
-            ('15m 支撑/阻力结构',structure['score_15m'],.5),
-            ('5m + 15m RSI 极值共振',rsi_resonance,1.5),
-            ('15m Setup（BOLL/量/KDJ/反转，封顶）',setup,1.5),
-            ('5m Trigger（EMA/KDJ/反转，封顶）',trigger,1.0),
-            ('1H 反向趋势惩罚',trend_1h,0),
-            ('4H 反向趋势惩罚',trend_4h,0),
-            ('前方结构空间惩罚',structure['penalty'],0),
+            ('5m 回调收回（硬条件）',c5['pullback_reclaim'],2.0),
+            ('5m 突破触发（硬条件）',c5['breakout_trigger'],2.0),
+            ('5m BOLL趋势/回调',c5['boll'],1.0),
+            ('5m EMA5/10/20结构',c5['ema'],.5),
+            ('5m RSI/KDJ动量',c5['momentum'],.5),
+            ('15m 高低点趋势结构',c15['structure'],1.0),
+            ('15m 支撑/压力位置',c15['position'],.5),
+            ('15m BOLL趋势/位置',c15['boll'],1.0),
+            ('15m EMA20/50趋势',c15['ema'],1.0),
+            ('15m RSI/KDJ动量',c15['momentum'],.5),
+            ('1H 趋势修正',trend_1h,1.0),
+            ('4H 趋势修正',trend_4h,2.0),
         ]
         results[side]={
-            'total':total,'raw':raw,'gate':gate,'eligible':eligible,'level':level,'required':required,
-            'position_multiplier':position_multiplier,'items':items,'reason':reason,'structure':structure,
-            'layers':{'daily_ema':daily_ema,'structure_4h':structure['score_4h'],'structure':structure['score'],
-                      'rsi_resonance':rsi_resonance,'setup':setup,'trigger':trigger,
-                      'trend_penalty_1h':trend_1h,'trend_penalty_4h':trend_4h,'front_penalty':structure['penalty']},
+            'total':total,'entry_score':base,'five_score':five_score,'fifteen_score':fifteen_score,
+            'trend_adjust':trend,'trend_1h':trend_1h,'trend_4h':trend_4h,
+            'trend_state_1h':state_1h,'trend_state_4h':state_4h,
+            'gate':gate,'mandatory_trigger':mandatory,'eligible':eligible,'required':required,'level':level,
+            'position_multiplier':1.0 if eligible else 0.0,'items':items,'reason':reason,'structure':structure,
+            'layers':{'5m':five_score,'15m':fifteen_score,'1h':trend_1h,'4h':trend_4h},
             'confirmations':{
-                '5m':trigger>=.5,'15m':setup>=.5,'1H_countertrend':opposite_1h,'4H_countertrend':opposite_4h,
-                'strong_opposite':opposite_1h or opposite_4h,'rsi_resonance':rsi_resonance>0,
-                'daily_ema':daily_ema_name,'daily_ema_detail':daily_ema_detail,
-                'volume_ratio_15m':volume_ratio,'trend_1h':trend_1h_detail,'trend_4h':trend_4h_detail,
-                'setup':setup_detail,'trigger':trigger_detail,'structure':structure,
+                'pullback_reclaim':five_detail['pullback_reclaim'],
+                'breakout_trigger':five_detail['breakout_trigger'],
+                'volume_confirm':five_detail['volume_confirm'],
+                'volume_ratio_5m':five_detail['volume_ratio'],
+                'five':five_detail,'fifteen':fifteen_detail,
+                'trend_1h':detail_1h,'trend_4h':detail_4h,'structure':structure,
             },
         }
-    qualified=[s for s,r in results.items() if r['eligible']]
+    qualified=[side for side,row in results.items() if row['eligible']]
     if len(qualified)==1:
         side=qualified[0]
-    elif len(qualified)==2 and results[qualified[0]]['total'] != results[qualified[1]]['total']:
+    elif len(qualified)==2 and results[qualified[0]]['total']!=results[qualified[1]]['total']:
         side=max(qualified,key=lambda s:results[s]['total'])
     else:
         side='观望'
-    why=results[side]['reason'] if side!='观望' else ' / '.join(s+': '+r['reason'] for s,r in results.items())
-    return {'d':d,'q':q,'h':h,'m':m,'f':f,'side':side,'why':why,'scores':results,'threshold':threshold,'score_max':SCORE_MAX}
+    why=results[side]['reason'] if side!='观望' else ' / '.join(s+': '+row['reason'] for s,row in results.items())
+    return {
+        'd':d,'q':q,'h':h,'m':m,'f':f,'side':side,'why':why,'scores':results,
+        'threshold':required,'score_max':SCORE_MAX,'entry_score_max':ENTRY_SCORE_MAX,
+    }
