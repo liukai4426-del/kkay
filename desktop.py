@@ -37,7 +37,7 @@ def smoke_test():
                 assert not {'key', 'secret', 'phrase'} & saved.keys()
                 assert ui.fields['stop_atr'].get() == '1.0'
                 assert ui.fields['reward_r'].get() == '1.5'
-                assert ui.fields['score_threshold'].get() == '7'
+                assert ui.fields['score_threshold'].get() == '8'
                 # Render both score cards, details, network status and filtered alarms.
                 from strategy import signal
                 rows=[dict(t=i*900000,o=100,h=101,l=99,c=100) for i in range(1002)]
@@ -48,7 +48,7 @@ def smoke_test():
                 ui.emit('alarm','测试警报：无网络、无订单')
                 ui.drain(); root.update()
                 assert len(ui.score_table.get_children()) == 8
-                assert ui.score_vars['做多'].get().endswith('/ 12')
+                assert ui.score_vars['做多'].get().endswith('/ 19')
                 assert ui.price.get()=='79,045.00 USDT'
                 assert len(ui.price_history)==4
                 assert 'Short' in str(ui.score_bars['做空']['style'])

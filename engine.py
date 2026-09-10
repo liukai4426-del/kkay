@@ -42,13 +42,13 @@ class Settings:
     cooldown_minutes:int=30
     stop_atr:float=1.0
     reward_r:float=1.5
-    score_threshold:float=7
+    score_threshold:float=8
     fee_bps:float=10
     slippage_bps:float=5
 
     def validate(self):
-        if int(self.score_threshold)!=self.score_threshold or not 7<=self.score_threshold<=12:
-            raise Halt('评分阈值必须是7—12的整数')
+        if int(self.score_threshold)!=self.score_threshold or not 8<=self.score_threshold<=19:
+            raise Halt('评分阈值必须是8—19的整数')
         for name,value in asdict(self).items():
             if not isinstance(value,(int,float)) or not math.isfinite(value) or value<=0:
                 raise Halt(name+' 必须是有限正数')
@@ -236,7 +236,7 @@ class Engine:
             check_latest('5m',f[-1]['t'],self.market_now(),ENTRY_STEP)
         except CandleLag as exc:
             self._handle_candle_lag(exc)
-        value=signal(h,m,f,self.settings.score_threshold if self.settings else 7)
+        value=signal(h,m,f,self.settings.score_threshold if self.settings else 8)
         self.market=dict(value,bar=f[-1]['t'],bar15=m[-1]['t'],bar1h=h[-1]['t'],close=f[-1]['c'])
         self.market_at=time.time()
         self.market_monotonic=time.monotonic()
@@ -317,7 +317,7 @@ class Engine:
                 'slTriggerPx':plan['sl'],'slOrdPx':'-1','tpTriggerPxType':'last','slTriggerPxType':'last'}]}
         self.x.post('/api/v5/trade/order',body)
         self.store.record('提交开仓请求',state['active'])
-        self.emit('log',f"已提交逐仓FOK开仓请求（评分 {score['total']}/12），附带TP/SL；尚不代表成交或保护单生效")
+        self.emit('log',f"已提交逐仓FOK开仓请求（{score.get('level','信号')} · 评分 {score['total']}/19），附带TP/SL；尚不代表成交或保护单生效")
         self.emit('plan',state['active'])
 
     def reconcile(self):

@@ -1,32 +1,24 @@
 # OKX Local V1.2.3
 
-## Expanded natural scoring
+## Per-signal multi-timeframe confluence scoring
 
-V1.2.3 no longer compresses the score back to 10. The positive signal weights are kept at their natural values, for a theoretical maximum of 12 points. The default automatic-entry threshold remains exactly 7 points.
+Each independent signal now receives its own 5m/15m/1H confluence ladder. Positive maximum: 19. Default entry threshold: 8.
 
-- 15m + 1H RSI extreme combination: +2.
-- 15m Bollinger touch + RSI oversold/overbought: +2.
-- 15m Bollinger rejection back inside the band + current volume >= 1.3x the prior 20-bar average: +2.
-- 15m KDJ J-value + K/D cross: +1.
-- 5m EMA20 reclaim/break: +1.
-- 15m reversal candle: +1.
-- Multi-timeframe confirmation, counted once: 5m = +1; 5m + 15m = +2; 5m + 15m + 1H environment = +3.
-- Strong opposite 1H trend: -2.
-- Final score is clamped to 0-12. Exactly 7 remains eligible for the separate safety/risk checks.
+- RSI confluence: max +3. Long thresholds: 5m <=20, 15m <=20, 1H <=25. Short: 5m >=75, 15m >=75, 1H >=70.
+- Bollinger outer-band touch confluence: max +3.
+- KDJ confluence: max +3.
+- EMA20 reclaim/loss confluence: max +3.
+- Reversal-candle confluence: max +3.
+- 15m RSI + Bollinger combination: +2.
+- 15m Bollinger rejection back inside + volume >=1.3x prior 20-bar average: +2.
+- Strong opposite 1H trend: -3.
 
-The volume rule only scores a rejection that returns inside the Bollinger band. A high-volume candle that keeps closing outside the band is not treated as a reversal.
+Each independent confluence ladder is replacement-style, not cumulative inside itself: 5m = +1; 5m+15m = +2; 5m+15m+1H = +3. Final score is clamped to 0-19 after the penalty.
 
-## ATR risk revision
+Signal bands: 0-7 no entry; 8-10 ordinary; 11-14 strong; 15-19 high-confluence. A score >= configured threshold (default 8) only enters the separate safety/risk checks.
 
-- Opening SL distance uses the latest closed 15m ATR.
-- Default stop distance is 1.0 x 15m ATR for new/default settings.
-- TP remains reward-R based (default 1.5R), derived from the same 15m ATR stop distance.
-- Existing saved user risk settings are preserved.
+## ATR risk and safety
 
-## Safety behavior retained
+SL remains based on latest closed 15m ATR, default 1.0x. TP remains default 1.5R. V1.2.2 candle/network/order/position/protection fail-closed safety, isolated margin, FOK entry and attached TP/SL are unchanged.
 
-Closed-candle checks, exchange-clock calibration, CandlePending/CandleLag/CandleStale behavior, unknown-order/position/protection fail-closed locks, isolated margin checks, FOK entry behavior and attached exchange TP/SL remain unchanged. A high score never overrides those safety checks.
-
-## Validation limits
-
-CI uses fake exchange/synthetic market data and packaged UI smoke tests. It does not validate profitability and is not a real-account end-to-end trading test. The app is unsigned/not notarized.
+A saved old threshold of 7 is migrated to 8 in the UI. CI is synthetic and does not validate profitability or real-account end-to-end execution. The app remains unsigned/not notarized.
