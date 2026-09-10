@@ -432,10 +432,15 @@ class App:
                         self.emit('ticker',self.engine.x.ticker()); self.public_at=time.monotonic()
                     self.emit('status','全自动运行 / '+('模拟盘' if self.engine.x.demo else '实盘') if self.engine.enabled else '故障暂停 · 需核对' if self.engine.store.data['halt'] else '已停止新开仓 / 继续核对持仓')
             except CandlePending as exc:
+                message=str(exc)
                 self.emit('status','等待最新收盘K线 · 暂不新开仓')
-                self.emit('candle_wait',str(exc))
-                if time.monotonic()-self.candle_wait_log>=15:
-                    self.emit('log',str(exc)); self.candle_wait_log=time.monotonic()
+                self.emit('candle_wait',message)
+                # A just-closed OKX candle normally needs a few seconds to receive confirm=1.
+                # Keep that visible in the status area, but do not write a scary log every
+                # quarter-hour. Only persistent/confirmed lag belongs in the event log.
+                persistent=('持续过期' in message or '连续异常' in message)
+                if persistent and time.monotonic()-self.candle_wait_log>=15:
+                    self.emit('log',message); self.candle_wait_log=time.monotonic()
             except NetworkError as exc:
                 self.network_paused=True; self.recovery_count=0; self.probe_at=time.monotonic()
                 if self.engine: self.engine.halt(str(exc))
