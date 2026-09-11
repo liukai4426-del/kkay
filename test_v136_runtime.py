@@ -12,6 +12,9 @@ class V136RuntimeTests(unittest.TestCase):
         self.e.connect(); self.e.arm(Settings()); self.e.startup_buffer_until=0
     def tearDown(self):self.tmp.cleanup()
     def test_waiting_signal_explains_no_order(self):
+        # This test targets decision reporting only.  Keep the engine explicitly
+        # armed so wall-clock/day-risk state cannot make CI skip the reporter.
+        self.e.enabled=True; self.e.stopped=False; self.e.store.data['halt']=''
         bar=int(self.e.market_now()//300)*300000-300000
         self.e.market={'side':'观望','bar':bar,'scores':{},'close':60000,'h':{'atr':100},'m':{'atr':20}}
         self.e.market_at=time.time(); self.e.market_monotonic=time.monotonic(); _decision(self.e)
