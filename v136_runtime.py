@@ -1,6 +1,6 @@
 """V1.3.6 runtime state/decision observability patch.
 
-No strategy weights, sizing, entry order type, or TP/SL rules are changed here.
+No strategy weights, sizing, entry order type, or TP/SL rules are changed here.\nThe build marker below exists only to trigger complete-branch validation.
 """
 import time
 
