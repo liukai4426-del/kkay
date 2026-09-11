@@ -103,9 +103,16 @@ jobs:
           import tkinter as tk
           from pathlib import Path
           from unittest.mock import patch
+          from PIL import Image
           import v142_visual_patch as v142
           import v138_strategy_patch as v138
           import app
+          logo_path=v142._logo_path()
+          print('V142 logo path:',logo_path,'exists=',logo_path.exists(),'size=',logo_path.stat().st_size if logo_path.exists() else -1)
+          if logo_path.exists():
+              with Image.open(logo_path) as probe:
+                  print('V142 logo PIL:',probe.format,probe.size,probe.mode)
+                  probe.verify()
           root=tk.Tk()
           try:
               with patch.object(app.App,'worker',lambda self: None):
@@ -116,7 +123,7 @@ jobs:
                   assert ui._v142_status_kind=='yellow'
                   assert ui._v142_status_label.cget('style')=='V142StatusYellow.TLabel'
                   logo=getattr(ui,'_v142_logo_widget',None)
-                  assert logo is not None, 'selected V1.4.2 logo not mounted'
+                  assert logo is not None, 'selected V1.4.2 logo not mounted; errors='+repr(getattr(ui,'_v142_logo_errors',v142.LOGO_ERRORS))
                   assert getattr(logo,'_kaytrade_v142_logo',False)
                   assert getattr(logo,'_kaytrade_v142_logo_image',None) is not None
                   assert len(logo.find_all())>=1
