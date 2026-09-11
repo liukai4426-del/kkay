@@ -1,0 +1,43 @@
+name: Backtest KAYTRADE V1.4.6 BTC SWAP 3M
+on:
+  push:
+    branches: [research/v146-btc-3m-backtest]
+    paths:
+      - research_v146_backtest.py
+      - .github/workflows/backtest-v146-btc-3m.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile research backtest
+        run: python -m py_compile research_v146_backtest.py
+      - name: Run V1.4.6 BTC-USDT-SWAP three-month backtest
+        env:
+          BACKTEST_OUT: backtest_output
+        run: python research_v146_backtest.py
+      - name: Show report summary
+        if: success()
+        run: |
+          cat backtest_output/metrics.json
+          echo '--- REPORT ---'
+          cat backtest_output/V146_BTC_SWAP_3M_Backtest_Report.md
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: KAYTRADE-V146-BTC-SWAP-3M-BACKTEST
+          path: |
+            backtest_output/V146_BTC_SWAP_3M_Backtest_Report.md
+            backtest_output/V146_BTC_SWAP_3M_Trades.csv
+            backtest_output/V146_BTC_SWAP_3M_Cycles.csv
+            backtest_output/V146_BTC_SWAP_3M_DailyEquity.csv
+            backtest_output/metrics.json
+          if-no-files-found: error
+          retention-days: 14
