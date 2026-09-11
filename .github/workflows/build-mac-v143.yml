@@ -29,11 +29,13 @@ on:
       - v141_exit_limit_patch.py
       - v142_visual_patch.py
       - v143_score_arbitration_patch.py
+      - v143_visual_polish_patch.py
       - test_v141_dialog_signal_positions.py
       - test_v141_history_return_chart.py
       - test_v141_exit_limit.py
       - test_v142_visual.py
       - test_v143_score_arbitration.py
+      - test_v143_visual_polish.py
       - RELEASE-1.4.3.md
       - .github/workflows/build-mac-v143.yml
   workflow_dispatch:
@@ -50,7 +52,7 @@ jobs:
         with:
           python-version: '3.13'
       - name: Compile V1.4.3 runtime
-        run: python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py v137_strategy_patch.py v137_cancel_fix.py v138_strategy_patch.py v139_position_patch.py v140_score_dialog_patch.py v141_dialog_signal_positions_patch.py v141_history_return_chart_patch.py v141_exit_limit_patch.py v142_visual_patch.py v143_score_arbitration_patch.py test_v142_visual.py test_v143_score_arbitration.py
+        run: python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py v137_strategy_patch.py v137_cancel_fix.py v138_strategy_patch.py v139_position_patch.py v140_score_dialog_patch.py v141_dialog_signal_positions_patch.py v141_history_return_chart_patch.py v141_exit_limit_patch.py v142_visual_patch.py v143_score_arbitration_patch.py v143_visual_polish_patch.py test_v142_visual.py test_v143_score_arbitration.py test_v143_visual_polish.py
       - name: Run preserved safety and strategy tests
         run: |
           python -m unittest -v test_engine test_candles test_v134 test_v135 test_v135_execution test_v135_safety2
@@ -66,6 +68,8 @@ jobs:
         run: python -m unittest -v test_v142_visual
       - name: Run V1.4.3 score arbitration tests
         run: python -m unittest -v test_v143_score_arbitration
+      - name: Run V1.4.3 visual polish tests
+        run: python -m unittest -v test_v143_visual_polish
       - name: Verify V1.4.3 wiring
         run: |
           python - <<'PY'
@@ -73,8 +77,10 @@ jobs:
           spec=Path('OKXLocal.spec').read_text()
           patch=Path('v142_visual_patch.py').read_text()
           arbitration=Path('v143_score_arbitration_patch.py').read_text()
+          polish=Path('v143_visual_polish_patch.py').read_text()
           assert 'v142_visual_patch.py' in spec
           assert 'v143_score_arbitration_patch.py' in spec
+          assert 'v143_visual_polish_patch.py' in spec
           assert 'assets/kaytrade-v142-logo.png' in spec
           assert "CFBundleShortVersionString': '1.4.3'" in spec
           assert "CFBundleVersion': '143'" in spec
@@ -83,6 +89,8 @@ jobs:
               assert token in patch, token
           for token in ('equal_score_wait','higher_score','direction_wait','本轮不发单'):
               assert token in arbitration, token
+          for token in ('SCROLL_TRACK=app.BG','_scrollbar_draw','_button_radius','rounded_scrollbar'):
+              assert token in polish, token
           print('PASS: V1.4.3 visual runtime, selected logo and score arbitration wired')
           PY
   build:
@@ -102,8 +110,8 @@ jobs:
         run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0'
       - name: Re-run V1.4.2 + V1.4.3 tests on Intel Mac
         run: |
-          python -m py_compile v141_dialog_signal_positions_patch.py v141_history_return_chart_patch.py v141_exit_limit_patch.py v142_visual_patch.py v143_score_arbitration_patch.py test_v141_dialog_signal_positions.py test_v141_history_return_chart.py test_v141_exit_limit.py test_v142_visual.py test_v143_score_arbitration.py
-          python -m unittest -v test_v141_dialog_signal_positions test_v141_history_return_chart test_v141_exit_limit test_v142_visual test_v143_score_arbitration
+          python -m py_compile v141_dialog_signal_positions_patch.py v141_history_return_chart_patch.py v141_exit_limit_patch.py v142_visual_patch.py v143_score_arbitration_patch.py v143_visual_polish_patch.py test_v141_dialog_signal_positions.py test_v141_history_return_chart.py test_v141_exit_limit.py test_v142_visual.py test_v143_score_arbitration.py test_v143_visual_polish.py
+          python -m unittest -v test_v141_dialog_signal_positions test_v141_history_return_chart test_v141_exit_limit test_v142_visual test_v143_score_arbitration test_v143_visual_polish
       - name: V1.4.3 UI source smoke test
         run: |
           python - <<'PY'
@@ -114,6 +122,7 @@ jobs:
           from PIL import Image
           import v142_visual_patch as v142
           import v143_score_arbitration_patch as v143
+          import v143_visual_polish_patch as polish
           import v138_strategy_patch as v138
           import app
           logo_path=v142._logo_path()
@@ -139,6 +148,12 @@ jobs:
                   buttons=[w for w in v138._widgets(root) if isinstance(w,app.RoundedButton)]
                   assert buttons
                   assert all(w.radius>=17 for w in buttons)
+                  assert all(w.radius>=polish._button_radius(w.button_height) for w in buttons)
+                  scrollbars=[w for w in v138._widgets(root) if isinstance(w,app.WideScrollbar)]
+                  assert len(scrollbars)>=4
+                  assert all(w.cget('bg')==app.BG for w in scrollbars)
+                  assert all(w.find_withtag('track') for w in scrollbars)
+                  assert all(w.find_withtag('thumb') for w in scrollbars)
                   by_text={w.text:w for w in buttons}
                   assert by_text['▶  启动自动交易'].variant=='accent'
                   assert by_text['仅平本程序仓位'].variant=='danger'
