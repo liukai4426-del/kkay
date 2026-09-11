@@ -1,0 +1,174 @@
+name: Build KAYTRADE Intel Mac 1.4.2 Visual Refresh
+on:
+  push:
+    branches: [codex/v1-4-2-visual-refresh]
+    paths:
+      - candles.py
+      - engine.py
+      - exchange.py
+      - app.py
+      - strategy.py
+      - visual.py
+      - desktop.py
+      - build_icon.py
+      - OKXLocal.spec
+      - assets/kaytrade-v142-logo.png
+      - v135_patch.py
+      - v135_execution_patch.py
+      - v135_flatten_noop_hotfix.py
+      - v135_auto_entry_guard.py
+      - v136_runtime.py
+      - v136_entry_fix.py
+      - v137_strategy_patch.py
+      - v137_cancel_fix.py
+      - v138_strategy_patch.py
+      - v139_position_patch.py
+      - v140_score_dialog_patch.py
+      - v141_dialog_signal_positions_patch.py
+      - v141_history_return_chart_patch.py
+      - v141_exit_limit_patch.py
+      - v142_visual_patch.py
+      - test_v141_dialog_signal_positions.py
+      - test_v141_history_return_chart.py
+      - test_v141_exit_limit.py
+      - test_v142_visual.py
+      - RELEASE-1.4.2.md
+      - .github/workflows/build-mac-v142.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  unit:
+    name: v142-strategy-safety-visual-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile V1.4.2 runtime
+        run: python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py v137_strategy_patch.py v137_cancel_fix.py v138_strategy_patch.py v139_position_patch.py v140_score_dialog_patch.py v141_dialog_signal_positions_patch.py v141_history_return_chart_patch.py v141_exit_limit_patch.py v142_visual_patch.py test_v142_visual.py
+      - name: Run preserved safety and strategy tests
+        run: |
+          python -m unittest -v test_engine test_candles test_v134 test_v135 test_v135_execution test_v135_safety2
+          python -m unittest -v test_v135_order_state test_v135_ack test_v135_fills test_v135_runtime_stability
+          python -m unittest -v test_v135_auto_entry_guard
+          python -m unittest -v test_v136_runtime test_v136_entry_fix
+          python -m unittest -v test_v137_strategy test_v137_cancel_fix
+          python -m unittest -v test_v138_strategy
+          python -m unittest -v test_v139_position
+          python -m unittest -v test_v140_score_dialog
+          python -m unittest -v test_v141_dialog_signal_positions test_v141_history_return_chart test_v141_exit_limit
+      - name: Run V1.4.2 visual tests
+        run: python -m unittest -v test_v142_visual
+      - name: Verify V1.4.2 wiring
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          spec=Path('OKXLocal.spec').read_text()
+          patch=Path('v142_visual_patch.py').read_text()
+          assert 'v142_visual_patch.py' in spec
+          assert 'assets/kaytrade-v142-logo.png' in spec
+          assert "CFBundleShortVersionString': '1.4.2'" in spec
+          assert "CFBundleVersion': '142'" in spec
+          assert Path('assets/kaytrade-v142-logo.png').stat().st_size > 5000
+          for token in ('默认停止 · 未连接','V142StatusYellow.TLabel','V142StatusGreen.TLabel','app.GREEN','app.RED','_button_radius','logo_mark'):
+              assert token in patch, token
+          print('PASS: V1.4.2 visual runtime and selected logo wired')
+          PY
+  build:
+    name: intel-mac-package
+    needs: unit
+    runs-on: macos-15-intel
+    timeout-minutes: 35
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - name: Install packaging dependencies
+        run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0'
+      - name: Re-run V1.4.1 + V1.4.2 tests on Intel Mac
+        run: |
+          python -m py_compile v141_dialog_signal_positions_patch.py v141_history_return_chart_patch.py v141_exit_limit_patch.py v142_visual_patch.py test_v141_dialog_signal_positions.py test_v141_history_return_chart.py test_v141_exit_limit.py test_v142_visual.py
+          python -m unittest -v test_v141_dialog_signal_positions test_v141_history_return_chart test_v141_exit_limit test_v142_visual
+      - name: V1.4.2 UI source smoke test
+        run: |
+          python - <<'PY'
+          import tempfile
+          import tkinter as tk
+          from tkinter import ttk
+          from pathlib import Path
+          from unittest.mock import patch
+          import v142_visual_patch as v142
+          import v138_strategy_patch as v138
+          import app
+          root=tk.Tk()
+          try:
+              with patch.object(app.App,'worker',lambda self: None):
+                  ui=app.App(root,Path(tempfile.mkdtemp(prefix='kaytrade142-')))
+                  root.update()
+                  assert '1.4.2' in root.title()
+                  assert ui.status.get()=='默认停止 · 未连接'
+                  assert ui._v142_status_kind=='yellow'
+                  assert ui._v142_status_label.cget('style')=='V142StatusYellow.TLabel'
+                  logos=[w for w in v138._widgets(root) if getattr(w,'_kaytrade_v142_logo',False)]
+                  assert logos, 'selected V1.4.2 logo not rendered'
+                  buttons=[w for w in v138._widgets(root) if isinstance(w,app.RoundedButton)]
+                  assert buttons
+                  assert all(w.radius>=17 for w in buttons)
+                  by_text={w.text:w for w in buttons}
+                  assert by_text['▶  启动自动交易'].variant=='accent'
+                  assert by_text['仅平本程序仓位'].variant=='danger'
+                  assert by_text['测试连接（只读）'].variant=='accent'
+                  assert by_text['校验并保存风险设置'].variant=='accent'
+                  assert app.RoundedButton.PALETTES['accent'][0]==app.GREEN
+                  assert app.RoundedButton.PALETTES['danger'][0]==app.RED
+                  class Store:
+                      data={'halt':False}
+                  class EngineStub:
+                      store=Store()
+                  ui.engine=EngineStub()
+                  ui.status.set('已停止新开仓 / 继续核对持仓')
+                  ui._v142_refresh_status(); root.update()
+                  assert ui._v142_status_kind=='green'
+                  assert ui._v142_status_label.cget('style')=='V142StatusGreen.TLabel'
+                  ui.engine=None
+                  ui.finished.set(); ui.lock.close()
+          finally:
+              root.destroy()
+          print('PASS: V1.4.2 logo, colors, roundness and connection status UI smoke test')
+          PY
+      - name: Create application icon from selected logo
+        run: |
+          python build_icon.py
+          test -s OKXLocal.icns
+      - name: Build Intel application
+        run: python -m PyInstaller --noconfirm OKXLocal.spec
+      - name: Verify bundle
+        run: |
+          python verify_bundle.py
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1.4.2'
+          test -s dist/KAYTRADE.app/Contents/Resources/assets/kaytrade-v142-logo.png || find dist/KAYTRADE.app -name 'kaytrade-v142-logo.png' -print -quit | grep .
+          codesign --verify --deep --strict dist/KAYTRADE.app
+      - name: Create installer
+        run: |
+          mkdir -p installer
+          ditto dist/KAYTRADE.app installer/KAYTRADE.app
+          cp RELEASE-1.4.2.md installer/RELEASE-1.4.2.md
+          printf 'PASS: V1.4.2 high-purity score colors + rounder buttons + yellow/green connection status + selected gradient logo + preserved V1.4.1 strategy\n' > installer/BUILD-TEST.txt
+          ln -s /Applications installer/Applications
+          hdiutil create -volname KAYTRADE-1.4.2 -srcfolder installer -ov -format UDZO KAYTRADE-1.4.2-Intel-test.dmg
+          shasum -a 256 KAYTRADE-1.4.2-Intel-test.dmg > SHA256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-1.4.2-Intel-test
+          path: |
+            KAYTRADE-1.4.2-Intel-test.dmg
+            SHA256.txt
+          if-no-files-found: error
+          retention-days: 14
