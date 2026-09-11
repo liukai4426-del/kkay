@@ -25,9 +25,6 @@ def _once(self, key, message, interval=60.0):
     seen=getattr(self,'_v136_decisions',None)
     if not isinstance(seen,dict):
         seen={}; self._v136_decisions=seen
-    # First occurrence must always be visible. Comparing against an implicit
-    # timestamp of 0 suppressed first logs on freshly booted runners/Macs when
-    # monotonic uptime was shorter than the throttle interval.
     if key not in seen or now-float(seen.get(key,0) or 0)>=interval:
         seen[key]=now; self.emit('log',message)
 
@@ -123,19 +120,13 @@ def apply():
         return result
 
     def acknowledge(self):
-        # Read current equity before mutating local state. The original acknowledge
-        # still performs the authoritative safety gate: auto-entry must be stopped,
-        # BTC positions/orders/algos must be empty, and any tracked parent order must
-        # be in a releasable state. If those checks fail, nothing below executes.
         equity,_=self.x.balance()
         equity=float(equity)
         if not math.isfinite(equity) or equity<=0:
             raise engine.Halt('当前账户权益无效，不能重置日内风控')
-        # V1.3.5's legacy success message says the daily baseline/streak are kept.
-        # Suppress only that obsolete line because V1.3.6 intentionally resets them.
         original_emit=self.emit
         def filtered_emit(kind,data):
-            if kind=='log' and isinstance(data,str) and data.startswith('故障锁已解除；每日权益基准、连续亏损计数与信号去重仍保留'):
+            if kind=='log' and isinstance(data,str) and '每日权益基准、连续亏损计数与信号去重仍保留' in data:
                 return
             return original_emit(kind,data)
         self.emit=filtered_emit
