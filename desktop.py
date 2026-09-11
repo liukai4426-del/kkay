@@ -13,6 +13,8 @@ from v135_patch import apply as apply_v135_patch
 apply_v135_patch()
 from v135_execution_patch import apply as apply_v135_execution_patch
 apply_v135_execution_patch()
+from v135_auto_entry_guard import apply as apply_v135_auto_entry_guard
+apply_v135_auto_entry_guard()
 
 
 def smoke_test():
