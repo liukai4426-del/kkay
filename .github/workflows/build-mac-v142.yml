@@ -101,7 +101,6 @@ jobs:
           python - <<'PY'
           import tempfile
           import tkinter as tk
-          from tkinter import ttk
           from pathlib import Path
           from unittest.mock import patch
           import v142_visual_patch as v142
@@ -116,8 +115,11 @@ jobs:
                   assert ui.status.get()=='默认停止 · 未连接'
                   assert ui._v142_status_kind=='yellow'
                   assert ui._v142_status_label.cget('style')=='V142StatusYellow.TLabel'
-                  logos=[w for w in v138._widgets(root) if getattr(w,'_kaytrade_v142_logo',False)]
-                  assert logos, 'selected V1.4.2 logo not rendered'
+                  logo=getattr(ui,'_v142_logo_widget',None)
+                  assert logo is not None, 'selected V1.4.2 logo not mounted'
+                  assert getattr(logo,'_kaytrade_v142_logo',False)
+                  assert getattr(logo,'_kaytrade_v142_logo_image',None) is not None
+                  assert len(logo.find_all())>=1
                   buttons=[w for w in v138._widgets(root) if isinstance(w,app.RoundedButton)]
                   assert buttons
                   assert all(w.radius>=17 for w in buttons)
