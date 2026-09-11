@@ -127,10 +127,13 @@ jobs:
                   assert getattr(ui,'_v146_log_filter_removed',False)
                   assert ui._v146_brand_title.cget('style')=='V146BrandTitle.TLabel'
                   assert ui._v146_brand_meta.cget('style')=='V146BrandMeta.TLabel'
-                  assert getattr(ui._v142_logo_widget,'_kaytrade_v146_logo',False)
-                  assert int(float(ui._v142_logo_widget.cget('width'))) >= v146.HEADER_LOGO_CANVAS
-                  assert ui.env_label.master is ui._v146_network_label.master
-                  assert ui.env_label.winfo_y()==ui._v146_network_label.winfo_y()
+                  assert getattr(ui._v146_logo_widget,'_kaytrade_v146_logo',False)
+                  assert int(float(ui._v146_logo_widget.cget('width'))) >= v146.HEADER_LOGO_CANVAS
+                  assert ui._v146_account_label.master is ui._v146_network_label.master
+                  assert ui._v146_account_label.winfo_y()==ui._v146_network_label.winfo_y()
+                  assert not ui._v146_legacy_env_label.winfo_ismapped()
+                  if ui._v146_legacy_network_label is not None:
+                      assert not ui._v146_legacy_network_label.winfo_ismapped()
                   assert not ui._v146_hidden_log_filter.winfo_ismapped()
                   assert not ui.log.winfo_ismapped()
                   assert len(ui.score_bars)==2
@@ -154,7 +157,7 @@ jobs:
                   ui.finished.set(); ui.lock.close()
           finally:
               root.destroy()
-          print('PASS: V1.4.6 energy bars, brand, status row and run-record card')
+          print('PASS: V1.4.6 energy bars, brand, inline status row and run-record card')
           PY
       - name: Create application icon from selected logo
         run: |
