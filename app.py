@@ -372,7 +372,14 @@ class App:
 
     def flatten(self):
         if messagebox.askyesno('真实平仓确认','立即停止新开仓，并以市价平掉本程序管理的BTC逐仓仓位？\n网络错误时不自动重复提交；可能产生滑点。'):
-            self.stop(); self.submit('flatten')
+            # Flatten owns the stop transition.  Do not enqueue a separate stop
+            # first: Engine.flatten() stops once after it has inspected the local
+            # strategy state.  The old two-command sequence produced duplicate
+            # stop logs and could race an otherwise harmless empty flatten.
+            if self.engine:
+                self.engine.enabled=False
+            self.update_trade_button()
+            self.submit('flatten')
 
     def ack(self):
         if messagebox.askyesno('核对确认','你已在OKX核对所有BTC仓位和普通/策略挂单？\n程序会再次读取；无法核实则拒绝解除。亏损计数不会重置。'):
