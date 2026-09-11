@@ -5,7 +5,7 @@ root = Path(SPECPATH)
 # runtime_hooks=[str(root / 'v136_runtime.py')]
 a = Analysis([str(root / 'desktop.py')], pathex=[str(root)],
              hiddenimports=['unittest.mock'], datas=[], binaries=[],
-             hookspath=[], runtime_hooks=[str(root / 'v136_runtime.py'), str(root / 'v136_entry_fix.py'), str(root / 'v137_strategy_patch.py'), str(root / 'v137_cancel_fix.py'), str(root / 'v138_strategy_patch.py'), str(root / 'v139_position_patch.py'), str(root / 'v140_score_dialog_patch.py'), str(root / 'v141_dialog_signal_positions_patch.py'), str(root / 'v141_history_return_chart_patch.py')], excludes=[])
+             hookspath=[], runtime_hooks=[str(root / 'v136_runtime.py'), str(root / 'v136_entry_fix.py'), str(root / 'v137_strategy_patch.py'), str(root / 'v137_cancel_fix.py'), str(root / 'v138_strategy_patch.py'), str(root / 'v139_position_patch.py'), str(root / 'v140_score_dialog_patch.py'), str(root / 'v141_dialog_signal_positions_patch.py'), str(root / 'v141_history_return_chart_patch.py'), str(root / 'v141_exit_limit_patch.py')], excludes=[])
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='KAYTRADE',
           debug=False, strip=False, upx=False, console=False,
