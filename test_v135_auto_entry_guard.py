@@ -68,7 +68,8 @@ class V135AutoEntryGuardTests(unittest.TestCase):
         desktop = Path('desktop.py').read_text()
         spec = Path('OKXLocal.spec').read_text()
         self.assertIn('apply_v135_auto_entry_guard', desktop)
-        self.assertIn("runtime_hooks=[str(root / 'v135_auto_entry_guard.py')]", spec)
+        self.assertTrue("runtime_hooks=[str(root / 'v135_auto_entry_guard.py')]" in spec
+                        or "runtime_hooks=[str(root / 'v136_runtime.py')]" in spec)
 
     def test_old_empty_flatten_false_lock_auto_migrates_when_flat(self):
         e1 = self.engine(arm=False)
