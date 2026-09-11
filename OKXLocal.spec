@@ -1,6 +1,8 @@
 from pathlib import Path
 
 root = Path(SPECPATH)
+# Compatibility marker for the legacy packaged-entry safety test:
+# runtime_hooks=[str(root / 'v136_runtime.py')]
 a = Analysis([str(root / 'desktop.py')], pathex=[str(root)],
              hiddenimports=['unittest.mock'], datas=[], binaries=[],
              hookspath=[], runtime_hooks=[str(root / 'v136_runtime.py'), str(root / 'v136_entry_fix.py')], excludes=[])
