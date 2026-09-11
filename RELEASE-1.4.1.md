@@ -1,6 +1,6 @@
 # KAYTRADE V1.4.1
 
-V1.4.1 is a focused UI and position-sizing update on top of V1.4.
+V1.4.1 is a focused UI, position-sizing, history-chart and exit-order update on top of V1.4.
 
 ## Signal position sizing
 
@@ -34,6 +34,18 @@ The `历史收益` trend chart now uses time and percentage performance directly
 - cumulative return rate = cumulative account-equity change recorded by KAYTRADE / current `策略资金预算` × 100%
 - the chart includes dated ticks and percentage grid labels
 - the historical detail table continues to show PnL and cumulative PnL in USDT
+
+## TP / SL execution
+
+All attached take-profit and stop-loss protection now uses trigger-limit execution instead of OKX's `-1` market-execution sentinel:
+
+- take-profit trigger price = take-profit limit price
+- stop-loss trigger price = stop-loss limit price
+- both long and short positions use explicit limit prices for attached TP/SL
+- the existing 2R full-position take-profit and 1R stop-loss levels are unchanged
+- the conservative cost/risk model still budgets taker-like exit costs because a limit order is not guaranteed to earn maker fees
+
+A limit stop is not guaranteed to fill during a fast price move. If an OKX TP/SL trigger creates a limit child order that remains pending, KAYTRADE keeps that limit exit in place, stops new entries and fault-locks for account verification rather than treating the position as closed. Manual flatten and emergency safety flatten remain separate safety operations and are not TP/SL orders.
 
 ## Preserved behavior
 
