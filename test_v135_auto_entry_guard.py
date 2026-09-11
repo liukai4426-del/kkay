@@ -2,6 +2,7 @@
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 from v135_auto_entry_guard import apply
 apply()
@@ -9,6 +10,7 @@ apply()
 from engine import Engine, Settings, Halt, Store
 from exchange import APIError, NetworkError
 from test_engine import FakeExchange, TICK
+import app
 
 
 class V135AutoEntryGuardTests(unittest.TestCase):
@@ -47,6 +49,26 @@ class V135AutoEntryGuardTests(unittest.TestCase):
         self.assertFalse(e.flatten())
         self.assertEqual(e.store.data['halt'], '')
         self.assertTrue(any(k == 'log' and '无需平仓' in str(v) for k, v in self.events))
+
+    def test_ui_flatten_submits_one_action_without_queued_stop(self):
+        ui = app.App.__new__(app.App)
+        ui.engine = type('Stub', (), {'enabled': True})()
+        submitted = []
+        ui.update_trade_button = lambda: None
+        ui.submit = lambda kind, data=None: submitted.append((kind, data))
+        # If App.flatten regresses to self.stop(), fail immediately.
+        ui.stop = lambda: self.fail('flatten must not enqueue a separate stop action')
+        with patch.object(app.messagebox, 'askyesno', return_value=True):
+            ui.flatten()
+        self.assertFalse(ui.engine.enabled)
+        self.assertEqual(submitted, [('flatten', None)])
+
+    def test_packaged_entry_loads_complete_fault_classifier(self):
+        from pathlib import Path
+        desktop = Path('desktop.py').read_text()
+        spec = Path('OKXLocal.spec').read_text()
+        self.assertIn('apply_v135_auto_entry_guard', desktop)
+        self.assertIn("runtime_hooks=[str(root / 'v135_auto_entry_guard.py')]", spec)
 
     def test_old_empty_flatten_false_lock_auto_migrates_when_flat(self):
         e1 = self.engine(arm=False)
