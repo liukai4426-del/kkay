@@ -13,7 +13,7 @@ class V136RuntimeTests(unittest.TestCase):
     def tearDown(self):self.tmp.cleanup()
     def logs(self):return [str(v) for k,v in self.events if k=='log']
     def test_waiting_signal_explains_no_order(self):
-        # This test targets decision reporting only.  Keep the engine explicitly
+        # This test targets decision reporting only. Keep the engine explicitly
         # armed so wall-clock/day-risk state cannot make CI skip the reporter.
         self.e.enabled=True; self.e.stopped=False; self.e.store.data['halt']=''
         bar=int(self.e.market_now()//300)*300000-300000
@@ -36,14 +36,34 @@ class V136RuntimeTests(unittest.TestCase):
         result=self.e.arm(Settings())
         self.assertFalse(result); self.assertFalse(self.e.enabled); self.assertTrue(self.e.stopped)
         self.assertTrue(any('自动交易启动未授权：中国时间本日已触发日内权益回撤停止' in v for v in self.logs()))
+        self.assertTrue(any('可在账户空仓且无挂单时使用“解除故障锁”人工重置' in v for v in self.logs()))
         self.assertFalse(any('请查看上一条启动检查/日内风控原因' in v for v in self.logs()))
-    def test_fault_unlock_reports_preserved_daily_stop(self):
-        self.e.stop(); self.events.clear(); day=_china_day()
-        self.e.store.data.update(halt='测试故障锁',day=day,daily_stop_day=day,daily_notice_day=day,peak=100,active=None)
+    def test_fault_unlock_resets_daily_stop_streak_and_rearms(self):
+        self.e.stop(); self.events.clear(); day=_china_day(); self.x.equity=95
+        self.e.store.data.update(
+            halt='测试故障锁',day=day,daily_stop_day=day,daily_notice_day=day,peak=100,
+            streak=3,streak_day=day,streak_notice_day=day,last_bar=123456,active=None)
         self.e.store.save(); self.e.acknowledge()
-        self.assertEqual(self.e.store.data['halt'],'')
+        state=self.e.store.data
+        self.assertEqual(state['halt'],'')
+        self.assertEqual(state.get('daily_stop_day'),'')
+        self.assertEqual(state.get('daily_notice_day'),'')
+        self.assertEqual(state.get('streak'),0)
+        self.assertEqual(state.get('streak_day'),day)
+        self.assertEqual(state.get('peak'),95)
+        self.assertEqual(state.get('last_bar'),123456)
+        self.assertTrue(any('当日日内回撤停止与连续亏损停止均已解除' in v for v in self.logs()))
+        self.e.arm(Settings())
+        self.assertTrue(self.e.enabled); self.assertFalse(self.e.stopped)
+        self.assertGreater(self.e.startup_buffer_until,time.monotonic())
+    def test_fault_unlock_cannot_bypass_live_exposure(self):
+        self.e.stop(); self.events.clear(); day=_china_day()
+        self.e.store.data.update(halt='仓位状态待核对',day=day,daily_stop_day=day,peak=100,active=None)
+        self.e.store.save(); self.x.pos=[{'instId':'BTC-USDT-SWAP','pos':'0.01','posSide':'long','mgnMode':'isolated'}]
+        with self.assertRaises(Exception):self.e.acknowledge()
+        self.assertEqual(self.e.store.data.get('halt'),'仓位状态待核对')
         self.assertEqual(self.e.store.data.get('daily_stop_day'),day)
-        self.assertTrue(any('V1.3.6解除锁后状态：中国时间本日已触发日内权益回撤停止' in v for v in self.logs()))
+        self.assertEqual(self.e.store.data.get('peak'),100)
     def test_fault_unlock_without_day_risk_can_rearm(self):
         self.e.stop(); self.events.clear(); day=_china_day()
         self.e.store.data.update(halt='测试故障锁',day=day,daily_stop_day='',daily_notice_day='',streak=0,streak_day=day,active=None)
