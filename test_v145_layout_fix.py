@@ -23,9 +23,9 @@ class V145LayoutFixTests(unittest.TestCase):
         self.assertIn("测试连接",source)
         self.assertIn("网络自检",source)
 
-    def test_runtime_note_is_small_black_and_right_aligned(self):
+    def test_runtime_note_is_small_gray_and_right_aligned(self):
         source=inspect.getsource(v145._style_runtime_note)
-        self.assertEqual(v145.RUNTIME_NOTE_COLOR,'#000000')
+        self.assertEqual(v145.RUNTIME_NOTE_COLOR,'#8b9ca6')
         self.assertEqual(v145.RUNTIME_NOTE_FONT,('Helvetica',9))
         self.assertIn("anchor='e'",source)
         self.assertIn("justify='right'",source)
