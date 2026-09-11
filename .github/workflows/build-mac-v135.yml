@@ -52,7 +52,7 @@ jobs:
               assert token in e, token
           for token in ("self.code=str(code or '')", "self.write_rejected=bool", "OKX订单级错误码", "move_order_stop", "def fills"):
               assert token in x, token
-          for token in ("STARTUP_BUFFER_SECONDS = 5.0","_remove_15m_setup_gate","DailyRiskStop","tpOrdPx'] = '-1'","_is_explicit_rejection","emergency_close_id","不进入51603订单核对"):
+          for token in ("STARTUP_BUFFER_SECONDS = 5.0","_remove_15m_setup_gate","DailyRiskStop","item['tpOrdPx']='-1'","_is_explicit_rejection","emergency_close_id","不进入51603订单核对"):
               assert token in p, token
           for token in ('UNKNOWN_WRITE_TIMEOUT = 60.0','SUBMIT_UNKNOWN','PARTIAL_EVIDENCE','FLATTEN_WAIT','CLOSE_SENT','CANCEL_SENT','CLOSING_EMERGENCY','emergency_close_blocked','def _acknowledge','def _matching_fills'):
               assert token in xp, token
