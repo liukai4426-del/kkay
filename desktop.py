@@ -15,10 +15,12 @@ from v135_execution_patch import apply as apply_v135_execution_patch
 apply_v135_execution_patch()
 from v135_auto_entry_guard import apply as apply_v135_auto_entry_guard
 apply_v135_auto_entry_guard()
+from v136_runtime import apply as apply_v136_runtime
+apply_v136_runtime()
 
 
 def smoke_test():
-    """Exercise the packaged V1.3.5 UI without credentials, network, or orders."""
+    """Exercise the packaged V1.3.6 UI without credentials, network, or orders."""
     import ssl
     import tkinter as tk
     from types import SimpleNamespace
@@ -34,7 +36,7 @@ def smoke_test():
                  patch.object(app.messagebox, 'showerror', side_effect=AssertionError):
                 ui = app.App(root, Path(folder))
                 root.update()
-                assert 'KAYTRADE' in root.title() and '1.3.5' in root.title()
+                assert 'KAYTRADE' in root.title() and '1.3.6' in root.title()
                 assert ui.mode.get() == 'OKX模拟盘'
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
@@ -160,7 +162,7 @@ def smoke_test():
         finally:
             root.destroy()
     Path(sys.argv[2]).write_text(
-        'PASS: KAYTRADE V1.3.5 UI + selectable 1-10 threshold + 5s startup buffer + hardened order lifecycle; '
+        'PASS: KAYTRADE V1.3.6 UI + runtime decision trace + selectable threshold + hardened order lifecycle; '
         '15m Setup is scoring-only, split TP1/TP2 are market-on-trigger, ambiguous writes remain fail-closed, '
         'manual flatten cancels unfinished parent entries first, all pending algo families are preflight-checked, '
         'functional scrollbars, direction colors, demo default, settings and bundled CA roots. No network or orders.\n')
