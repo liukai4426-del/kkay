@@ -2,14 +2,13 @@
 
 V1.4.4 visual styling is preserved, but the main page geometry is corrected so
 selected pages expand across the application instead of collapsing into a
-narrow right-side area.  Width normalization remains local to peer cards; it
-is not applied across unrelated page regions.
+narrow right-side area. Width normalization remains local to peer cards; it is
+not applied across unrelated page regions.
 """
 from v144_ui_polish_patch import apply as apply_v144
 apply_v144()
 
 import tkinter as tk
-from tkinter import ttk
 
 import app
 import engine
@@ -18,24 +17,32 @@ import visual
 V145_VERSION='1.4.5'
 
 
+def _walk(root):
+    try:children=root.winfo_children()
+    except Exception:return
+    for child in children:
+        yield child
+        yield from _walk(child)
+
+
 def _main_page_top(book):
     """Top offset below the main navigation strip."""
     try:
         book.update_idletasks()
-        return max(44, int(book.nav.winfo_reqheight()) + 10)
+        return max(44,int(book.nav.winfo_reqheight())+10)
     except Exception:
         return 54
 
 
 def _rebuild_connection_page(owner):
-    """Rebuild the Account Connection page as one full-width responsive card."""
+    """Rebuild Account Connection as one full-width responsive panel."""
     book=getattr(owner,'book',None)
     if book is None or not getattr(book,'pages',None):
         return False
     page=book.pages[0]
     for child in list(page.winfo_children()):
-        try: child.destroy()
-        except Exception: pass
+        try:child.destroy()
+        except Exception:pass
 
     surface=app.Card(page,height=650)
     surface.pack(fill='both',expand=True,pady=(0,4))
@@ -95,7 +102,8 @@ def apply():
     previous_cycle=engine.Engine.cycle
 
     def tabs_select(self,page=None):
-        # Nested score/indicator tabs keep their original compact layout.
+        # Nested score/indicator tabs keep the previous compact layout. Only the
+        # top-level application pages use the full-width placement geometry.
         if not getattr(self,'_v145_main_layout',False):
             return previous_tabs_select(self,page)
         if page is None:
@@ -125,14 +133,13 @@ def apply():
         self.book._v145_main_layout=True
         _rebuild_connection_page(self)
 
-        # Re-apply the currently selected main page using the full-width geometry.
+        # Re-apply the currently selected main page with explicit full-area geometry.
         current=self.book.active if self.book.active is not None else 0
         self.book.select(current)
         self.root.update_idletasks()
         self._v145_layout_full_width=True
 
-        # Update only the version subtitle; no trading wording or strategy state is changed.
-        for widget in visual._walk(self.root) if hasattr(visual,'_walk') else ():
+        for widget in _walk(self.root):
             try:
                 text=str(widget.cget('text') or '')
                 if 'V1.4.4 视觉精修版' in text:
