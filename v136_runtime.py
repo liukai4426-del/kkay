@@ -1,9 +1,11 @@
-"""V1.3.6 runtime state/decision observability patch.
+"""V1.3.6 runtime state/decision observability and manual recovery patch.
 
 No strategy weights, sizing, entry order type, or TP/SL rules are changed here.
-This patch keeps fail-closed behavior while making every manual start explain the
-actual blocker instead of falling back to a generic "not eligible" message.
+Manual fault unlock may reset recoverable day-risk stops after the existing account
+cross-check proves BTC positions/orders/algos are empty. Ambiguous live exposure or
+unverified order state still fails closed through the original acknowledge checks.
 """
+import math
 import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -23,7 +25,7 @@ def _once(self, key, message, interval=60.0):
     seen=getattr(self,'_v136_decisions',None)
     if not isinstance(seen,dict):
         seen={}; self._v136_decisions=seen
-    # First occurrence must always be visible.  Comparing against an implicit
+    # First occurrence must always be visible. Comparing against an implicit
     # timestamp of 0 suppressed first logs on freshly booted runners/Macs when
     # monotonic uptime was shorter than the throttle interval.
     if key not in seen or now-float(seen.get(key,0) or 0)>=interval:
@@ -31,19 +33,19 @@ def _once(self, key, message, interval=60.0):
 
 
 def _preserved_risk_block(self, settings=None):
-    """Return a human-readable preserved day-risk blocker without weakening it."""
+    """Return a human-readable recoverable day-risk blocker."""
     if not self.store:
         return ''
     state=self.store.data; day=_china_day(); settings=settings or getattr(self,'settings',None)
     if state.get('daily_stop_day')==day:
         limit=getattr(settings,'daily_loss',None)
         suffix=f'（日内回撤上限 {float(limit):g} USDT）' if isinstance(limit,(int,float)) else ''
-        return '中国时间本日已触发日内权益回撤停止'+suffix+'；故障锁解除不会重置该风控，次日自动恢复'
+        return '中国时间本日已触发日内权益回撤停止'+suffix+'；可在账户空仓且无挂单时使用“解除故障锁”人工重置'
     streak_day=state.get('streak_day')
     streak=int(state.get('streak') or 0)
     limit=int(getattr(settings,'consecutive_losses',0) or 0) if settings else 0
     if streak_day==day and limit>0 and streak>=limit:
-        return f'中国时间本日连续净亏损已达 {streak} 次（上限 {limit} 次）；停止新开仓，次日自动恢复'
+        return f'中国时间本日连续净亏损已达 {streak} 次（上限 {limit} 次）；可在账户空仓且无挂单时使用“解除故障锁”人工重置'
     return ''
 
 
@@ -121,12 +123,36 @@ def apply():
         return result
 
     def acknowledge(self):
+        # Read current equity before mutating local state. The original acknowledge
+        # still performs the authoritative safety gate: auto-entry must be stopped,
+        # BTC positions/orders/algos must be empty, and any tracked parent order must
+        # be in a releasable state. If those checks fail, nothing below executes.
+        equity,_=self.x.balance()
+        equity=float(equity)
+        if not math.isfinite(equity) or equity<=0:
+            raise engine.Halt('当前账户权益无效，不能重置日内风控')
         result=original_acknowledge(self)
-        risk_block=_preserved_risk_block(self)
-        if risk_block:
-            self.emit('log','V1.3.6解除锁后状态：'+risk_block+'；这是独立日内风控，不会随故障锁一起清除')
-        else:
-            self.emit('log','V1.3.6解除锁后状态：未检测到当日日内回撤/连续亏损阻断；重新启动自动交易后将重新执行完整启动检查')
+        if not self.store:
+            return result
+        day=_china_day(); state=self.store.data
+        preserved_last_bar=state.get('last_bar',0)
+        state.update(
+            day=day,
+            peak=equity,
+            daily_stop_day='',
+            daily_notice_day='',
+            streak=0,
+            streak_day=day,
+            streak_notice_day='',
+            last_bar=preserved_last_bar,
+        )
+        self.store.save()
+        self.store.record('V1.3.6人工解除可恢复风险停止',{
+            'day':day,
+            'equity_baseline':equity,
+            'last_bar_preserved':preserved_last_bar,
+        })
+        self.emit('log',f'V1.3.6人工恢复完成：故障锁、当日日内回撤停止与连续亏损停止均已解除；日内权益基准重置为 {equity:g} USDT；信号去重仍保留。重新启动自动交易后会再次执行完整启动检查')
         return result
 
     def cycle(self):
