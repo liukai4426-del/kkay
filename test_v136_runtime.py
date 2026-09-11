@@ -53,6 +53,7 @@ class V136RuntimeTests(unittest.TestCase):
         self.assertEqual(state.get('peak'),95)
         self.assertEqual(state.get('last_bar'),123456)
         self.assertTrue(any('当日日内回撤停止与连续亏损停止均已解除' in v for v in self.logs()))
+        self.assertFalse(any('每日权益基准、连续亏损计数与信号去重仍保留' in v for v in self.logs()))
         self.e.arm(Settings())
         self.assertTrue(self.e.enabled); self.assertFalse(self.e.stopped)
         self.assertGreater(self.e.startup_buffer_until,time.monotonic())
