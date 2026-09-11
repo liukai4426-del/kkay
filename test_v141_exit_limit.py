@@ -53,6 +53,19 @@ class ExitLimitTests(unittest.TestCase):
         self.assertNotEqual(bracket['tpOrdPx'],'-1')
         self.assertNotEqual(bracket['slOrdPx'],'-1')
 
+    def test_manual_and_emergency_market_flatten_orders_remain_market(self):
+        fake=FakePostTarget()
+        body={
+            'instId':'BTC-USDT-SWAP','tdMode':'isolated','posSide':'long',
+            'side':'sell','ordType':'market','sz':'1','clOrdId':'ec-test',
+        }
+        exchange.Exchange.post(fake,'/api/v5/trade/order',body)
+        method,path,payload,private=fake.calls[-1]
+        self.assertEqual((method,path,private),('POST','/api/v5/trade/order',True))
+        self.assertEqual(payload['ordType'],'market')
+        self.assertNotIn('px',payload)
+        self.assertNotIn('attachAlgoOrds',payload)
+
     def test_triggered_exit_child_is_recognized_strictly(self):
         p={'posSide':'long','legs':[{'state':'filled','sz':'2','tp':'120','sl':'90'}]}
         child={'source':'7','posSide':'long','tdMode':'isolated','side':'sell','ordType':'limit','px':'90','sz':'2'}
