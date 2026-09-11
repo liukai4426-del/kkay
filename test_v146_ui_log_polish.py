@@ -27,8 +27,9 @@ class V146UiLogPolishTests(unittest.TestCase):
     def test_account_and_network_share_one_aligned_row(self):
         source=inspect.getsource(v146._align_account_network)
         self.assertIn("padding=(MAIN_PAD,0)",source)
-        self.assertIn("env.pack(side='left'",source)
+        self.assertIn("account.pack(side='left'",source)
         self.assertIn("network.pack(side='left'",source)
+        self.assertIn('_v146_status_inline',source)
         self.assertIn('_v146_status_row_aligned',source)
 
     def test_run_record_card_replaces_legacy_filter(self):
