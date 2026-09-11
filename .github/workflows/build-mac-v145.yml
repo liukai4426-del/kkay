@@ -56,7 +56,7 @@ jobs:
         with:
           python-version: '3.13'
       - name: Compile V1.4.5 runtime
-        run: python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py v137_strategy_patch.py v137_cancel_fix.py v138_strategy_patch.py v139_position_patch.py v140_score_dialog_patch.py v141_dialog_signal_positions_patch.py v141_history_return_chart_patch.py v141_exit_limit_patch.py v142_visual_patch.py v143_score_arbitration_patch.py v143_visual_polish_patch.py v144_ui_polish_patch.py v145_layout_fix_patch.py test_v145_layout_fix.py
+        run: python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py v137_strategy_patch.py v137_cancel_fix.py v138_strategy_patch.py v139_position_patch.py v140_score_dialog_patch.py v141_dialog_signal_positions_patch.py v141_history_return_chart_patch.py v141_exit_limit_patch.py v142_visual_patch.py v143_score_arbitration_patch.py v143_visual_polish_patch.py v144_ui_polish_patch.py v145_layout_fix_patch.py test_v145_layout_fix.py build_icon.py
       - name: Run preserved safety and strategy tests
         run: |
           python -m unittest -v test_engine test_candles test_v134 test_v135 test_v135_execution test_v135_safety2
@@ -70,7 +70,7 @@ jobs:
           python -m unittest -v test_v141_dialog_signal_positions test_v141_history_return_chart test_v141_exit_limit
       - name: Run V1.4.2 through V1.4.4 regression tests
         run: python -m unittest -v test_v142_visual test_v143_score_arbitration test_v143_visual_polish test_v144_ui_polish
-      - name: Run V1.4.5 layout tests
+      - name: Run V1.4.5 layout and visual feedback tests
         run: python -m unittest -v test_v145_layout_fix
       - name: Verify V1.4.5 wiring
         run: |
@@ -78,12 +78,15 @@ jobs:
           from pathlib import Path
           spec=Path('OKXLocal.spec').read_text()
           patch=Path('v145_layout_fix_patch.py').read_text()
+          icon=Path('build_icon.py').read_text()
           assert 'v145_layout_fix_patch.py' in spec
           assert "CFBundleShortVersionString': '1.4.5'" in spec
           assert "CFBundleVersion': '145'" in spec
-          for token in ('relwidth=1.0','relheight=1.0','_rebuild_connection_page','_v145_main_layout','账户连接'):
+          for token in ('relwidth=1.0','relheight=1.0','_rebuild_connection_page','_centered_modal','_style_brand','_flatten_connection_badge','_align_right_header_lines','_style_signal_summary','HISTORY_AXIS_TITLES'):
               assert token in patch, token
-          print('PASS: V1.4.5 full-width layout runtime wired')
+          assert 'LOGO_CROP_RATIO=0.02' in icon
+          assert 'LOGO_SIZE=780' in icon
+          print('PASS: V1.4.5 feedback repair runtime wired')
           PY
   build:
     name: intel-mac-package
@@ -102,9 +105,9 @@ jobs:
         run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0'
       - name: Re-run V1.4.1 through V1.4.5 tests on Intel Mac
         run: |
-          python -m py_compile v141_dialog_signal_positions_patch.py v141_history_return_chart_patch.py v141_exit_limit_patch.py v142_visual_patch.py v143_score_arbitration_patch.py v143_visual_polish_patch.py v144_ui_polish_patch.py v145_layout_fix_patch.py test_v141_dialog_signal_positions.py test_v141_history_return_chart.py test_v141_exit_limit.py test_v142_visual.py test_v143_score_arbitration.py test_v143_visual_polish.py test_v144_ui_polish.py test_v145_layout_fix.py
+          python -m py_compile v141_dialog_signal_positions_patch.py v141_history_return_chart_patch.py v141_exit_limit_patch.py v142_visual_patch.py v143_score_arbitration_patch.py v143_visual_polish_patch.py v144_ui_polish_patch.py v145_layout_fix_patch.py test_v141_dialog_signal_positions.py test_v141_history_return_chart.py test_v141_exit_limit.py test_v142_visual.py test_v143_score_arbitration.py test_v143_visual_polish.py test_v144_ui_polish.py test_v145_layout_fix.py build_icon.py
           python -m unittest -v test_v141_dialog_signal_positions test_v141_history_return_chart test_v141_exit_limit test_v142_visual test_v143_score_arbitration test_v143_visual_polish test_v144_ui_polish test_v145_layout_fix
-      - name: V1.4.5 full-width UI smoke test
+      - name: V1.4.5 full-width and visual feedback UI smoke test
         run: |
           python - <<'PY'
           import tempfile
@@ -123,6 +126,8 @@ jobs:
                   assert '1.4.5' in root.title()
                   assert getattr(ui,'_v145_layout_full_width',False)
                   assert getattr(ui,'_v145_connection_rebuilt',False)
+
+                  # Main pages still use the repaired full-width layout.
                   ui.book.select(0)
                   root.update_idletasks(); root.update()
                   page=ui._v145_connection_page
@@ -135,6 +140,43 @@ jobs:
                   assert surface_width >= page_width*0.94, (page_width,surface_width)
                   assert len(ui.connection_widgets)==5
                   assert all(w.winfo_width() >= 500 for w in ui.connection_widgets), [w.winfo_width() for w in ui.connection_widgets]
+
+                  # Brand/logo sizing and flat connected state.
+                  assert ui._v145_brand_title.cget('style')=='V145BrandTitle.TLabel'
+                  assert ui._v145_brand_meta.cget('style')=='V145BrandMeta.TLabel'
+                  assert getattr(ui._v142_logo_widget,'_kaytrade_v145_logo',False)
+                  assert int(float(ui._v142_logo_widget.cget('width'))) >= v145.HEADER_LOGO_CANVAS
+                  ui.environment.set('已连接：OKX模拟盘')
+                  ui.env_label.configure(bg='#173c31',fg='#65eeb4')
+                  assert ui.env_label.cget('bg')==app.BG
+                  assert ui.env_label.cget('fg')==app.GREEN
+
+                  # Header alignment and smaller score summary.
+                  assert ui._v145_right_header_aligned
+                  assert ui._v145_runtime_note.cget('style')=='V145RuntimeNote.TLabel'
+                  assert ui._v145_signal_label.cget('style')=='V145SignalSummary.TLabel'
+
+                  # Historical chart keeps tick values but drops only standalone axis titles.
+                  ui._v141_history_return_points=[('2026-09-10T10:00:00',0.4),('2026-09-11T10:00:00',1.2)]
+                  ui._v141_history_return_capital=5000.0
+                  ui.draw_curve()
+                  chart_texts=[]
+                  for item in ui.chart.find_all():
+                      if ui.chart.type(item)=='text':chart_texts.append(ui.chart.itemcget(item,'text'))
+                  assert '日期' not in chart_texts and '收益率' not in chart_texts
+                  assert any('%' in text for text in chart_texts)
+                  assert any('09-10' in text or '09-11' in text for text in chart_texts)
+
+                  # Final custom result modal has centered content and no black outer gutter.
+                  modal=v145._centered_modal(root,'设置保存成功','参数校验通过并已保存。',True)
+                  root.update_idletasks(); root.update()
+                  assert modal.cget('bg')==app.PANEL
+                  assert getattr(modal,'_v145_no_outer_black_frame',False)
+                  assert getattr(modal,'_v145_all_centered',False)
+                  try:modal.grab_release()
+                  except Exception:pass
+                  modal.destroy()
+
                   ui.book.select(3)
                   root.update_idletasks(); root.update()
                   dash=ui.book.pages[3]
@@ -142,7 +184,7 @@ jobs:
                   ui.finished.set(); ui.lock.close()
           finally:
               root.destroy()
-          print('PASS: V1.4.5 main pages and Account Connection expand across the application')
+          print('PASS: V1.4.5 layout, modal, brand, status, chart and score-summary feedback fixes')
           PY
       - name: Create application icon from selected logo
         run: |
@@ -161,7 +203,7 @@ jobs:
           mkdir -p installer
           ditto dist/KAYTRADE.app installer/KAYTRADE.app
           cp RELEASE-1.4.5.md installer/RELEASE-1.4.5.md
-          printf 'PASS: V1.4.5 full-width layout repair + V1.4.4 visual polish + V1.4.3 trading logic preserved\n' > installer/BUILD-TEST.txt
+          printf 'PASS: V1.4.5 reported UI feedback fixes + V1.4.3 trading logic preserved\n' > installer/BUILD-TEST.txt
           ln -s /Applications installer/Applications
           hdiutil create -volname KAYTRADE-1.4.5 -srcfolder installer -ov -format UDZO KAYTRADE-1.4.5-Intel-test.dmg
           shasum -a 256 KAYTRADE-1.4.5-Intel-test.dmg > SHA256.txt
