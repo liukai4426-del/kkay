@@ -131,7 +131,18 @@ def apply():
         equity=float(equity)
         if not math.isfinite(equity) or equity<=0:
             raise engine.Halt('当前账户权益无效，不能重置日内风控')
-        result=original_acknowledge(self)
+        # V1.3.5's legacy success message says the daily baseline/streak are kept.
+        # Suppress only that obsolete line because V1.3.6 intentionally resets them.
+        original_emit=self.emit
+        def filtered_emit(kind,data):
+            if kind=='log' and isinstance(data,str) and data.startswith('故障锁已解除；每日权益基准、连续亏损计数与信号去重仍保留'):
+                return
+            return original_emit(kind,data)
+        self.emit=filtered_emit
+        try:
+            result=original_acknowledge(self)
+        finally:
+            self.emit=original_emit
         if not self.store:
             return result
         day=_china_day(); state=self.store.data
