@@ -1,9 +1,10 @@
 import tempfile,time,unittest
 from pathlib import Path
+import v136_runtime
 from v136_runtime import apply,_decision,_china_day
 apply()
-from engine import Engine,Settings,Store
-from test_engine import FakeExchange
+from engine import Engine,Settings,Store,make_plan
+from test_engine import FakeExchange,META,TICK
 
 class V136RuntimeTests(unittest.TestCase):
     def setUp(self):
@@ -72,5 +73,22 @@ class V136RuntimeTests(unittest.TestCase):
         self.assertTrue(self.e.enabled); self.assertFalse(self.e.stopped)
         self.assertGreater(self.e.startup_buffer_until,time.monotonic())
         self.assertTrue(any('自动开仓已授权；5秒缓冲后进入信号执行' in v for v in self.logs()))
+    def test_tp_cost_filter_uses_expected_fees_not_full_slippage_budget(self):
+        v136_runtime._ACCOUNT_SNAPSHOT.clear()
+        p=make_plan(Settings(),'做多',TICK,META,200,100,3)
+        self.assertGreater(p['expected_fee_multiple'],p['worst_cost_multiple'])
+        self.assertLess(p['expected_roundtrip_cost'],p['worst_roundtrip_cost'])
+        self.assertEqual(p['entry_fee_budget_bps'],2.0)
+        self.assertAlmostEqual(p['stop_distance'],200)
+        self.assertGreater(p['expected_net_profit'],0)
+    def test_live_equity_caps_risk_budget_and_is_attached_to_plan(self):
+        v136_runtime._ACCOUNT_SNAPSHOT.update(equity=50.0,available=40.0,at=time.monotonic())
+        s=Settings(capital=100,max_notional=500,risk_usdt=10,risk_pct=1,daily_loss=3)
+        p=make_plan(s,'做多',TICK,META,200,40,3)
+        self.assertEqual(p['account_equity'],50.0)
+        self.assertEqual(p['available_balance'],40.0)
+        self.assertEqual(p['risk_capital'],50.0)
+        self.assertAlmostEqual(p['base_risk_budget'],.5)
+        self.assertLessEqual(p['notional'],40*.9*s.leverage+1e-9)
 
 if __name__=='__main__':unittest.main(verbosity=2)
