@@ -17,7 +17,9 @@ on:
       - v136_runtime.py
       - v136_entry_fix.py
       - v137_strategy_patch.py
+      - v137_cancel_fix.py
       - test_v137_strategy.py
+      - test_v137_cancel_fix.py
       - RELEASE-1.3.7.md
       - .github/workflows/build-mac-v137.yml
   workflow_dispatch:
@@ -34,7 +36,7 @@ jobs:
         with:
           python-version: '3.13'
       - name: Compile strategy and runtime patches
-        run: python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py desktop.py v135_patch.py v135_execution_patch.py v135_flatten_noop_hotfix.py v135_auto_entry_guard.py v136_runtime.py v136_entry_fix.py v137_strategy_patch.py test_v137_strategy.py
+        run: python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py desktop.py v135_patch.py v135_execution_patch.py v135_flatten_noop_hotfix.py v135_auto_entry_guard.py v136_runtime.py v136_entry_fix.py v137_strategy_patch.py v137_cancel_fix.py test_v137_strategy.py test_v137_cancel_fix.py
       - name: Run preserved execution safety tests
         run: |
           python -m unittest -v test_engine test_candles test_v134 test_v135 test_v135_execution test_v135_safety2
@@ -42,19 +44,21 @@ jobs:
           python -m unittest -v test_v135_auto_entry_guard
           python -m unittest -v test_v136_runtime test_v136_entry_fix
       - name: Run V1.3.7 strategy tests in isolated process
-        run: python -m unittest -v test_v137_strategy
+        run: python -m unittest -v test_v137_strategy test_v137_cancel_fix
       - name: Verify V1.3.7 packaging wiring
         run: |
           python - <<'PY'
           from pathlib import Path
           spec=Path('OKXLocal.spec').read_text()
           patch=Path('v137_strategy_patch.py').read_text()
-          assert 'v137_strategy_patch.py' in spec
+          cancel=Path('v137_cancel_fix.py').read_text()
+          assert 'v137_strategy_patch.py' in spec and 'v137_cancel_fix.py' in spec
           assert "CFBundleShortVersionString': '1.3.7'" in spec
           assert 'V137_THRESHOLD = 3.5' in patch
           assert "return 3, 2.0, '三级超强信号'" in patch
           assert "'tpOrdPx':'-1'" in patch and "'slOrdPx':'-1'" in patch
           assert '整仓TP=2R' in patch
+          assert '不触发平仓冷却' in cancel
           print('PASS: V1.3.7 wiring')
           PY
 
@@ -75,8 +79,8 @@ jobs:
         run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0'
       - name: Re-run V1.3.7 tests on Intel Mac
         run: |
-          python -m py_compile v137_strategy_patch.py test_v137_strategy.py
-          python -m unittest -v test_v137_strategy
+          python -m py_compile v137_strategy_patch.py v137_cancel_fix.py test_v137_strategy.py test_v137_cancel_fix.py
+          python -m unittest -v test_v137_strategy test_v137_cancel_fix
       - name: V1.3.7 UI source smoke test
         run: |
           python - <<'PY'
@@ -84,8 +88,12 @@ jobs:
           import tkinter as tk
           from pathlib import Path
           from unittest.mock import patch
+          import v137_cancel_fix
           import v137_strategy_patch
           import app
+          def text_of(widget):
+              try: return str(widget.cget('text') or '')
+              except Exception: return ''
           root=tk.Tk()
           try:
               with patch.object(app.App,'worker',lambda self: None):
@@ -95,7 +103,7 @@ jobs:
                   assert ui.fields['score_threshold'].get() == '3.5'
                   threshold_widgets=[w for w in v137_strategy_patch._widgets(root) if isinstance(w,app.RoundedEntry) and getattr(w,'variable',None) is ui.fields['score_threshold']]
                   assert len(threshold_widgets)==1 and str(threshold_widgets[0].entry.cget('state'))=='disabled'
-                  fixed_labels=[w for w in v137_strategy_patch._widgets(root) if getattr(w,'cget',lambda *_: '')('text')=='固定执行成本']
+                  fixed_labels=[w for w in v137_strategy_patch._widgets(root) if text_of(w)=='固定执行成本']
                   assert fixed_labels
                   card=fixed_labels[0].master.master
                   assert card.cget('bg') == app.PANEL_ALT
