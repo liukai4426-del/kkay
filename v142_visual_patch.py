@@ -18,7 +18,6 @@ apply_v141()
 import app
 import engine
 import visual
-import v138_strategy_patch as v138
 
 V142_VERSION='1.4.2'
 YELLOW='#ffd84d'
@@ -82,8 +81,6 @@ def apply():
             return previous_mark(parent)
         c=tk.Canvas(parent,width=50,height=50,bg=app.BG,highlightthickness=0,borderwidth=0)
         try:
-            # Pillow/ImageTk is more reliable than Aqua Tk's native PNG loader for
-            # alpha/gradient assets. It is packaged with the Intel build.
             from PIL import Image,ImageTk
             pil=Image.open(path).convert('RGBA').resize((44,44),Image.Resampling.LANCZOS)
             image=ImageTk.PhotoImage(pil,master=parent)
@@ -147,34 +144,26 @@ def apply():
             except Exception:
                 pass
 
-        # Defensive replacement for an already-created legacy 48px K mark. This
-        # also makes the logo robust if an older wrapper captured the legacy mark.
-        if self._v142_logo_widget is None:
-            legacy=None
-            for w in _walk(self.root):
+        # The status label gives us the exact header container. Replace the legacy
+        # logo there directly instead of guessing by canvas dimensions.
+        if self._v142_logo_widget is None and self._v142_status_label is not None:
+            header=self._v142_status_label.master
+            children=list(header.winfo_children())
+            brand=next((w for w in children if isinstance(w,ttk.Frame)),None)
+            for w in children:
                 if isinstance(w,tk.Canvas):
-                    try:
-                        if int(w.cget('width'))==48 and int(w.cget('height'))==48 and w.winfo_manager()=='pack':
-                            legacy=w; break
+                    try:w.destroy()
                     except Exception:pass
-            if legacy is not None:
-                parent=legacy.master
-                siblings=list(parent.winfo_children())
-                try:index=siblings.index(legacy)
-                except ValueError:index=-1
-                before=siblings[index+1] if 0<=index+1<len(siblings) else None
-                try:legacy.destroy()
-                except Exception:pass
-                replacement=logo_mark(parent)
-                try:
-                    if before is not None:
-                        replacement.pack(side='left',padx=(0,12),before=before)
-                    else:
-                        replacement.pack(side='left',padx=(0,12))
-                except Exception:
+            replacement=logo_mark(header)
+            try:
+                if brand is not None:
+                    replacement.pack(side='left',padx=(0,12),before=brand)
+                else:
                     replacement.pack(side='left',padx=(0,12))
-                if getattr(replacement,'_kaytrade_v142_logo',False):
-                    self._v142_logo_widget=replacement
+            except Exception:
+                replacement.pack(side='left',padx=(0,12))
+            if getattr(replacement,'_kaytrade_v142_logo',False):
+                self._v142_logo_widget=replacement
 
         try:
             if not (getattr(self,'engine',None) and getattr(self.engine,'store',None)):
