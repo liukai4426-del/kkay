@@ -1,13 +1,21 @@
 """V1.3.6 runtime state/decision observability patch.
 
-No strategy weights, sizing, entry order type, or TP/SL rules are changed here.\nThe build marker below exists only to trigger complete-branch validation.
+No strategy weights, sizing, entry order type, or TP/SL rules are changed here.
+This patch keeps fail-closed behavior while making every manual start explain the
+actual blocker instead of falling back to a generic "not eligible" message.
 """
 import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from v135_auto_entry_guard import apply as apply_v135_guard
 apply_v135_guard()
 
 import engine
+
+
+def _china_day():
+    return datetime.now(ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d')
 
 
 def _once(self, key, message, interval=60.0):
@@ -19,6 +27,23 @@ def _once(self, key, message, interval=60.0):
         seen[key]=now; self.emit('log',message)
 
 
+def _preserved_risk_block(self, settings=None):
+    """Return a human-readable preserved day-risk blocker without weakening it."""
+    if not self.store:
+        return ''
+    state=self.store.data; day=_china_day(); settings=settings or getattr(self,'settings',None)
+    if state.get('daily_stop_day')==day:
+        limit=getattr(settings,'daily_loss',None)
+        suffix=f'（日内回撤上限 {float(limit):g} USDT）' if isinstance(limit,(int,float)) else ''
+        return '中国时间本日已触发日内权益回撤停止'+suffix+'；故障锁解除不会重置该风控，次日自动恢复'
+    streak_day=state.get('streak_day')
+    streak=int(state.get('streak') or 0)
+    limit=int(getattr(settings,'consecutive_losses',0) or 0) if settings else 0
+    if streak_day==day and limit>0 and streak>=limit:
+        return f'中国时间本日连续净亏损已达 {streak} 次（上限 {limit} 次）；停止新开仓，次日自动恢复'
+    return ''
+
+
 def _decision(self):
     """Explain a no-order cycle using state already read by the engine."""
     if not self.store:return
@@ -28,6 +53,10 @@ def _decision(self):
     if state.get('active'):
         p=state['active']; phase=p.get('phase') or ('已成交' if p.get('filled') else '等待OKX订单状态')
         _once(self,'active:'+str(p.get('client_id')),f'自动下单状态：已有本程序活动记录（{phase}），先核对/管理该订单，不重复开仓')
+        return
+    risk_block=_preserved_risk_block(self)
+    if risk_block:
+        _once(self,'risk-block:'+_china_day()+':'+risk_block,'自动下单检查：'+risk_block,60)
         return
     if not self.enabled:
         return
@@ -68,16 +97,33 @@ def apply():
     original_arm=engine.Engine.arm
     original_cycle=engine.Engine.cycle
     original_stop=engine.Engine.stop
+    original_acknowledge=engine.Engine.acknowledge
 
     def arm(self,settings):
         result=original_arm(self,settings)
+        risk_block=_preserved_risk_block(self,settings)
         if not self.enabled:
             self.startup_buffer_until=0.0
             self.stopped=True
-            _once(self,'arm-blocked','自动交易未进入可开仓状态；请查看上一条启动检查/日内风控原因',5)
+            if risk_block:
+                self.emit('log','自动交易启动未授权：'+risk_block+'；未产生开仓请求')
+            else:
+                self.emit('log','自动交易启动未授权：启动检查未通过；未产生开仓请求。请查看同一时间的“自动交易启动检查未通过”日志获取具体原因')
             return False
         self.stopped=False
-        self.emit('log','V1.3.6运行状态确认：自动开仓已授权；5秒缓冲后进入信号执行')
+        if risk_block:
+            self.emit('log','V1.3.6运行状态确认：自动交易已授权，但'+risk_block)
+        else:
+            self.emit('log','V1.3.6运行状态确认：自动开仓已授权；5秒缓冲后进入信号执行')
+        return result
+
+    def acknowledge(self):
+        result=original_acknowledge(self)
+        risk_block=_preserved_risk_block(self)
+        if risk_block:
+            self.emit('log','V1.3.6解除锁后状态：'+risk_block+'；这是独立日内风控，不会随故障锁一起清除')
+        else:
+            self.emit('log','V1.3.6解除锁后状态：未检测到当日日内回撤/连续亏损阻断；重新启动自动交易后将重新执行完整启动检查')
         return result
 
     def cycle(self):
@@ -99,7 +145,7 @@ def apply():
         self.startup_buffer_until=0.0
         return result
 
-    engine.Engine.arm=arm; engine.Engine.cycle=cycle; engine.Engine.stop=stop
+    engine.Engine.arm=arm; engine.Engine.cycle=cycle; engine.Engine.stop=stop; engine.Engine.acknowledge=acknowledge
     engine.Engine._kaytrade_v136_runtime_applied=True
 
 
