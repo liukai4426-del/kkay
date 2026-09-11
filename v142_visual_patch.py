@@ -25,6 +25,7 @@ ACCENT_HOVER='#1aefb1'
 ACCENT_PRESSED='#09b987'
 DANGER_HOVER='#ff7892'
 DANGER_PRESSED='#df4f6b'
+LOGO_ERRORS=[]
 
 
 def _asset_root():
@@ -62,7 +63,6 @@ def apply():
     if getattr(engine.Engine,'_kaytrade_v142_visual_applied',False):
         return
 
-    # Use exactly the score-board long/short colors for primary green/red buttons.
     app.RoundedButton.PALETTES['accent']=(app.GREEN,ACCENT_HOVER,ACCENT_PRESSED,'#04120d')
     app.RoundedButton.PALETTES['danger']=(app.RED,DANGER_HOVER,DANGER_PRESSED,'#19070b')
 
@@ -78,6 +78,7 @@ def apply():
     def logo_mark(parent):
         path=_logo_path()
         if not path.exists():
+            LOGO_ERRORS.append(('missing',str(path)))
             return previous_mark(parent)
         c=tk.Canvas(parent,width=50,height=50,bg=app.BG,highlightthickness=0,borderwidth=0)
         try:
@@ -86,14 +87,16 @@ def apply():
             image=ImageTk.PhotoImage(pil,master=parent)
             c.create_image(25,25,image=image,anchor='center')
             c._kaytrade_v142_logo_pil=pil
-        except Exception:
+        except Exception as pil_error:
+            LOGO_ERRORS.append(('pillow',repr(pil_error),str(path),path.stat().st_size if path.exists() else -1))
             try:
                 source=tk.PhotoImage(master=parent,file=str(path))
                 factor=max(1,int(round(max(source.width(),source.height())/44.0)))
                 image=source.subsample(factor,factor) if factor>1 else source
                 c.create_image(25,25,image=image,anchor='center')
                 c._kaytrade_v142_logo_source=source
-            except Exception:
+            except Exception as tk_error:
+                LOGO_ERRORS.append(('tk',repr(tk_error)))
                 c.destroy()
                 return previous_mark(parent)
         c._kaytrade_v142_logo=True
@@ -108,8 +111,7 @@ def apply():
 
     def refresh_status(self):
         label=getattr(self,'_v142_status_label',None)
-        if label is None:
-            return
+        if label is None:return
         connected=bool(getattr(self,'engine',None) and getattr(self.engine,'store',None))
         halted=False
         try:halted=bool(self.engine.store.data.get('halt')) if connected else False
@@ -124,28 +126,18 @@ def apply():
         previous_app_init(self,*args,**kwargs)
         try:self.root.title('KAYTRADE 1.4.2 · BTC 策略控制台')
         except Exception:pass
-
         style=ttk.Style(self.root)
         style.configure('V142StatusYellow.TLabel',background=app.BG,foreground=YELLOW,font=('Helvetica',11,'bold'))
         style.configure('V142StatusGreen.TLabel',background=app.BG,foreground=app.GREEN,font=('Helvetica',11,'bold'))
         style.configure('V142StatusRed.TLabel',background=app.BG,foreground=app.RED,font=('Helvetica',11,'bold'))
-
-        self._v142_status_label=None
-        self._v142_logo_widget=None
+        self._v142_status_label=None; self._v142_logo_widget=None
         for w in _walk(self.root):
-            if getattr(w,'_kaytrade_v142_logo',False):
-                self._v142_logo_widget=w
+            if getattr(w,'_kaytrade_v142_logo',False):self._v142_logo_widget=w
             try:
-                if isinstance(w,ttk.Label) and str(w.cget('textvariable'))==str(self.status):
-                    self._v142_status_label=w
+                if isinstance(w,ttk.Label) and str(w.cget('textvariable'))==str(self.status):self._v142_status_label=w
                 text=str(w.cget('text') or '')
-                if 'V1.4.1 三档信号仓位版' in text:
-                    w.configure(text=text.replace('V1.4.1 三档信号仓位版','V1.4.2 视觉优化版'))
-            except Exception:
-                pass
-
-        # The status label gives us the exact header container. Replace the legacy
-        # logo there directly instead of guessing by canvas dimensions.
+                if 'V1.4.1 三档信号仓位版' in text:w.configure(text=text.replace('V1.4.1 三档信号仓位版','V1.4.2 视觉优化版'))
+            except Exception:pass
         if self._v142_logo_widget is None and self._v142_status_label is not None:
             header=self._v142_status_label.master
             children=list(header.winfo_children())
@@ -156,18 +148,14 @@ def apply():
                     except Exception:pass
             replacement=logo_mark(header)
             try:
-                if brand is not None:
-                    replacement.pack(side='left',padx=(0,12),before=brand)
-                else:
-                    replacement.pack(side='left',padx=(0,12))
+                if brand is not None:replacement.pack(side='left',padx=(0,12),before=brand)
+                else:replacement.pack(side='left',padx=(0,12))
             except Exception:
                 replacement.pack(side='left',padx=(0,12))
-            if getattr(replacement,'_kaytrade_v142_logo',False):
-                self._v142_logo_widget=replacement
-
+            if getattr(replacement,'_kaytrade_v142_logo',False):self._v142_logo_widget=replacement
+        self._v142_logo_errors=list(LOGO_ERRORS)
         try:
-            if not (getattr(self,'engine',None) and getattr(self.engine,'store',None)):
-                self.status.set('默认停止 · 未连接')
+            if not (getattr(self,'engine',None) and getattr(self.engine,'store',None)):self.status.set('默认停止 · 未连接')
         except Exception:pass
         refresh_status(self)
         self._v142_refresh_status=lambda:refresh_status(self)
@@ -192,6 +180,5 @@ def apply():
     app.App.emit=emit
     engine.Engine.cycle=cycle
     engine.Engine._kaytrade_v142_visual_applied=True
-
 
 apply()
