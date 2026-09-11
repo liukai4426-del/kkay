@@ -23,7 +23,10 @@ def _once(self, key, message, interval=60.0):
     seen=getattr(self,'_v136_decisions',None)
     if not isinstance(seen,dict):
         seen={}; self._v136_decisions=seen
-    if now-float(seen.get(key,0) or 0)>=interval:
+    # First occurrence must always be visible.  Comparing against an implicit
+    # timestamp of 0 suppressed first logs on freshly booted runners/Macs when
+    # monotonic uptime was shorter than the throttle interval.
+    if key not in seen or now-float(seen.get(key,0) or 0)>=interval:
         seen[key]=now; self.emit('log',message)
 
 
