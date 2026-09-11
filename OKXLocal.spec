@@ -3,6 +3,7 @@ from pathlib import Path
 root = Path(SPECPATH)
 # Compatibility marker for the legacy packaged-entry safety test:
 # runtime_hooks=[str(root / 'v136_runtime.py')]
+# asset: assets/kaytrade-v142-logo.png
 a = Analysis([str(root / 'desktop.py')], pathex=[str(root)],
              hiddenimports=['unittest.mock'], datas=[(str(root / 'assets' / 'kaytrade-v142-logo.png'),'assets')], binaries=[],
              hookspath=[], runtime_hooks=[str(root / 'v136_runtime.py'), str(root / 'v136_entry_fix.py'), str(root / 'v137_strategy_patch.py'), str(root / 'v137_cancel_fix.py'), str(root / 'v138_strategy_patch.py'), str(root / 'v139_position_patch.py'), str(root / 'v140_score_dialog_patch.py'), str(root / 'v141_dialog_signal_positions_patch.py'), str(root / 'v141_history_return_chart_patch.py'), str(root / 'v141_exit_limit_patch.py'), str(root / 'v142_visual_patch.py')], excludes=[])
