@@ -23,6 +23,9 @@ def apply():
             # must not raise Halt because the UI's global exception handler would
             # persist that benign condition as a fault lock.
             self.enabled = False
+            self.stopped = True
+            if hasattr(self, 'startup_buffer_until'):
+                self.startup_buffer_until = 0.0
             self.emit('log', '当前没有本程序仓位/活动订单；无需平仓，未写入故障锁')
             return False
         return original_flatten(self)
