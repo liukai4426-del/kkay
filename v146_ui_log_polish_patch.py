@@ -133,34 +133,58 @@ def _style_brand(owner):
     return bool(owner._v146_brand_title and owner._v146_brand_meta)
 
 
+def _status_color(text):
+    text=str(text or '')
+    if text.startswith('已连接：'):return app.GREEN
+    if '未连接' in text:return WAIT_COLOR
+    return app.MUTED
+
+
 def _align_account_network(owner):
-    """Put account and network state on one row, starting at the same x as main cards."""
+    """Create a deterministic inline status row while preserving legacy bound widgets hidden."""
     env=getattr(owner,'env_label',None)
     if env is None:return False
     badges=env.master
-    try:badges.configure(padding=(MAIN_PAD,0))
+    try:badges.configure(padding=(MAIN_PAD,0)); badges.pack_configure(fill='x')
     except Exception:pass
-    try:badges.pack_configure(fill='x')
-    except Exception:pass
-    network=None
+
+    network_old=None
     for widget in badges.winfo_children():
         try:
             if isinstance(widget,ttk.Label) and str(widget.cget('textvariable'))==str(owner.network):
-                network=widget; break
+                network_old=widget; break
         except Exception:pass
-    try:
-        env.pack_forget(); env.pack(side='left',anchor='w')
-        env.configure(bg=app.BG,padx=0,pady=6,font=('Helvetica',13,'bold'))
+    try:env.pack_forget()
     except Exception:pass
-    if network is not None:
-        try:
-            network.pack_forget(); network.pack(side='left',anchor='w',padx=(16,0))
-            network.configure(padding=(0,6),anchor='w',justify='left')
+    if network_old is not None:
+        try:network_old.pack_forget()
         except Exception:pass
+
+    inline=tk.Frame(badges,bg=app.BG,bd=0,highlightthickness=0)
+    inline.pack(side='left',anchor='w',fill='y')
+    account=tk.Label(inline,textvariable=owner.environment,bg=app.BG,
+                     fg=_status_color(owner.environment.get()),font=('Helvetica',13,'bold'),
+                     anchor='w',justify='left',bd=0,highlightthickness=0,padx=0,pady=6)
+    account.pack(side='left',anchor='w')
+    network=tk.Label(inline,textvariable=owner.network,bg=app.BG,fg=visual.TEXT,
+                     font=('Helvetica',13,'bold'),anchor='w',justify='left',
+                     bd=0,highlightthickness=0,padx=0,pady=6)
+    network.pack(side='left',anchor='w',padx=(16,0))
+
+    def refresh_account(*_):
+        try:account.configure(fg=_status_color(owner.environment.get()))
+        except Exception:pass
+    try:owner.environment.trace_add('write',refresh_account)
+    except Exception:pass
+
+    owner._v146_legacy_env_label=env
+    owner._v146_legacy_network_label=network_old
+    owner._v146_account_label=account
     owner._v146_network_label=network
+    owner._v146_status_inline=inline
     owner._v146_status_row=badges
-    owner._v146_status_row_aligned=network is not None
-    return owner._v146_status_row_aligned
+    owner._v146_status_row_aligned=True
+    return True
 
 
 def _log_state(kind,line):
@@ -184,14 +208,16 @@ def _strip_timestamp(line):
 
 
 def _find_legacy_log_filter(owner):
-    """Find the old footer frame that contains the 运行日志 title / 全部 selector."""
-    for child in owner.root.winfo_children():
-        if not isinstance(child,ttk.Frame):continue
-        for item in child.winfo_children():
-            try:
-                if isinstance(item,ttk.Label) and str(item.cget('text') or '')=='运行日志':
-                    return child
-            except Exception:pass
+    """Find the old footer frame using either its title or the bound filter control."""
+    for widget in _walk(owner.root):
+        try:
+            if isinstance(widget,ttk.Label) and str(widget.cget('text') or '')=='运行日志':
+                return widget.master
+        except Exception:pass
+        try:
+            if isinstance(widget,app.RoundedCombobox) and getattr(widget,'variable',None) is owner.log_filter:
+                return widget.master
+        except Exception:pass
     return None
 
 
@@ -208,6 +234,13 @@ def _build_log_card(owner):
         except Exception:pass
         old_log._v146_hidden=True
 
+    # Safety sweep: no visible control bound to the legacy 全部 selector may survive.
+    for widget in _walk(owner.root):
+        try:
+            if isinstance(widget,app.RoundedCombobox) and getattr(widget,'variable',None) is owner.log_filter:
+                widget.pack_forget()
+        except Exception:pass
+
     surface=app.Card(owner.root,height=LOG_CARD_HEIGHT)
     try:surface.pack(side='bottom',fill='x',padx=MAIN_PAD,pady=(0,12),before=owner.book)
     except Exception:surface.pack(side='bottom',fill='x',padx=MAIN_PAD,pady=(0,12))
@@ -220,7 +253,7 @@ def _build_log_card(owner):
     owner._v146_log_surface=surface
     owner._v146_log_rows=rows
     owner._v146_log_redesign=True
-    owner._v146_log_filter_removed=old_filter is not None
+    owner._v146_log_filter_removed=(old_filter is not None)
     return True
 
 
@@ -269,7 +302,6 @@ def apply():
     previous_app_init=app.App.__init__
     previous_cycle=engine.Engine.cycle
 
-    # Install visuals before App construction so existing score bars/header use them immediately.
     def energy_init(self,*args,**kwargs):
         requested=int(kwargs.get('height',ENERGY_BAR_BASE_HEIGHT) or ENERGY_BAR_BASE_HEIGHT)
         kwargs['height']=max(1,int(round(requested*ENERGY_BAR_SCALE)))
@@ -296,9 +328,13 @@ def apply():
         _align_account_network(self)
         _build_log_card(self)
         self.render_logs()
-        # V1.4.5 keeps its 2% crop. V1.4.6 scales the whole brand block 1.2x.
-        logo=getattr(self,'_v142_logo_widget',None)
-        if logo is not None:self._v146_logo_widget=logo
+        # Explicitly resolve the V1.4.6 logo after all inherited wrappers finish.
+        self._v146_logo_widget=None
+        for widget in _walk(self.root):
+            if getattr(widget,'_kaytrade_v146_logo',False):
+                self._v146_logo_widget=widget
+                self._v142_logo_widget=widget
+                break
         self._v146_brand_scale=BRAND_SCALE
         self.root.update_idletasks()
 
