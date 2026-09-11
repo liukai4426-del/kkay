@@ -1,8 +1,8 @@
-name: Build KAYTRADE Intel Mac 1.3.5 Runtime Stability
+name: Build KAYTRADE Intel Mac 1.3.6 Runtime Stability
 # V1.3.5 execution and legacy-51603 hotfix validation trigger.
 on:
   push:
-    branches: [codex/v1-3-5-runtime-stability]
+    branches: [codex/v1-3-6-runtime-observability]
     paths:
       - engine.py
       - exchange.py
@@ -12,6 +12,7 @@ on:
       - v135_execution_patch.py
       - v135_flatten_noop_hotfix.py
       - v135_auto_entry_guard.py
+      - v136_runtime.py
       - test_engine.py
       - test_v134.py
       - test_v135.py
@@ -22,7 +23,8 @@ on:
       - test_v135_fills.py
       - test_v135_runtime_stability.py
       - test_v135_auto_entry_guard.py
-      - RELEASE-1.3.5.md
+      - test_v136_runtime.py
+      - RELEASE-1.3.6.md
       - .github/workflows/build-mac-v135.yml
   workflow_dispatch:
 permissions:
@@ -38,13 +40,15 @@ jobs:
         with:
           python-version: '3.13'
       - name: Compile V1.3.5 execution path
-        run: python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py desktop.py v135_patch.py v135_execution_patch.py v135_flatten_noop_hotfix.py v135_auto_entry_guard.py test_v135_execution.py test_v135_safety2.py test_v135_order_state.py test_v135_ack.py test_v135_fills.py test_v135_runtime_stability.py test_v135_auto_entry_guard.py
+        run: python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py desktop.py v135_patch.py v135_execution_patch.py v135_flatten_noop_hotfix.py v135_auto_entry_guard.py v136_runtime.py test_v135_execution.py test_v135_safety2.py test_v135_order_state.py test_v135_ack.py test_v135_fills.py test_v135_runtime_stability.py test_v135_auto_entry_guard.py test_v136_runtime.py
       - name: Run preserved strategy and execution safety tests
         run: python -m unittest -v test_engine test_candles test_v134 test_v135 test_v135_execution test_v135_safety2
       - name: Run hardened order-state tests in isolated process
         run: python -m unittest -v test_v135_order_state test_v135_ack test_v135_fills test_v135_runtime_stability
       - name: Run fault-lock classifier tests in isolated process
         run: python -m unittest -v test_v135_auto_entry_guard
+      - name: Run V1.3.6 runtime state tests in isolated process
+        run: python -m unittest -v test_v136_runtime
       - name: Verify V1.3.5 wiring
         run: |
           python - <<'PY'
@@ -62,7 +66,7 @@ jobs:
           for token in ('UNKNOWN_WRITE_TIMEOUT = 60.0','SUBMIT_UNKNOWN','PARTIAL_EVIDENCE','FLATTEN_WAIT','CLOSE_SENT','CANCEL_SENT','CLOSING_EMERGENCY','emergency_close_blocked','def _acknowledge','def _matching_fills'):
               assert token in xp, token
           assert 'apply_v135_execution_patch' in d
-          assert 'apply_v135_auto_entry_guard' in d
+          assert 'apply_v135_auto_entry_guard' in d and 'apply_v136_runtime' in d
           assert '_SOFT_HALT_PATTERNS' in g and '_LEGACY_FALSE_LOCK_PATTERNS' in g
           print('PASS: V1.3.5 strategy/order/API safety wiring')
           PY
@@ -84,10 +88,11 @@ jobs:
         run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0'
       - name: Re-run execution tests on Intel Mac
         run: |
-          python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py desktop.py v135_patch.py v135_execution_patch.py v135_flatten_noop_hotfix.py v135_auto_entry_guard.py test_v135_execution.py test_v135_safety2.py test_v135_order_state.py test_v135_ack.py test_v135_fills.py test_v135_runtime_stability.py test_v135_auto_entry_guard.py
+          python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py desktop.py v135_patch.py v135_execution_patch.py v135_flatten_noop_hotfix.py v135_auto_entry_guard.py v136_runtime.py test_v135_execution.py test_v135_safety2.py test_v135_order_state.py test_v135_ack.py test_v135_fills.py test_v135_runtime_stability.py test_v135_auto_entry_guard.py test_v136_runtime.py
           python -m unittest -v test_engine test_candles test_v122 test_v132 test_v133 test_v134 test_v135 test_v135_execution test_v135_safety2
           python -m unittest -v test_v135_order_state test_v135_ack test_v135_fills test_v135_runtime_stability
           python -m unittest -v test_v135_auto_entry_guard
+          python -m unittest -v test_v136_runtime
       - name: Create application icon
         run: python build_icon.py
       - name: Build Intel application
@@ -105,16 +110,16 @@ jobs:
         run: |
           mkdir -p installer
           ditto dist/KAYTRADE.app installer/KAYTRADE.app
-          cp RELEASE-1.3.5.md installer/RELEASE-1.3.5.md
+          cp RELEASE-1.3.6.md installer/RELEASE-1.3.6.md
           cp "$RUNNER_TEMP/kaytrade-smoke.txt" installer/BUILD-TEST.txt
           ln -s /Applications installer/Applications
-          hdiutil create -volname KAYTRADE-1.3.5 -srcfolder installer -ov -format UDZO KAYTRADE-1.3.5-Intel-test.dmg
-          shasum -a 256 KAYTRADE-1.3.5-Intel-test.dmg > SHA256.txt
+          hdiutil create -volname KAYTRADE-1.3.6 -srcfolder installer -ov -format UDZO KAYTRADE-1.3.6-Intel-test.dmg
+          shasum -a 256 KAYTRADE-1.3.6-Intel-test.dmg > SHA256.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: KAYTRADE-1.3.5-Intel-test
+          name: KAYTRADE-1.3.6-Intel-test
           path: |
-            KAYTRADE-1.3.5-Intel-test.dmg
+            KAYTRADE-1.3.6-Intel-test.dmg
             SHA256.txt
             ui-*.png
           if-no-files-found: error
