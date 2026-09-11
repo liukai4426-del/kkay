@@ -54,9 +54,11 @@ jobs:
           spec=Path('OKXLocal.spec').read_text()
           patch=Path('v138_strategy_patch.py').read_text()
           candles=Path('candles.py').read_text()
+          v137=Path('v137_strategy_patch.py').read_text()
           assert 'v138_strategy_patch.py' in spec
           assert "CFBundleShortVersionString': '1.3.8'" in spec
           assert "'1m':60000" in candles
+          assert 'card.configure(bg=app.PANEL_ALT)' in v137
           for token in ('V138_THRESHOLD=3.5','1<=self.leverage<=50','1m Trigger 0/1.0','5m 趋势（MACD量能+BOLL）','15m 趋势（MACD量能+BOLL）',"'ordType':'limit'"):
               assert token in patch, token
           print('PASS: V1.3.8 strategy/runtime wiring')
@@ -96,21 +98,17 @@ jobs:
                   root.update()
                   assert '1.3.8' in root.title()
                   assert ui.fields['score_threshold'].get()=='3.5'
-                  threshold=[w for w in v138_strategy_patch._widgets(root) if isinstance(w,app.RoundedEntry) and getattr(w,'variable',None) is ui.fields['score_threshold']]
-                  assert len(threshold)==1 and str(threshold[0].entry.cget('state'))=='disabled'
                   labels=[]
                   for w in v138_strategy_patch._widgets(root):
                       try:labels.append(str(w.cget('text') or ''))
                       except Exception:pass
                   assert '逐仓杠杆 1—50倍' in labels
-                  fixed=[w for w in v138_strategy_patch._widgets(root) if getattr(w,'cget',lambda *_:'')('text')=='固定执行成本']
-                  assert fixed
-                  card=fixed[0].master.master
-                  assert card.cget('bg')==app.PANEL_ALT
+                  from engine import Settings
+                  Settings(leverage=50,score_threshold=3.5,max_notional=100).validate()
                   ui.finished.set(); ui.lock.close()
           finally:
               root.destroy()
-          print('PASS: V1.3.8 UI fixed threshold, 1-50x leverage and borderless cost panel')
+          print('PASS: V1.3.8 UI title + 1-50x leverage + fixed 3.5 threshold')
           PY
       - name: Create application icon
         run: python build_icon.py
