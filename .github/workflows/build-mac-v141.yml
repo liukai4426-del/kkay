@@ -24,8 +24,10 @@ on:
       - v140_score_dialog_patch.py
       - v141_dialog_signal_positions_patch.py
       - v141_history_return_chart_patch.py
+      - v141_exit_limit_patch.py
       - test_v141_dialog_signal_positions.py
       - test_v141_history_return_chart.py
+      - test_v141_exit_limit.py
       - RELEASE-1.4.1.md
       - .github/workflows/build-mac-v141.yml
   workflow_dispatch:
@@ -42,7 +44,7 @@ jobs:
         with:
           python-version: '3.13'
       - name: Compile V1.4.1 runtime
-        run: python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py v137_strategy_patch.py v137_cancel_fix.py v138_strategy_patch.py v139_position_patch.py v140_score_dialog_patch.py v141_dialog_signal_positions_patch.py v141_history_return_chart_patch.py test_v141_dialog_signal_positions.py test_v141_history_return_chart.py
+        run: python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py v137_strategy_patch.py v137_cancel_fix.py v138_strategy_patch.py v139_position_patch.py v140_score_dialog_patch.py v141_dialog_signal_positions_patch.py v141_history_return_chart_patch.py v141_exit_limit_patch.py test_v141_dialog_signal_positions.py test_v141_history_return_chart.py test_v141_exit_limit.py
       - name: Run preserved safety and strategy tests
         run: |
           python -m unittest -v test_engine test_candles test_v134 test_v135 test_v135_execution test_v135_safety2
@@ -54,7 +56,7 @@ jobs:
           python -m unittest -v test_v139_position
           python -m unittest -v test_v140_score_dialog
       - name: Run V1.4.1 tests
-        run: python -m unittest -v test_v141_dialog_signal_positions test_v141_history_return_chart
+        run: python -m unittest -v test_v141_dialog_signal_positions test_v141_history_return_chart test_v141_exit_limit
       - name: Verify V1.4.1 wiring
         run: |
           python - <<'PY'
@@ -62,14 +64,18 @@ jobs:
           spec=Path('OKXLocal.spec').read_text()
           patch=Path('v141_dialog_signal_positions_patch.py').read_text()
           chart=Path('v141_history_return_chart_patch.py').read_text()
+          exits=Path('v141_exit_limit_patch.py').read_text()
           assert 'v141_dialog_signal_positions_patch.py' in spec
           assert 'v141_history_return_chart_patch.py' in spec
+          assert 'v141_exit_limit_patch.py' in spec
           assert "CFBundleShortVersionString': '1.4.1'" in spec
           for token in ('first_signal_notional','second_signal_notional','third_signal_notional','{1:1,2:1,3:1}','_centered_modal','第一信号仓位','第二信号仓位','第三信号仓位'):
               assert token in patch, token
           for token in ('累计收益率','策略资金预算','收益率','日期','_history_points'):
               assert token in chart, token
-          print('PASS: V1.4.1 runtime, three signal caps, centered dialogs and dated return-rate chart wired')
+          for token in ("tpOrdPx':tp_trigger","slOrdPx':sl_trigger",'_matching_leg_for_exit_child','限价止盈/止损已触发但尚未完全成交'):
+              assert token in exits, token
+          print('PASS: V1.4.1 runtime, signal caps, dialogs, return chart and trigger-limit TP/SL wired')
           PY
   build:
     name: intel-mac-package
@@ -88,8 +94,8 @@ jobs:
         run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0'
       - name: Re-run V1.4.1 tests on Intel Mac
         run: |
-          python -m py_compile v141_dialog_signal_positions_patch.py v141_history_return_chart_patch.py test_v141_dialog_signal_positions.py test_v141_history_return_chart.py
-          python -m unittest -v test_v141_dialog_signal_positions test_v141_history_return_chart
+          python -m py_compile v141_dialog_signal_positions_patch.py v141_history_return_chart_patch.py v141_exit_limit_patch.py test_v141_dialog_signal_positions.py test_v141_history_return_chart.py test_v141_exit_limit.py
+          python -m unittest -v test_v141_dialog_signal_positions test_v141_history_return_chart test_v141_exit_limit
       - name: V1.4.1 UI source smoke test
         run: |
           python - <<'PY'
@@ -99,6 +105,7 @@ jobs:
           from unittest.mock import patch
           import v141_dialog_signal_positions_patch as v141
           import v141_history_return_chart_patch as hchart
+          import v141_exit_limit_patch as exits
           import v138_strategy_patch as v138
           import app
           root=tk.Tk()
@@ -141,10 +148,13 @@ jobs:
                   assert any('%' in text for text in chart_text)
                   assert any('09-10' in text for text in chart_text)
                   assert any('日期' in text for text in chart_text)
+                  payload=exits._limit_attached_payload('/api/v5/trade/order',{'attachAlgoOrds':[{'attachAlgoClOrdId':'smoke','tpTriggerPx':'120','tpOrdPx':'-1','slTriggerPx':'90','slOrdPx':'-1'}]})
+                  bracket=payload['attachAlgoOrds'][0]
+                  assert bracket['tpOrdPx']=='120' and bracket['slOrdPx']=='90'
                   ui.finished.set(); ui.lock.close()
           finally:
               root.destroy()
-          print('PASS: V1.4.1 centered dialogs, signal-position fields and dated return-rate chart UI')
+          print('PASS: V1.4.1 UI, return chart and trigger-limit TP/SL smoke test')
           PY
       - name: Create application icon
         run: python build_icon.py
@@ -160,7 +170,7 @@ jobs:
           mkdir -p installer
           ditto dist/KAYTRADE.app installer/KAYTRADE.app
           cp RELEASE-1.4.1.md installer/RELEASE-1.4.1.md
-          printf 'PASS: V1.4.1 signal-position tests + centered dialog UI + dated return-rate history chart + Intel build\n' > installer/BUILD-TEST.txt
+          printf 'PASS: V1.4.1 signal positions + centered dialogs + dated return chart + trigger-limit TP/SL + Intel build\n' > installer/BUILD-TEST.txt
           ln -s /Applications installer/Applications
           hdiutil create -volname KAYTRADE-1.4.1 -srcfolder installer -ov -format UDZO KAYTRADE-1.4.1-Intel-test.dmg
           shasum -a 256 KAYTRADE-1.4.1-Intel-test.dmg > SHA256.txt
