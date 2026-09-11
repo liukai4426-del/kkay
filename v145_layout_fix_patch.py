@@ -4,7 +4,7 @@ V1.4.4 visual styling is preserved, but the main page geometry is corrected so
 selected pages expand across the application instead of collapsing into a
 narrow right-side area. Width normalization remains local to peer cards; it is
 not applied across unrelated page regions. The compact runtime note above the
-main tabs is also reduced, rendered black, and right-aligned as requested.
+main tabs is also reduced, rendered muted gray, and right-aligned as requested.
 """
 from v144_ui_polish_patch import apply as apply_v144
 apply_v144()
@@ -18,7 +18,7 @@ import visual
 
 V145_VERSION='1.4.5'
 RUNTIME_NOTE_PREFIX='KAYTRADE · 本机执行'
-RUNTIME_NOTE_COLOR='#000000'
+RUNTIME_NOTE_COLOR=app.MUTED
 RUNTIME_NOTE_FONT=('Helvetica',9)
 
 
@@ -40,7 +40,7 @@ def _main_page_top(book):
 
 
 def _style_runtime_note(owner):
-    """Make the execution-description line small, black and right-aligned."""
+    """Make the execution-description line small, muted gray and right-aligned."""
     style=ttk.Style(owner.root)
     style.configure('V145RuntimeNote.TLabel',background=app.BG,foreground=RUNTIME_NOTE_COLOR,
                     font=RUNTIME_NOTE_FONT,borderwidth=0)
