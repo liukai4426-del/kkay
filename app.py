@@ -372,7 +372,14 @@ class App:
 
     def flatten(self):
         if messagebox.askyesno('真实平仓确认','立即停止新开仓，并以市价平掉本程序管理的BTC逐仓仓位？\n网络错误时不自动重复提交；可能产生滑点。'):
-            self.stop(); self.submit('flatten')
+            # Flatten owns the stop transition.  Do not enqueue a separate stop
+            # first: Engine.flatten() stops once after it has inspected the local
+            # strategy state.  The old two-command sequence produced duplicate
+            # stop logs and could race an otherwise harmless empty flatten.
+            if self.engine:
+                self.engine.enabled=False
+            self.update_trade_button()
+            self.submit('flatten')
 
     def ack(self):
         if messagebox.askyesno('核对确认','你已在OKX核对所有BTC仓位和普通/策略挂单？\n程序会再次读取；无法核实则拒绝解除。亏损计数不会重置。'):
@@ -432,10 +439,15 @@ class App:
                         self.emit('ticker',self.engine.x.ticker()); self.public_at=time.monotonic()
                     self.emit('status','全自动运行 / '+('模拟盘' if self.engine.x.demo else '实盘') if self.engine.enabled else '故障暂停 · 需核对' if self.engine.store.data['halt'] else '已停止新开仓 / 继续核对持仓')
             except CandlePending as exc:
+                message=str(exc)
                 self.emit('status','等待最新收盘K线 · 暂不新开仓')
-                self.emit('candle_wait',str(exc))
-                if time.monotonic()-self.candle_wait_log>=15:
-                    self.emit('log',str(exc)); self.candle_wait_log=time.monotonic()
+                self.emit('candle_wait',message)
+                # A just-closed OKX candle normally needs a few seconds to receive confirm=1.
+                # Keep that visible in the status area, but do not write a scary log every
+                # quarter-hour. Only persistent/confirmed lag belongs in the event log.
+                persistent=('持续过期' in message or '连续异常' in message)
+                if persistent and time.monotonic()-self.candle_wait_log>=15:
+                    self.emit('log',message); self.candle_wait_log=time.monotonic()
             except NetworkError as exc:
                 self.network_paused=True; self.recovery_count=0; self.probe_at=time.monotonic()
                 if self.engine: self.engine.halt(str(exc))
