@@ -82,15 +82,25 @@ def apply():
             return previous_mark(parent)
         c=tk.Canvas(parent,width=50,height=50,bg=app.BG,highlightthickness=0,borderwidth=0)
         try:
-            source=tk.PhotoImage(file=str(path))
-            factor=max(1,int(round(max(source.width(),source.height())/44.0)))
-            image=source.subsample(factor,factor) if factor>1 else source
+            # Pillow/ImageTk is more reliable than Aqua Tk's native PNG loader for
+            # alpha/gradient assets. It is packaged with the Intel build.
+            from PIL import Image,ImageTk
+            pil=Image.open(path).convert('RGBA').resize((44,44),Image.Resampling.LANCZOS)
+            image=ImageTk.PhotoImage(pil,master=parent)
             c.create_image(25,25,image=image,anchor='center')
-            c._kaytrade_v142_logo=True
-            c._kaytrade_v142_logo_image=image
-            c._kaytrade_v142_logo_source=source
+            c._kaytrade_v142_logo_pil=pil
         except Exception:
-            return previous_mark(parent)
+            try:
+                source=tk.PhotoImage(master=parent,file=str(path))
+                factor=max(1,int(round(max(source.width(),source.height())/44.0)))
+                image=source.subsample(factor,factor) if factor>1 else source
+                c.create_image(25,25,image=image,anchor='center')
+                c._kaytrade_v142_logo_source=source
+            except Exception:
+                c.destroy()
+                return previous_mark(parent)
+        c._kaytrade_v142_logo=True
+        c._kaytrade_v142_logo_image=image
         return c
     app.mark=logo_mark
     visual.mark=logo_mark
@@ -124,7 +134,10 @@ def apply():
         style.configure('V142StatusRed.TLabel',background=app.BG,foreground=app.RED,font=('Helvetica',11,'bold'))
 
         self._v142_status_label=None
+        self._v142_logo_widget=None
         for w in _walk(self.root):
+            if getattr(w,'_kaytrade_v142_logo',False):
+                self._v142_logo_widget=w
             try:
                 if isinstance(w,ttk.Label) and str(w.cget('textvariable'))==str(self.status):
                     self._v142_status_label=w
@@ -133,6 +146,36 @@ def apply():
                     w.configure(text=text.replace('V1.4.1 三档信号仓位版','V1.4.2 视觉优化版'))
             except Exception:
                 pass
+
+        # Defensive replacement for an already-created legacy 48px K mark. This
+        # also makes the logo robust if an older wrapper captured the legacy mark.
+        if self._v142_logo_widget is None:
+            legacy=None
+            for w in _walk(self.root):
+                if isinstance(w,tk.Canvas):
+                    try:
+                        if int(w.cget('width'))==48 and int(w.cget('height'))==48 and w.winfo_manager()=='pack':
+                            legacy=w; break
+                    except Exception:pass
+            if legacy is not None:
+                parent=legacy.master
+                siblings=list(parent.winfo_children())
+                try:index=siblings.index(legacy)
+                except ValueError:index=-1
+                before=siblings[index+1] if 0<=index+1<len(siblings) else None
+                try:legacy.destroy()
+                except Exception:pass
+                replacement=logo_mark(parent)
+                try:
+                    if before is not None:
+                        replacement.pack(side='left',padx=(0,12),before=before)
+                    else:
+                        replacement.pack(side='left',padx=(0,12))
+                except Exception:
+                    replacement.pack(side='left',padx=(0,12))
+                if getattr(replacement,'_kaytrade_v142_logo',False):
+                    self._v142_logo_widget=replacement
+
         try:
             if not (getattr(self,'engine',None) and getattr(self.engine,'store',None)):
                 self.status.set('默认停止 · 未连接')
