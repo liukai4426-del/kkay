@@ -33,13 +33,13 @@ class App:
         self.candle_wait_log=0
         self.log_lines=[]
         self.history_key=None; self.history_curve=[]
-        self.root.title('KAYTRADE 1.3.5 · BTC 策略控制台'); self.root.geometry('1200x920'); self.root.minsize(820,620)
+        self.root.title('KAYTRADE 1.3.6 · BTC 策略控制台'); self.root.geometry('1200x920'); self.root.minsize(820,620)
         theme(root)
         top=ttk.Frame(root,padding=15); top.pack(fill='x')
         mark(top).pack(side='left',padx=(0,12))
         brand=ttk.Frame(top); brand.pack(side='left')
         ttk.Label(brand,text='KAYTRADE',style='Title.TLabel').pack(anchor='w')
-        ttk.Label(brand,text='BTC / USDT   ·   V1.3.5 10分细分结构策略',style='Muted.TLabel').pack(anchor='w')
+        ttk.Label(brand,text='BTC / USDT   ·   V1.3.6 运行稳定性版',style='Muted.TLabel').pack(anchor='w')
         self.status=tk.StringVar(value='默认停止 · 未连接')
         ttk.Label(top,textvariable=self.status,style='Muted.TLabel').pack(side='right')
         badges=ttk.Frame(root,padding=(15,0)); badges.pack(fill='x')
@@ -168,7 +168,7 @@ class App:
         self.spark=tk.Canvas(quote.body,width=300,height=72,bg=PANEL,highlightthickness=0)
         self.spark.place(relx=1,y=4,anchor='ne')
         self.spark.create_text(150,36,text='连接后显示行情走势',fill=MUTED,font=('Helvetica',11))
-        self.signal=tk.StringVar(value='V1.3.5 最高10分 · 日线EMA位置 + 结构 + 极值回归 · 1H/4H逆势扣分 · 默认≥3.5开仓')
+        self.signal=tk.StringVar(value='V1.3.6 最高10分 · 策略不变 · 新增自动下单逐步决策追踪')
         ttk.Label(dash,textvariable=self.signal,wraplength=1080,style='Muted.TLabel').pack(anchor='w',pady=(0,10))
         cards=ttk.Frame(dash); cards.pack(fill='x',pady=(0,12))
         self.score_vars={}; self.gate_vars={}; self.score_bars={}
