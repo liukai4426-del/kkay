@@ -5,6 +5,7 @@ Changes on top of V1.3.8:
 - initial entry is capped independently so later Tier 2 / Tier 3 add-ons keep room
 - fixed auto-entry floor becomes 4.5/10
 - Tier 1 becomes 4.5-5.0; Tier 2 stays 5.5-7.0; Tier 3 stays 7.5-10.0
+- connection security note uses the card background and tighter small-text layout
 """
 import json
 import math
@@ -77,11 +78,9 @@ def apply():
     if getattr(engine.Engine,'_kaytrade_v139_applied',False):
         return
 
-    # Replace the runtime Settings class before the App instance is created.
     engine.Settings=SettingsV139
     app.Settings=SettingsV139
 
-    # Keep all V1.3.8 score components, but move the fixed floor / Tier 1 boundary.
     v137._tier=_tier
     v138.V138_THRESHOLD=V139_THRESHOLD
     original_signal=v138.v138_signal
@@ -114,8 +113,6 @@ def apply():
         return result
     v138.v138_signal=v139_signal
 
-    # Cap only the first order by max_initial_notional.  Add-ons continue to use
-    # the original V1.3.8 remaining-total-cap logic based on max_notional.
     original_submit_initial=v138._submit_initial
     def submit_initial(self,market,score,equity,available,remaining):
         original_settings=self.settings
@@ -165,8 +162,6 @@ def apply():
         except Exception:pass
         if 'score_threshold' in self.fields:self.fields['score_threshold'].set('4.5')
 
-        # Add a dedicated initial-entry notional field directly before the total
-        # notional field while preserving the rest of the existing risk layout.
         total_widget=None
         for w in v138._widgets(self.root):
             if isinstance(w,app.RoundedEntry) and getattr(w,'variable',None) is self.fields.get('max_notional'):
@@ -191,6 +186,17 @@ def apply():
             tk.Label(parent,text='最大名义首仓 USDT（仅限制第一笔）',wraplength=340,bg=app.PANEL,fg='#dbe6eb',font=('Helvetica',12),anchor='w',bd=0).grid(row=2,column=0,sticky='w',padx=6,pady=11)
             app.RoundedEntry(parent,textvariable=var,width=170,height=40,font=('Helvetica',14)).grid(row=2,column=1,sticky='e',padx=8,pady=11)
 
+        note_text=('密钥仅保存在本次运行内存，退出后需重新填写；不会发送给GPT/Gemini。\n'
+                   '使用专用交易子账户，不与手动交易或其他机器人共用BTC仓位。\n'
+                   '测试连接仅只读；自动交易需要读取+交易权限，禁止提币权限。\n'
+                   '模拟盘与真实账户密钥不可混用；地区或产品不支持时停止。\n'
+                   '程序仅连接OKX官方接口，不接入原Sites网页。')
+        try:
+            style=app.ttk.Style(self.root)
+            style.configure('V139ConnectionNote.TLabel',background=app.PANEL,foreground=app.MUTED,font=('Helvetica',9),padding=0)
+        except Exception:
+            style=None
+
         for w in v138._widgets(self.root):
             try:text=str(w.cget('text') or '')
             except Exception:text=''
@@ -201,6 +207,9 @@ def apply():
                     w.configure(text='自动开仓评分阈值 4.5（固定）')
                 elif 'V1.3.8 1m触发版' in text:
                     w.configure(text=text.replace('V1.3.8 1m触发版','V1.3.9 仓位上限版'))
+                elif text.startswith('密钥仅保存在此次运行内存中') or text.startswith('密钥仅保存在本次运行内存'):
+                    w.configure(text=note_text,style='V139ConnectionNote.TLabel',wraplength=720,justify='left')
+                    w.grid_configure(sticky='w',pady=(10,12))
             except Exception:pass
             if isinstance(w,app.RoundedEntry) and getattr(w,'variable',None) is self.fields.get('score_threshold'):
                 try:w.variable.set('4.5'); w.entry.configure(state='disabled',disabledbackground=app.FIELD,disabledforeground=app.MUTED)
