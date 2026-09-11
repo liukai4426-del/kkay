@@ -3,18 +3,23 @@
 V1.4.4 visual styling is preserved, but the main page geometry is corrected so
 selected pages expand across the application instead of collapsing into a
 narrow right-side area. Width normalization remains local to peer cards; it is
-not applied across unrelated page regions.
+not applied across unrelated page regions. The compact runtime note above the
+main tabs is also reduced, rendered black, and right-aligned as requested.
 """
 from v144_ui_polish_patch import apply as apply_v144
 apply_v144()
 
 import tkinter as tk
+from tkinter import ttk
 
 import app
 import engine
 import visual
 
 V145_VERSION='1.4.5'
+RUNTIME_NOTE_PREFIX='KAYTRADE · 本机执行'
+RUNTIME_NOTE_COLOR='#000000'
+RUNTIME_NOTE_FONT=('Helvetica',9)
 
 
 def _walk(root):
@@ -32,6 +37,30 @@ def _main_page_top(book):
         return max(44,int(book.nav.winfo_reqheight())+10)
     except Exception:
         return 54
+
+
+def _style_runtime_note(owner):
+    """Make the execution-description line small, black and right-aligned."""
+    style=ttk.Style(owner.root)
+    style.configure('V145RuntimeNote.TLabel',background=app.BG,foreground=RUNTIME_NOTE_COLOR,
+                    font=RUNTIME_NOTE_FONT,borderwidth=0)
+    for widget in _walk(owner.root):
+        if not isinstance(widget,ttk.Label):
+            continue
+        try:text=str(widget.cget('text') or '')
+        except Exception:continue
+        if not text.startswith(RUNTIME_NOTE_PREFIX):
+            continue
+        try:
+            widget.configure(style='V145RuntimeNote.TLabel',anchor='e',justify='right',padding=(4,2))
+            widget.pack_configure(fill='x',anchor='e')
+        except Exception:pass
+        owner._v145_runtime_note=widget
+        owner._v145_runtime_note_styled=True
+        return True
+    owner._v145_runtime_note=None
+    owner._v145_runtime_note_styled=False
+    return False
 
 
 def _rebuild_connection_page(owner):
@@ -132,6 +161,7 @@ def apply():
 
         self.book._v145_main_layout=True
         _rebuild_connection_page(self)
+        _style_runtime_note(self)
 
         # Re-apply the currently selected main page with explicit full-area geometry.
         current=self.book.active if self.book.active is not None else 0
