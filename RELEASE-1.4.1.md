@@ -37,7 +37,7 @@ The `历史收益` trend chart now uses time and percentage performance directly
 
 ## TP / SL execution
 
-All attached take-profit and stop-loss protection now uses trigger-limit execution instead of OKX's `-1` market-execution sentinel:
+Opening orders remain LIMIT orders. All attached take-profit and stop-loss protection now uses trigger-limit execution instead of OKX's `-1` market-execution sentinel:
 
 - take-profit trigger price = take-profit limit price
 - stop-loss trigger price = stop-loss limit price
@@ -45,7 +45,9 @@ All attached take-profit and stop-loss protection now uses trigger-limit executi
 - the existing 2R full-position take-profit and 1R stop-loss levels are unchanged
 - the conservative cost/risk model still budgets taker-like exit costs because a limit order is not guaranteed to earn maker fees
 
-A limit stop is not guaranteed to fill during a fast price move. If an OKX TP/SL trigger creates a limit child order that remains pending, KAYTRADE keeps that limit exit in place, stops new entries and fault-locks for account verification rather than treating the position as closed. Manual flatten and emergency safety flatten remain separate safety operations and are not TP/SL orders.
+A limit stop is not guaranteed to fill during a fast price move. If an OKX TP/SL trigger creates a limit child order that remains pending, KAYTRADE keeps that limit exit in place, stops new entries and fault-locks for account verification rather than treating the position as closed.
+
+Manual flatten and the program's emergency/safety flatten are intentionally unchanged and continue to use their existing MARKET execution path. The TP/SL limit conversion only applies to attached protection orders and does not rewrite ordinary manual or safety close orders.
 
 ## Preserved behavior
 
