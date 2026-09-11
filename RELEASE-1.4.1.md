@@ -25,6 +25,16 @@ All KAYTRADE success/failure result dialogs now:
 - remove the contrasting dark/black outer gutter
 - retain green success and red failure confirmation buttons
 
+## Historical return chart
+
+The `历史收益` trend chart now uses time and percentage performance directly:
+
+- horizontal axis: closed-round date
+- vertical axis: cumulative return rate (%)
+- cumulative return rate = cumulative account-equity change recorded by KAYTRADE / current `策略资金预算` × 100%
+- the chart includes dated ticks and percentage grid labels
+- the historical detail table continues to show PnL and cumulative PnL in USDT
+
 ## Preserved behavior
 
 V1.4 scoring remains unchanged: fixed 4.0 entry floor, Tier 1 4.0–6.0, Tier 2 6.5–7.5, Tier 3 8.0–10.0. 1m Trigger, 5m/15m MACD+BOLL trend scoring, RSI penalties, 1H/4H structure penalties, LIMIT entries, 15m ATR 1R stop / 2R full take-profit, cost filter, fault lock, order dedupe and daily safety controls are unchanged.
