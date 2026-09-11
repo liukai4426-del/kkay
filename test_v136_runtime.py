@@ -1,6 +1,6 @@
 import tempfile,time,unittest
 from pathlib import Path
-from v136_runtime import apply
+from v136_runtime import apply,_decision
 apply()
 from engine import Engine,Settings,Store
 from test_engine import FakeExchange
@@ -14,7 +14,7 @@ class V136RuntimeTests(unittest.TestCase):
     def test_waiting_signal_explains_no_order(self):
         bar=int(self.e.market_now()//300)*300000-300000
         self.e.market={'side':'观望','bar':bar,'scores':{},'close':60000,'h':{'atr':100},'m':{'atr':20}}
-        self.e.market_at=time.time(); self.e.market_monotonic=time.monotonic(); self.e.cycle()
+        self.e.market_at=time.time(); self.e.market_monotonic=time.monotonic(); _decision(self.e)
         self.assertTrue(any('当前5m收盘信号为观望' in str(v) for k,v in self.events if k=='log'))
         self.assertIsNone(self.e.store.data['active'])
     def test_failed_arm_cannot_look_enabled(self):
