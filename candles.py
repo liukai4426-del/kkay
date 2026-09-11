@@ -32,7 +32,7 @@ class CandleCache:
         self.api=api; self.rows={}
 
     def read(self,bar):
-        steps={'1Dutc':86400000,'4H':14400000,'1H':3600000,'15m':900000,'5m':300000}
+        steps={'1Dutc':86400000,'4H':14400000,'1H':3600000,'15m':900000,'5m':300000,'1m':60000}
         if bar not in steps:raise ValueError('不支持的K线周期')
         step=steps[bar]
         rows=dict(self.rows.get(bar,{}))
