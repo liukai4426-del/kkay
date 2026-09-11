@@ -1,5 +1,5 @@
 name: Build KAYTRADE Intel Mac 1.3.6 Runtime Stability
-# V1.3.5 execution and legacy-51603 hotfix validation trigger.
+# V1.3.6 execution, runtime and entry-filter validation trigger.
 on:
   push:
     branches: [codex/v1-3-6-runtime-observability]
