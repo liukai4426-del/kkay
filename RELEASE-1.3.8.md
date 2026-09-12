@@ -1,43 +1,69 @@
-# KAYTRADE V1.3.8
+# KAYTRADE V1.3.8 — Final Two-Signal Hard-Gate Build
 
-V1.3.8 retains the existing 1-minute trigger, LIMIT entry, isolated-margin execution, whole-position TP=2R / SL=1R, fail-closed write handling and fixed execution-cost controls, while replacing the entry classification and consecutive-loss pause rules with the user-confirmed two-signal model.
+本版将此前确认的 V1.3.8 两档信号/仓位/6小时风控，与已经补齐的层级式开仓 Hard Gate 合并为同一套最终规则。原有逐仓、限价开仓、15m ATR、TP=2R / SL=1R、故障锁、订单核对与 Fail-closed 安全机制继续保留。
 
-## Two-signal scoring
+## 最终开仓链条
 
-- Final score remains on the 0-10 scale.
-- Below 6.0: no automatic entry.
-- 6.0-7.5: **开仓信号 / Opening Signal**.
-- 8.0-10.0: **强信号 / Strong Signal**.
-- No third signal level remains.
-- If long and short are both eligible, the higher score is selected; an equal score remains in wait/observe state.
+新开仓/加仓必须依次通过：
 
-## Signal position sizing
+**有效1m Trigger → 5m MACD方向确认 → 1H不能逆势 → 前方有效空间≥1.3R → 最终评分≥6.0 → 多空评分仲裁 → 才允许提交限价单。**
 
-- The Risk page now treats the existing position input as **第一信号仓位**.
-- **第二信号仓位** is derived automatically as exactly 2x the first signal position and is displayed read-only.
-- Opening Signal uses 1x sizing.
-- Strong Signal uses 2x sizing.
-- If an existing Opening Signal position later upgrades to a Strong Signal, the strategy can add the Strong Signal leg while preserving the 1:2 per-signal relationship; all existing capital, leverage, available-balance, daily-risk and exchange minimum-size limits still apply.
+### Hard Block
 
-## Consecutive-loss protection
+- 有效1m Trigger：至少出现 1m KDJ方向交叉 / 1m EMA20回收 / 1m反转K线之一。
+- 1m EMA方向本身不加分，也不能单独激活 Trigger。
+- 5m MACD必须与准备开仓方向一致；满足时同时 +1分，不一致直接禁止开仓。
+- 1H顺趋势 +2；中性0；**1H逆趋势直接禁止对应方向开仓**。
+- 前方强支撑/阻力有效空间必须 **≥1.3R**；不足直接禁止开仓。
+- 多空同时满足时只允许最终评分更高的一侧；同分保持等待。
+- 每根最新已收盘1m K线最多新增一次开仓/加仓。
+- 当前价格相对1m信号收盘价偏移超过约 0.3×1H ATR 时跳过，不追价。
+- LIMIT开仓单有效期约60秒，未成交取消。
 
-- Three consecutive losing completed cycles stop new entries for **6 hours**.
-- The old "stop until the next day" behavior is removed.
-- The pause survives application restarts through local strategy state.
-- After the 6-hour pause expires, the consecutive-loss count is cleared and automatic entries may resume if all other checks pass.
-- Existing positions and exchange-side TP/SL protection continue to be reconciled during the pause.
+## 最终评分模块
 
-## Runtime log
+- 1H顺趋势：+2；逆趋势为 Hard Block，不再作为普通扣分。
+- 4H顺趋势：+1；4H逆趋势：-1，目前不作为 Hard Block。
+- 5m MACD同向：+1，同时为硬性确认。
+- 5m BOLL方向：+1。
+- 15m MACD：+1。
+- 15m BOLL：+1。
+- 15m有利结构：+0.5。
+- 15m Setup（BOLL/量/KDJ/反转）：最高+1.5。
+- 5m+15m RSI过热/过冷：-1 / -2。
+- 靠近1H不利支撑/阻力：-1。
+- 靠近4H不利支撑/阻力：-1.5。
+- **所有1D指标已删除**：1D EMA5 / EMA10 / EMA20不再加分、不作过滤，运行时也不再为本策略读取1D评分数据。
 
-- Runtime event and alarm lines show a `YYYY-MM-DD HH:MM:SS` timestamp in the visible log and in `events.log`.
+## 两档信号
 
-## Preserved execution behavior
+最终评分仍为0–10分，但只保留两档：
 
-- Long and short entries use LIMIT orders.
-- Entry/add-on decisions use the latest CLOSED 1m candle and 1m Trigger remains a hard gate.
-- Isolated leverage remains 1-50x.
-- Whole-position TP=2R and SL=1R remain unchanged.
-- Expected-cost filter remains 1.20x minimum.
-- Startup buffer, daily drawdown protection, order dedupe, account cross-check and ambiguous-write fail-closed handling remain in force.
+- **6.0–7.5：开仓信号**。
+- **8.0–10.0：强信号**。
+- 低于6.0不开仓。
+- 不再保留第三档信号。
 
-This build is for controlled testing. Real OKX execution still requires account-side verification before production use.
+## 仓位关系
+
+- 用户只设置 **第一仓位**。
+- **第二仓位自动=第一仓位×2**，界面自动联动且不可编辑。
+- 6.0–7.5使用第一仓位。
+- 8.0–10使用第二仓位。
+- 所有仓位仍受账户资金、杠杆、可用余额、日内风险及OKX最小下单量限制。
+
+## 连续亏损风控
+
+- 连续亏损3个完整交易周期后，**暂停新开仓6小时**。
+- 原“停止一天 / 次日恢复 / 24小时”逻辑全部取消。
+- 6小时结束后自动允许重新开仓，并清零该连续亏损计数。
+- 暂停期间已有仓位与交易所TP/SL继续正常管理。
+
+## 执行与日志
+
+- 开仓继续使用LIMIT限价单；平仓/TP/SL按既有V1.3.8执行机制。
+- TP固定为整仓2R，SL固定为1R（基于15m ATR×止损倍数）。
+- 运行日志每条保留 `YYYY-MM-DD HH:MM:SS` 时间戳。
+- 启动缓冲、日回撤保护、订单去重、账户交叉核对、故障锁、写入不确定 Fail-closed 均继续保留。
+
+本版本用于受控测试；历史回测和软件逻辑验证不代表未来交易收益。
