@@ -3,6 +3,7 @@
 Intentional behavior changes:
 - fixed opening threshold is 6.0/10 and every eligible signal is one unified
   "开仓信号" at 1x size; Tier 2 / Tier 3 and upgrade add-ons are disabled.
+- only one opening-position input remains in the UI/settings.
 - the redesigned 运行记录 card shows the original event time for every row.
 
 All V1.4.7 hard gates, score components, direction arbitration, 15m ATR stop,
@@ -11,18 +12,51 @@ All V1.4.7 hard gates, score components, direction arbitration, 15m ATR stop,
 from v147_strategy_patch import apply as apply_v147
 apply_v147()
 
+import math
+from dataclasses import asdict, dataclass
+
 import app
 import engine
 import v137_strategy_patch as v137
 import v138_strategy_patch as v138
 import v139_position_patch as v139
 import v140_score_dialog_patch as v140
+import v141_dialog_signal_positions_patch as v141
 import v143_score_arbitration_patch as v143
 import v146_ui_log_polish_patch as v146
 import v147_strategy_patch as v147
 
 V150_VERSION='1.5.0'
 V150_THRESHOLD=6.0
+
+
+@dataclass(frozen=True)
+class SettingsV150(v141.SettingsV141):
+    score_threshold:float=6.0
+    # Kept only for backward-compatible loading of old V1.4.7 settings files.
+    # They are hidden and not used for V1.5 sizing.
+    second_signal_notional:float=1.0
+    third_signal_notional:float=1.0
+
+    def validate(self):
+        if abs(float(self.score_threshold)-V150_THRESHOLD)>1e-9:
+            raise engine.Halt('V1.5自动开仓评分门槛固定为6.0，不可修改')
+        for name,value in asdict(self).items():
+            if not isinstance(value,(int,float)) or not math.isfinite(value) or value<=0:
+                raise engine.Halt(name+' 必须是有限正数')
+        if int(self.leverage)!=self.leverage or not 1<=self.leverage<=50:
+            raise engine.Halt('杠杆范围1—50倍（整数）')
+        if int(self.consecutive_losses)!=self.consecutive_losses or self.consecutive_losses>20:
+            raise engine.Halt('连续亏损上限必须是1—20的整数')
+        if self.daily_loss>self.capital or float(self.first_signal_notional)>self.capital*self.leverage:
+            raise engine.Halt('日亏损/开仓信号仓位超出资金与杠杆范围')
+        if not .6<=self.stop_atr<=3:
+            raise engine.Halt('ATR止损倍数范围0.6—3')
+        if abs(self.reward_r-2.0)>1e-9:
+            raise engine.Halt('V1.5止盈固定为2R')
+        if abs(self.fee_bps-2.0)>1e-9 or abs(self.taker_fee_bps-5.0)>1e-9 or abs(self.slippage_bps-5.0)>1e-9:
+            raise engine.Halt('V1.5成本参数固定：Maker 2bps / Taker 5bps / 滑点预算5bps')
+        return self
 
 
 def _tier(total):
@@ -70,6 +104,32 @@ def _render_logs(self):
 _PREVIOUS_RENDER_LOGS=app.App.render_logs
 
 
+def _hide_extra_position_rows(owner):
+    """Leave only the first/opening signal notional row visible."""
+    for widget in v138._widgets(owner.root):
+        try:text=str(widget.cget('text') or '')
+        except Exception:text=''
+        if text.startswith('第一信号仓位 USDT'):
+            try:widget.configure(text='开仓信号仓位 USDT（评分 ≥6.0）')
+            except Exception:pass
+        if text.startswith('第二信号仓位 USDT') or text.startswith('第三信号仓位 USDT'):
+            try:
+                info=widget.grid_info()
+                row=int(info.get('row',-1)) if info else -1
+                parent=widget.master
+                widget.grid_remove()
+                if row>=0:
+                    for sibling in parent.winfo_children():
+                        try:
+                            sinfo=sibling.grid_info()
+                            if sinfo and int(sinfo.get('row',-2))==row:
+                                sibling.grid_remove()
+                        except Exception:pass
+            except Exception:pass
+    owner.fields.pop('second_signal_notional',None)
+    owner.fields.pop('third_signal_notional',None)
+
+
 def apply():
     if getattr(engine.Engine,'_kaytrade_v150_applied',False):
         return
@@ -81,9 +141,10 @@ def apply():
     v140.V140_THRESHOLD=V150_THRESHOLD
     v147.V147_THRESHOLD=V150_THRESHOLD
 
-    # A single 1x signal tier. V1.4 entry guard then naturally forbids any add-on
-    # because Tier 1 is only legal while flat; the explicit limit also disables
-    # legacy Tier 2/3 paths.
+    engine.Settings=SettingsV150
+    app.Settings=SettingsV150
+
+    # A single 1x signal tier. The entry guard rejects any existing-position add-on.
     v137._tier=_tier
     v137._tier_limit=_tier_limit
     v139._tier=_tier
@@ -117,7 +178,6 @@ def apply():
         return v143._apply_arbitration(result)
 
     def app_settings(self):
-        # V1.4's settings wrapper hard-coded 4.0; V1.5 must persist/validate 6.0.
         if 'score_threshold' in self.fields:
             self.fields['score_threshold'].set('6.0')
         values={k:float(v.get()) for k,v in self.fields.items()}
@@ -125,7 +185,10 @@ def apply():
             if int(values[k])!=values[k]:
                 raise engine.Halt(k+'必须是整数')
             values[k]=int(values[k])
-        return engine.Settings(**values).validate()
+        first=float(values['first_signal_notional'])
+        values['max_initial_notional']=first
+        values['max_notional']=first
+        return SettingsV150(**values).validate()
 
     def app_init(self,*args,**kwargs):
         previous_app_init(self,*args,**kwargs)
@@ -135,6 +198,7 @@ def apply():
             if 'score_threshold' in self.fields:
                 self.fields['score_threshold'].set('6.0')
         except Exception:pass
+        _hide_extra_position_rows(self)
         for widget in v138._widgets(self.root):
             try:
                 text=str(widget.cget('text') or '')
