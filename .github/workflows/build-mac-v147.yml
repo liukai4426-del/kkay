@@ -1,0 +1,98 @@
+name: Build KAYTRADE Intel Mac 1.4.7 Strategy Update
+on:
+  push:
+    branches: [codex/v1-4-7-strategy-update]
+    paths:
+      - '**.py'
+      - OKXLocal.spec
+      - RELEASE-1.4.7.md
+      - .github/workflows/build-mac-v147.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  unit:
+    name: v147-strategy-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile V1.4.7 runtime
+        run: python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py v138_strategy_patch.py v140_score_dialog_patch.py v143_score_arbitration_patch.py v146_ui_log_polish_patch.py v146_ui_fix_patch.py v147_strategy_patch.py test_v147_strategy.py
+      - name: Run preserved strategy and safety regression tests
+        run: |
+          python -m unittest -v test_engine test_candles
+          python -m unittest -v test_v135_execution test_v135_safety2 test_v135_order_state test_v135_auto_entry_guard
+          python -m unittest -v test_v136_runtime test_v136_entry_fix
+          python -m unittest -v test_v137_strategy test_v138_strategy test_v139_position
+          python -m unittest -v test_v140_score_dialog test_v141_dialog_signal_positions test_v141_exit_limit
+          python -m unittest -v test_v143_score_arbitration test_v145_layout_fix test_v146_ui_log_polish test_v146_ui_fix
+      - name: Run V1.4.7 strategy tests
+        run: python -m unittest -v test_v147_strategy
+      - name: Verify V1.4.7 wiring and rules
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          spec=Path('OKXLocal.spec').read_text()
+          patch=Path('v147_strategy_patch.py').read_text()
+          assert 'v147_strategy_patch.py' in spec
+          assert "CFBundleShortVersionString': '1.4.7'" in spec
+          assert "CFBundleVersion': '147'" in spec
+          for token in ('FRONT_MIN_R=1.3','1H逆趋势','5m MACD未与开仓方向确认','valid_1m_trigger','trend_1h','trend_4h'):
+              assert token in patch, token
+          refresh=patch[patch.index('def refresh_market'):patch.index('def cycle',patch.index('def refresh_market'))]
+          assert "candles('1Dutc')" not in refresh
+          assert "candles('4H')" in refresh and "candles('1m')" in refresh
+          print('PASS: V1.4.7 strategy rules and no-1D market refresh wired')
+          PY
+  build:
+    name: intel-mac-package
+    needs: unit
+    runs-on: macos-15-intel
+    timeout-minutes: 40
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - name: Install packaging dependencies
+        run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0'
+      - name: Re-run V1.4.7 strategy and key regression tests on Intel Mac
+        run: |
+          python -m py_compile v147_strategy_patch.py test_v147_strategy.py build_icon.py
+          python -m unittest -v test_v138_strategy test_v143_score_arbitration test_v146_ui_log_polish test_v146_ui_fix test_v147_strategy
+      - name: Create application icon
+        run: |
+          python build_icon.py
+          test -s OKXLocal.icns
+      - name: Build Intel application
+        run: python -m PyInstaller --noconfirm OKXLocal.spec
+      - name: Verify bundle
+        run: |
+          python verify_bundle.py
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1.4.7'
+          test -s dist/KAYTRADE.app/Contents/Resources/assets/kaytrade-v142-logo.png || find dist/KAYTRADE.app -name 'kaytrade-v142-logo.png' -print -quit | grep .
+          codesign --verify --deep --strict dist/KAYTRADE.app
+      - name: Create installer
+        run: |
+          mkdir -p installer
+          ditto dist/KAYTRADE.app installer/KAYTRADE.app
+          cp RELEASE-1.4.7.md installer/RELEASE-1.4.7.md
+          printf 'PASS: V1.4.7 strategy update + V1.4.6 UI/order/risk controls preserved\n' > installer/BUILD-TEST.txt
+          ln -s /Applications installer/Applications
+          hdiutil create -volname KAYTRADE-1.4.7 -srcfolder installer -ov -format UDZO KAYTRADE-1.4.7-Intel-test.dmg
+          shasum -a 256 KAYTRADE-1.4.7-Intel-test.dmg > SHA256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-1.4.7-Intel-test
+          path: |
+            KAYTRADE-1.4.7-Intel-test.dmg
+            SHA256.txt
+          if-no-files-found: error
+          retention-days: 14
