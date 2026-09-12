@@ -1,0 +1,40 @@
+name: Analyze KAYTRADE V1.4.6 Indicator Effectiveness
+on:
+  push:
+    branches: [research/v146-btc-3m-backtest]
+    paths:
+      - research_v146_indicator_analysis.py
+      - .github/workflows/analyze-v146-indicators.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile indicator analyzer
+        run: python -m py_compile research_v146_backtest.py research_v146_indicator_analysis.py
+      - name: Run V1.4.6 indicator effectiveness analysis
+        env:
+          BACKTEST_OUT: indicator_analysis_output
+        run: python research_v146_indicator_analysis.py
+      - name: Show report
+        if: success()
+        run: cat indicator_analysis_output/V146_Indicator_Analysis_Report.md
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: KAYTRADE-V146-INDICATOR-ANALYSIS
+          path: |
+            indicator_analysis_output/V146_Indicator_Analysis_Report.md
+            indicator_analysis_output/V146_4PT_1R2R_OrderIndicators.csv
+            indicator_analysis_output/V146_Indicator_Effectiveness.csv
+            indicator_analysis_output/V146_Indicator_Pairs.csv
+            indicator_analysis_output/V146_ScoreBins.csv
+          if-no-files-found: error
+          retention-days: 14
