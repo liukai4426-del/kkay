@@ -1,0 +1,58 @@
+name: Backtest KAYTRADE V1.3.8 BTC SWAP 3M 1000-2000U 6H
+on:
+  push:
+    branches: [research/v138-btc-3m-1000-2000u-6h]
+    paths:
+      - research_v146_backtest.py
+      - research_v138_3m_1000_2000u_backtest.py
+      - .github/workflows/backtest-v138-btc-3m-1000-2000u-6h.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile V1.3.8 research backtest
+        run: python -m py_compile research_v146_backtest.py research_v138_3m_1000_2000u_backtest.py
+      - name: Verify V1.3.8 two-signal profile
+        run: |
+          python - <<'PY'
+          import research_v138_3m_1000_2000u_backtest as r
+          assert r.START.isoformat().startswith('2026-06-12T00:00:00')
+          assert r.END.isoformat().startswith('2026-09-12T00:00:00')
+          assert r.FIRST_SIGNAL_NOTIONAL == 1000.0
+          assert r.SECOND_SIGNAL_NOTIONAL == 2000.0
+          assert r.CONSECUTIVE_LOSSES == 3
+          assert r.LOSS_PAUSE_MS == 6*60*60*1000
+          assert r.tier(5.5) == 0
+          assert r.tier(6.0) == 1 and r.tier(7.5) == 1
+          assert r.tier(8.0) == 2 and r.tier(10.0) == 2
+          assert r.STOP_ATR == 1.0 and r.REWARD_R == 2.0
+          print('PASS: V1.3.8 two-signal 1000/2000U + 3 losses / 6h profile verified')
+          PY
+      - name: Run V1.3.8 BTC-USDT-SWAP three-month backtest
+        run: python research_v138_3m_1000_2000u_backtest.py
+      - name: Show result summary
+        if: success()
+        run: |
+          cat backtest_output_v138_3m_1000_2000u_6h/metrics.json
+          echo '--- REPORT ---'
+          cat backtest_output_v138_3m_1000_2000u_6h/V138_BTC_SWAP_3M_Backtest_Report.md
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: KAYTRADE-V138-BTC-SWAP-3M-1000-2000U-6H-BACKTEST
+          path: |
+            backtest_output_v138_3m_1000_2000u_6h/V138_BTC_SWAP_3M_Backtest_Report.md
+            backtest_output_v138_3m_1000_2000u_6h/V138_BTC_SWAP_3M_Trades.csv
+            backtest_output_v138_3m_1000_2000u_6h/V138_BTC_SWAP_3M_Cycles.csv
+            backtest_output_v138_3m_1000_2000u_6h/V138_BTC_SWAP_3M_DailyEquity.csv
+            backtest_output_v138_3m_1000_2000u_6h/metrics.json
+          if-no-files-found: error
+          retention-days: 14
