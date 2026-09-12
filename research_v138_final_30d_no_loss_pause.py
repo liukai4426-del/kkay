@@ -1,28 +1,40 @@
 #!/usr/bin/env python3
-"""V1.3.8 FINAL rolling 30-day BTC backtest with ONLY the 3-loss/6h pause disabled."""
+"""V1.3.8 FINAL exact-window 30-day BTC backtest with ONLY the 3-loss/6h pause disabled."""
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import research_v138_final_30d_backtest as d30
 
 v138 = d30.v138
 base = v138.base
+
+# Pin to the exact same interval as the prior 30-day baseline run so the pause
+# setting is literally the only experimental variable.
+END = datetime(2026, 9, 12, 10, 57, tzinfo=timezone.utc)
+START = END - timedelta(days=30)
+START_MS = int(START.timestamp() * 1000)
+END_MS = int(END.timestamp() * 1000)
 OUTDIR = Path("backtest_output_v138_final_30d_no_loss_pause")
 OUTDIR.mkdir(parents=True, exist_ok=True)
 
-# Keep the same 30-day window and every strategy/execution parameter from d30.
+for mod in (d30, v138, base):
+    mod.START = START
+    mod.END = END
+    mod.START_MS = START_MS
+    mod.END_MS = END_MS
+    mod.OUTDIR = OUTDIR
+
 d30.OUTDIR = OUTDIR
-v138.OUTDIR = OUTDIR
-base.OUTDIR = OUTDIR
 
 
 def no_pause_can_signal(self, side, ti, signal_ms):
     """Exact V1.3.8 can_signal flow, except consecutive losses never block entries."""
     if ti <= 0:
         return False
-    day = d30.datetime.fromtimestamp(signal_ms/1000, tz=d30.timezone.utc).astimezone(base.SH_TZ).strftime("%Y-%m-%d")
+    day = datetime.fromtimestamp(signal_ms/1000, tz=timezone.utc).astimezone(base.SH_TZ).strftime("%Y-%m-%d")
     if self.daily_block_day == day:
         self.stats["daily_risk_blocks"] += 1
         return False
@@ -81,19 +93,19 @@ def main():
     metrics["loss_pause_enabled"] = False
     metrics["loss_pause_triggers"] = 0
     metrics["loss_pause_blocked_signals"] = 0
-    metrics["comparison"] = "same final V1.3.8 30d strategy; ONLY 3-loss/6-hour pause disabled"
+    metrics["comparison"] = "same exact 30d window and final V1.3.8 strategy; ONLY 3-loss/6-hour pause disabled"
     metrics_path.write_text(json.dumps(metrics, ensure_ascii=False, indent=2), encoding="utf-8")
 
     report_path = OUTDIR / "V138_FINAL_BTC_SWAP_30D_Backtest_Report.md"
     if report_path.exists():
         text = report_path.read_text(encoding="utf-8")
         text = text.replace("**策略：** 与已验证92天回测完全相同，仅缩短样本窗口。",
-                            "**策略：** 与上一轮30天V1.3.8完全相同；唯一变化是关闭‘连续亏损3次→暂停6小时’。")
+                            "**策略：** 与上一轮30天V1.3.8使用完全相同的起止时间；唯一变化是关闭‘连续亏损3次→暂停6小时’。")
         import re
         text = re.sub(r"3连亏→暂停6小时触发 .*?次；暂停期拦截合格信号 .*?次。",
                       "连续亏损暂停机制：已关闭；不会因3连亏暂停6小时。", text)
         report_path.write_text(text, encoding="utf-8")
-    print("FINAL_30D_NO_LOSS_PAUSE_METRICS")
+    print("FINAL_30D_NO_LOSS_PAUSE_EXACT_WINDOW_METRICS")
     print(metrics_path.read_text(encoding="utf-8"))
 
 
