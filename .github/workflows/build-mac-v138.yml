@@ -1,4 +1,4 @@
-name: Build KAYTRADE Intel Mac 1.3.8 1m Trigger
+name: Build KAYTRADE Intel Mac 1.3.8 Two-Signal
 on:
   push:
     branches: [codex/v1-3-8-strategy-update]
@@ -20,7 +20,9 @@ on:
       - v137_strategy_patch.py
       - v137_cancel_fix.py
       - v138_strategy_patch.py
+      - v138_user_update.py
       - test_v138_strategy.py
+      - test_v138_user_update.py
       - RELEASE-1.3.8.md
       - .github/workflows/build-mac-v138.yml
   workflow_dispatch:
@@ -37,7 +39,7 @@ jobs:
         with:
           python-version: '3.13'
       - name: Compile V1.3.8 runtime
-        run: python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py v137_strategy_patch.py v137_cancel_fix.py v138_strategy_patch.py test_v138_strategy.py
+        run: python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py v137_strategy_patch.py v137_cancel_fix.py v138_strategy_patch.py v138_user_update.py test_v138_strategy.py test_v138_user_update.py
       - name: Run preserved V1.3.6 and V1.3.7 safety tests
         run: |
           python -m unittest -v test_engine test_candles test_v134 test_v135 test_v135_execution test_v135_safety2
@@ -45,23 +47,29 @@ jobs:
           python -m unittest -v test_v135_auto_entry_guard
           python -m unittest -v test_v136_runtime test_v136_entry_fix
           python -m unittest -v test_v137_strategy test_v137_cancel_fix
-      - name: Run V1.3.8 tests in isolated process
+      - name: Run preserved base V1.3.8 tests
         run: python -m unittest -v test_v138_strategy
+      - name: Run confirmed V1.3.8 user update tests
+        run: python -m unittest -v test_v138_user_update
       - name: Verify V1.3.8 wiring
         run: |
           python - <<'PY'
           from pathlib import Path
           spec=Path('OKXLocal.spec').read_text()
-          patch=Path('v138_strategy_patch.py').read_text()
+          base=Path('v138_strategy_patch.py').read_text()
+          update=Path('v138_user_update.py').read_text()
           candles=Path('candles.py').read_text()
           v137=Path('v137_strategy_patch.py').read_text()
           assert 'v138_strategy_patch.py' in spec
+          assert 'v138_user_update.py' in spec
           assert "CFBundleShortVersionString': '1.3.8'" in spec
           assert "'1m':60000" in candles
           assert 'card.configure(bg=app.PANEL_ALT)' in v137
-          for token in ('V138_THRESHOLD=3.5','1<=self.leverage<=50','1m Trigger 0/1.0','5m 趋势（MACD量能+BOLL）','15m 趋势（MACD量能+BOLL）',"'ordType':'limit'"):
-              assert token in patch, token
-          print('PASS: V1.3.8 strategy/runtime wiring')
+          for token in ('1<=self.leverage<=50','1m Trigger 0/1.0','5m 趋势（MACD量能+BOLL）','15m 趋势（MACD量能+BOLL）',"'ordType':'limit'"):
+              assert token in base, token
+          for token in ('V138_ENTRY_THRESHOLD = 6.0','V138_STRONG_THRESHOLD = 8.0','LOSS_PAUSE_SECONDS = 6 * 60 * 60',"return 2, 2.0, '强信号'","return 1, 1.0, '开仓信号'"):
+              assert token in update, token
+          print('PASS: V1.3.8 confirmed two-signal/runtime wiring')
           PY
   build:
     name: intel-mac-package
@@ -80,8 +88,9 @@ jobs:
         run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0'
       - name: Re-run V1.3.8 tests on Intel Mac
         run: |
-          python -m py_compile v138_strategy_patch.py test_v138_strategy.py
+          python -m py_compile v138_strategy_patch.py v138_user_update.py test_v138_strategy.py test_v138_user_update.py
           python -m unittest -v test_v138_strategy
+          python -m unittest -v test_v138_user_update
       - name: V1.3.8 UI source smoke test
         run: |
           python - <<'PY'
@@ -89,7 +98,7 @@ jobs:
           import tkinter as tk
           from pathlib import Path
           from unittest.mock import patch
-          import v138_strategy_patch
+          import v138_user_update
           import app
           root=tk.Tk()
           try:
@@ -97,18 +106,22 @@ jobs:
                   ui=app.App(root,Path(tempfile.mkdtemp(prefix='kaytrade138-')))
                   root.update()
                   assert '1.3.8' in root.title()
-                  assert ui.fields['score_threshold'].get()=='3.5'
+                  assert ui.fields['score_threshold'].get()=='6.0'
+                  assert ui.second_signal_position_var.get()==f"{float(ui.fields['max_notional'].get())*2:g}"
+                  assert ui.second_signal_position_entry.entry.cget('state')=='disabled'
                   labels=[]
-                  for w in v138_strategy_patch._widgets(root):
+                  for w in v138_user_update._position_widgets(root):
                       try:labels.append(str(w.cget('text') or ''))
                       except Exception:pass
                   assert '逐仓杠杆 1—50倍' in labels
+                  assert any('第一信号仓位 USDT（6.0–7.5）' == x for x in labels)
+                  assert any('第二信号仓位 USDT（8.0–10，自动=第一仓位×2）' == x for x in labels)
                   from engine import Settings
-                  Settings(leverage=50,score_threshold=3.5,max_notional=100).validate()
+                  Settings(leverage=50,score_threshold=6.0,max_notional=100).validate()
                   ui.finished.set(); ui.lock.close()
           finally:
               root.destroy()
-          print('PASS: V1.3.8 UI title + 1-50x leverage + fixed 3.5 threshold')
+          print('PASS: V1.3.8 UI title + two signal bands + locked 1:2 position field + fixed 6.0 threshold')
           PY
       - name: Create application icon
         run: python build_icon.py
@@ -124,7 +137,7 @@ jobs:
           mkdir -p installer
           ditto dist/KAYTRADE.app installer/KAYTRADE.app
           cp RELEASE-1.3.8.md installer/RELEASE-1.3.8.md
-          printf 'PASS: V1.3.8 strategy tests + Intel build + UI source smoke test\n' > installer/BUILD-TEST.txt
+          printf 'PASS: V1.3.8 two-signal strategy tests + 6-hour loss pause tests + Intel build + UI source smoke test\n' > installer/BUILD-TEST.txt
           ln -s /Applications installer/Applications
           hdiutil create -volname KAYTRADE-1.3.8 -srcfolder installer -ov -format UDZO KAYTRADE-1.3.8-Intel-test.dmg
           shasum -a 256 KAYTRADE-1.3.8-Intel-test.dmg > SHA256.txt
