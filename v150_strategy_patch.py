@@ -33,8 +33,8 @@ V150_THRESHOLD=6.0
 @dataclass(frozen=True)
 class SettingsV150(v141.SettingsV141):
     score_threshold:float=6.0
-    # Kept only for backward-compatible loading of old V1.4.7 settings files.
-    # They are hidden and not used for V1.5 sizing.
+    # Backward-compatible fields for loading old V1.4.7 settings files only.
+    # They are hidden and never used for V1.5 sizing.
     second_signal_notional:float=1.0
     third_signal_notional:float=1.0
 
@@ -130,6 +130,22 @@ def _hide_extra_position_rows(owner):
     owner.fields.pop('third_signal_notional',None)
 
 
+def _clean_arm_prompt(prompt):
+    """Remove inherited three-tier descriptions before showing V1.5 confirmation."""
+    lines=[]
+    for line in str(prompt).splitlines():
+        if 'V1.4评分：' in line or 'V1.4.1仓位：' in line:
+            continue
+        line=line.replace('4.0–6.0一级最多1次','评分≥6.0开仓信号最多1次')
+        line=line.replace('6.5–7.5二级最多1次','')
+        line=line.replace('8.0–10三级最多1次','')
+        line=line.replace('8.0–10三级最多2次','')
+        lines.append(line)
+    text='\n'.join(lines).strip()
+    text+='\n\nV1.5：固定6.0分开仓；仅“开仓信号”1×仓位；不设二级/三级信号，不升级加仓。'
+    return text
+
+
 def apply():
     if getattr(engine.Engine,'_kaytrade_v150_applied',False):
         return
@@ -152,6 +168,7 @@ def apply():
 
     previous_signal=v138.v138_signal
     previous_app_init=app.App.__init__
+    previous_app_arm=app.App.arm
     previous_cycle=engine.Engine.cycle
 
     def v150_signal(*args,**kwargs):
@@ -209,6 +226,16 @@ def apply():
             except Exception:pass
         self.render_logs()
 
+    def app_arm(self):
+        original=app.simpledialog.askstring
+        def askstring(title,prompt,*args,**kwargs):
+            return original(title,_clean_arm_prompt(prompt),*args,**kwargs)
+        app.simpledialog.askstring=askstring
+        try:
+            return previous_app_arm(self)
+        finally:
+            app.simpledialog.askstring=original
+
     def cycle(self):
         result=previous_cycle(self)
         p=self.store.data.get('active') if self.store else None
@@ -223,6 +250,7 @@ def apply():
     app.App.settings=app_settings
     app.App.render_logs=_render_logs
     app.App.__init__=app_init
+    app.App.arm=app_arm
     engine.Engine.cycle=cycle
     engine.Engine._kaytrade_v150_applied=True
 
