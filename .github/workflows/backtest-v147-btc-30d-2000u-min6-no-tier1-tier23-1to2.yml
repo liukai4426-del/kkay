@@ -1,0 +1,59 @@
+name: Backtest KAYTRADE V1.4.7 BTC SWAP 30D MIN6 NO-TIER1 TIER23 1TO2
+
+on:
+  push:
+    branches:
+      - research/v147-btc-30d-2000u-min6-no-tier1-tier23-1to2
+    paths:
+      - 'research_v146_backtest.py'
+      - 'research_v147_1m_2000u_backtest.py'
+      - 'research_v147_min6_no_tier1_tier23_1to2_backtest.py'
+      - '.github/workflows/backtest-v147-btc-30d-2000u-min6-no-tier1-tier23-1to2.yml'
+  workflow_dispatch:
+
+jobs:
+  backtest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile research scenario
+        run: python -m py_compile research_v146_backtest.py research_v147_1m_2000u_backtest.py research_v147_min6_no_tier1_tier23_1to2_backtest.py
+      - name: Verify requested score mapping, sizing and fixed comparison period
+        run: |
+          python - <<'PY'
+          import research_v147_min6_no_tier1_tier23_1to2_backtest as s
+          assert s.MIN_ENTRY_SCORE == 6.0
+          assert s.TIER_CAP == {1: 0.0, 2: 1000.0, 3: 2000.0}
+          assert s.tier_min6_no_first(5.5) == 0
+          assert s.tier_min6_no_first(6.0) == 2
+          assert s.tier_min6_no_first(7.5) == 2
+          assert s.tier_min6_no_first(8.0) == 3
+          assert s.v.STOP_ATR == 1.0
+          assert s.v.REWARD_R == 2.0
+          assert s.v.CAPITAL == 2000.0
+          assert s.START.isoformat() == '2026-08-13T07:40:00+00:00'
+          assert s.END.isoformat() == '2026-09-12T07:40:00+00:00'
+          print('PASS: first position disabled; min score 6.0; 6.0-7.5=>Tier2 1000U; 8.0+=>Tier3 2000U; all other comparison parameters retained')
+          PY
+      - name: Run V1.4.7 BTC 30-day min6 no-tier1 tier23 1to2 backtest
+        run: python research_v147_min6_no_tier1_tier23_1to2_backtest.py
+      - name: Show result summary
+        run: |
+          cat backtest_output_v147_min6_no_tier1_tier23_1to2/metrics.json
+          echo '--- REPORT ---'
+          cat backtest_output_v147_min6_no_tier1_tier23_1to2/V147_BTC_SWAP_30D_2000U_MIN6_NO_TIER1_TIER23_1TO2_Backtest_Report.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V147-BTC-SWAP-30D-MIN6-NO-TIER1-TIER23-1TO2-BACKTEST
+          path: |
+            backtest_output_v147_min6_no_tier1_tier23_1to2/V147_BTC_SWAP_30D_2000U_MIN6_NO_TIER1_TIER23_1TO2_Backtest_Report.md
+            backtest_output_v147_min6_no_tier1_tier23_1to2/V147_BTC_SWAP_30D_2000U_MIN6_NO_TIER1_TIER23_1TO2_Trades.csv
+            backtest_output_v147_min6_no_tier1_tier23_1to2/V147_BTC_SWAP_30D_2000U_MIN6_NO_TIER1_TIER23_1TO2_Cycles.csv
+            backtest_output_v147_min6_no_tier1_tier23_1to2/V147_BTC_SWAP_30D_2000U_MIN6_NO_TIER1_TIER23_1TO2_DailyEquity.csv
+            backtest_output_v147_min6_no_tier1_tier23_1to2/metrics.json
+          if-no-files-found: error
+          retention-days: 14
