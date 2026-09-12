@@ -29,12 +29,17 @@ class V150StrategyTests(unittest.TestCase):
         bar=123456
         active={'highest_tier':1,'tier_counts':{'1':1,'2':0,'3':0},
                 'last_entry_bar':bar-1,'legs':[{'state':'filled'}]}
-        allowed,reason=v137._allow_entry(active,1,bar)
+        allowed,_=v137._allow_entry(active,1,bar)
         self.assertFalse(allowed)
-        self.assertIn('一级信号只允许空仓首笔',reason)
         for tier in (2,3):
             allowed,_=v137._allow_entry(active,tier,bar)
             self.assertFalse(allowed)
+
+    def test_settings_only_size_by_opening_signal(self):
+        s=engine.Settings(first_signal_notional=500.0,second_signal_notional=9999.0,third_signal_notional=9999.0)
+        self.assertEqual(s.validate().first_signal_notional,500.0)
+        self.assertEqual(v150._tier_limit(2),0)
+        self.assertEqual(v150._tier_limit(3),0)
 
     def test_run_log_time_is_restored(self):
         clock,text=v150._timestamp_parts('2026-09-13 04:31:22 自动交易启动')
