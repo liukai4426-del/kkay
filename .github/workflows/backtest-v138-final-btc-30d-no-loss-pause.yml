@@ -1,0 +1,53 @@
+name: Backtest KAYTRADE V1.3.8 Final BTC 30D No Loss Pause
+on:
+  push:
+    branches: [research/v138-final-btc-30d-no-loss-pause]
+    paths:
+      - research_v146_backtest.py
+      - research_v138_final_3m_backtest.py
+      - research_v138_final_30d_backtest.py
+      - research_v138_final_30d_no_loss_pause.py
+      - .github/workflows/backtest-v138-final-btc-30d-no-loss-pause.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile research backtest
+        run: python -m py_compile research_v146_backtest.py research_v138_final_3m_backtest.py research_v138_final_30d_backtest.py research_v138_final_30d_no_loss_pause.py
+      - name: Verify one-variable comparison
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          base=Path('research_v138_final_3m_backtest.py').read_text()
+          s=Path('research_v138_final_30d_no_loss_pause.py').read_text()
+          for token in ('FIRST_POSITION = 1_000.0','SECOND_POSITION = 2_000.0','front_r >= 1.3','trigger_ok and macd5 and hstate != "opposite" and space_ok'):
+              assert token in base, token
+          for token in ('INTENTIONALLY DISABLED','v138.V138Simulator.can_signal = no_pause_can_signal','v138.V138Simulator.cleanup_cycle = no_pause_cleanup_cycle','loss_pause_enabled'):
+              assert token in s, token
+          print('PASS: only 3-loss/6h pause disabled')
+          PY
+      - name: Run 30-day no-loss-pause backtest
+        run: python research_v138_final_30d_no_loss_pause.py
+      - name: Show result summary
+        run: |
+          cat backtest_output_v138_final_30d_no_loss_pause/metrics.json
+          echo '--- REPORT ---'
+          cat backtest_output_v138_final_30d_no_loss_pause/V138_FINAL_BTC_SWAP_30D_Backtest_Report.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V138-FINAL-BTC-SWAP-30D-NO-LOSS-PAUSE-BACKTEST
+          path: |
+            backtest_output_v138_final_30d_no_loss_pause/V138_FINAL_BTC_SWAP_30D_Backtest_Report.md
+            backtest_output_v138_final_30d_no_loss_pause/V138_FINAL_BTC_SWAP_30D_Trades.csv
+            backtest_output_v138_final_30d_no_loss_pause/V138_FINAL_BTC_SWAP_30D_Cycles.csv
+            backtest_output_v138_final_30d_no_loss_pause/V138_FINAL_BTC_SWAP_30D_DailyEquity.csv
+            backtest_output_v138_final_30d_no_loss_pause/metrics.json
+          retention-days: 14
