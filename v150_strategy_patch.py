@@ -1,6 +1,6 @@
 """KAYTRADE V1.5.0 strategy/log update on top of V1.4.7.
 
-Only two intentional behavior changes:
+Intentional behavior changes:
 - fixed opening threshold is 6.0/10 and every eligible signal is one unified
   "开仓信号" at 1x size; Tier 2 / Tier 3 and upgrade add-ons are disabled.
 - the redesigned 运行记录 card shows the original event time for every row.
@@ -116,6 +116,17 @@ def apply():
         result['strategy_version']=V150_VERSION
         return v143._apply_arbitration(result)
 
+    def app_settings(self):
+        # V1.4's settings wrapper hard-coded 4.0; V1.5 must persist/validate 6.0.
+        if 'score_threshold' in self.fields:
+            self.fields['score_threshold'].set('6.0')
+        values={k:float(v.get()) for k,v in self.fields.items()}
+        for k in ('leverage','consecutive_losses','cooldown_minutes'):
+            if int(values[k])!=values[k]:
+                raise engine.Halt(k+'必须是整数')
+            values[k]=int(values[k])
+        return engine.Settings(**values).validate()
+
     def app_init(self,*args,**kwargs):
         previous_app_init(self,*args,**kwargs)
         try:self.root.title('KAYTRADE 1.5.0 · BTC 策略控制台')
@@ -145,6 +156,7 @@ def apply():
         return result
 
     v138.v138_signal=v150_signal
+    app.App.settings=app_settings
     app.App.render_logs=_render_logs
     app.App.__init__=app_init
     engine.Engine.cycle=cycle
