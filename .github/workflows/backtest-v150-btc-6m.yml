@@ -1,0 +1,104 @@
+name: Backtest KAYTRADE V1.5.0 BTC 6M
+
+on:
+  push:
+    branches:
+      - research/v150-btc-6m-backtest
+    paths:
+      - 'research_v150_6m_backtest.py'
+      - 'v150_strategy_patch.py'
+      - 'v147_strategy_patch.py'
+      - 'test_v150_strategy.py'
+      - '.github/workflows/backtest-v150-btc-6m.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  v150-six-month-backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compile standalone V1.5 backtest
+        run: python -m py_compile research_v150_6m_backtest.py
+
+      - name: Verify V1.5 production strategy tests
+        run: python -m unittest -v test_v150_strategy.py
+
+      - name: Verify standalone backtest is V1.5-only
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import research_v150_6m_backtest as bt
+          import v150_strategy_patch as v150
+
+          text = Path('research_v150_6m_backtest.py').read_text(encoding='utf-8')
+          forbidden = ('import research_v146', 'import research_v147', 'from research_v146', 'from research_v147')
+          assert not any(x in text for x in forbidden), 'legacy research simulator import detected'
+          assert bt.VERSION == '1.5.0'
+          assert bt.SCORE_THRESHOLD == 6.0 == v150.V150_THRESHOLD
+          assert bt.OPENING_NOTIONAL_CAP == 50.0
+          assert bt.CAPITAL == 100.0
+          assert bt.LEVERAGE == 5
+          assert bt.STOP_ATR == 1.0
+          assert bt.REWARD_R == 2.0
+          assert bt.FRONT_MIN_R == 1.3
+          assert bt.CONSECUTIVE_LOSSES == 3
+          assert bt.COOLDOWN_MINUTES == 30
+          assert (bt.END - bt.START).days == 183
+          assert v150._tier(5.5)[0] == 0
+          assert v150._tier(6.0) == (1, 1.0, '开仓信号')
+          assert v150._tier(10.0) == (1, 1.0, '开仓信号')
+          assert v150._tier_limit(1) == 1 and v150._tier_limit(2) == 0 and v150._tier_limit(3) == 0
+          print('PASS: V1.5.0 only; threshold 6; one 1x signal; no add-ons; fixed 183-day window')
+          PY
+
+      - name: Run V1.5.0 six-month BTC backtest
+        run: python research_v150_6m_backtest.py
+
+      - name: Publish summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('backtest_output_v150_6m/metrics.json')
+          if not p.exists():
+              print('metrics.json not produced')
+              raise SystemExit(0)
+          m = json.loads(p.read_text())
+          lines = [
+              '# KAYTRADE V1.5.0 BTC 183-day backtest', '',
+              f"- Period: {m['period_start']} -> {m['period_end']}",
+              f"- Capital / opening cap: {m['starting_capital']:.2f}U / {m['opening_notional_cap']:.2f}U",
+              f"- Trades: {m['trades']}",
+              f"- Win rate: {m['win_rate_pct']:.2f}%",
+              f"- Net PnL: {m['net_pnl']:+.4f}U ({m['net_return_pct']:+.4f}%)",
+              f"- Profit Factor: {m['profit_factor']:.4f}",
+              f"- Expectancy: {m['expectancy']:+.5f}U/trade",
+              f"- Max drawdown: {m['max_drawdown_usdt']:.4f}U / {m['max_drawdown_pct']:.3f}%",
+              f"- Fees: {m['fees']:.4f}U; Funding: {m['funding_pnl']:+.4f}U",
+              f"- Stress PnL: {m['stress_net_pnl']:+.4f}U ({m['stress_return_pct']:+.4f}%)",
+          ]
+          with open(Path.home() / 'summary.txt', 'w') as f:
+              f.write('\n'.join(lines))
+          with open(__import__('os').environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write('\n'.join(lines) + '\n')
+          print('\n'.join(lines))
+          PY
+
+      - name: Upload V1.5.0 backtest artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V150-BTC-6M-BACKTEST
+          path: backtest_output_v150_6m/
+          if-no-files-found: error
+          retention-days: 14
