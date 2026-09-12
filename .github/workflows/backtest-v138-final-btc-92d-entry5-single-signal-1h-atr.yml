@@ -1,0 +1,54 @@
+name: Backtest KAYTRADE V1.3.8 Final BTC 92D Entry5 Single Signal 1H ATR
+
+on:
+  push:
+    branches:
+      - research/v138-final-btc-92d-entry5-single-signal-1h-atr
+    paths:
+      - research_v138_final_92d_entry5_single_signal_1h_atr.py
+      - .github/workflows/backtest-v138-final-btc-92d-entry5-single-signal-1h-atr.yml
+  workflow_dispatch:
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile research backtest
+        run: python -m py_compile research_v146_backtest.py research_v138_final_3m_backtest.py research_v138_final_30d_backtest.py research_v138_final_30d_entry5_backtest.py research_v138_final_30d_entry5_single_signal_backtest.py research_v138_final_30d_entry5_single_signal_1h_atr.py research_v138_final_92d_entry5_single_signal_1h_atr.py
+      - name: Verify fixed 92d strategy
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('research_v138_final_92d_entry5_single_signal_1h_atr.py').read_text()
+          base=Path('research_v138_final_3m_backtest.py').read_text()
+          assert '2026, 6, 12, 10, 57' in s and '2026, 9, 12, 10, 57' in s
+          assert 'single.single_signal_tier' in s
+          assert 'h1.OneHourAtrExecutionMarket' in s
+          assert 'stop_atr_timeframe' in s and '"1H"' in s
+          assert 'position_cap_usdt' in s and '1000.0' in s
+          for token in ('front_r >= 1.3','trigger_ok and macd5 and hstate != "opposite" and space_ok','LOSS_PAUSE_MS = 6 * 60 * 60 * 1000'):
+              assert token in base, token
+          print('PASS: fixed 92d; 5-point single signal; 1H ATR SL/TP; 3-loss 6h pause preserved')
+          PY
+      - name: Run backtest
+        run: python research_v138_final_92d_entry5_single_signal_1h_atr.py
+      - name: Show summary
+        run: |
+          cat backtest_output_v138_final_92d_entry5_single_signal_1h_atr/metrics.json
+          echo '--- REPORT ---'
+          cat backtest_output_v138_final_92d_entry5_single_signal_1h_atr/V138_FINAL_BTC_SWAP_92D_ENTRY5_SINGLE_1H_ATR_Backtest_Report.md
+      - name: Upload result
+        uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V138-FINAL-BTC-92D-ENTRY5-SINGLE-SIGNAL-1H-ATR
+          path: |
+            backtest_output_v138_final_92d_entry5_single_signal_1h_atr/V138_FINAL_BTC_SWAP_92D_ENTRY5_SINGLE_1H_ATR_Backtest_Report.md
+            backtest_output_v138_final_92d_entry5_single_signal_1h_atr/V138_FINAL_BTC_SWAP_92D_ENTRY5_SINGLE_1H_ATR_Trades.csv
+            backtest_output_v138_final_92d_entry5_single_signal_1h_atr/V138_FINAL_BTC_SWAP_92D_ENTRY5_SINGLE_1H_ATR_Cycles.csv
+            backtest_output_v138_final_92d_entry5_single_signal_1h_atr/V138_FINAL_BTC_SWAP_92D_ENTRY5_SINGLE_1H_ATR_DailyEquity.csv
+            backtest_output_v138_final_92d_entry5_single_signal_1h_atr/metrics.json
+          retention-days: 14
