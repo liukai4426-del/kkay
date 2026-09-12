@@ -1,6 +1,6 @@
-import inspect
 import time
 import unittest
+from pathlib import Path
 
 import app
 import engine
@@ -75,9 +75,12 @@ class V138UserUpdateTests(unittest.TestCase):
         self.assertEqual(fake.store.data['loss_pause_until'], 0.0)
 
     def test_runtime_log_lines_include_timestamp(self):
-        source = inspect.getsource(app.App.drain)
+        # App.drain is wrapped by runtime patches, so verify the canonical UI
+        # source rather than the final wrapper returned by inspect.getsource().
+        source = Path(app.__file__).read_text()
         self.assertIn("time.strftime('%Y-%m-%d %H:%M:%S')", source)
-        self.assertIn('self.log_lines.append', source)
+        self.assertIn('self.log_lines.append((kind,line))', source)
+        self.assertIn("f.write(line+'\\n')", source)
 
 
 if __name__ == '__main__':
