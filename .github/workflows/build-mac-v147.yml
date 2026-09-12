@@ -25,11 +25,17 @@ jobs:
       - name: Run preserved strategy and safety regression tests
         run: |
           python -m unittest -v test_engine test_candles
-          python -m unittest -v test_v135_execution test_v135_safety2 test_v135_order_state test_v135_auto_entry_guard
+          python -m unittest -v test_v134 test_v135 test_v135_execution test_v135_safety2
+          python -m unittest -v test_v135_order_state test_v135_ack test_v135_fills test_v135_runtime_stability
+          python -m unittest -v test_v135_auto_entry_guard
           python -m unittest -v test_v136_runtime test_v136_entry_fix
-          python -m unittest -v test_v137_strategy test_v138_strategy test_v139_position
-          python -m unittest -v test_v140_score_dialog test_v141_dialog_signal_positions test_v141_exit_limit
-          python -m unittest -v test_v143_score_arbitration test_v145_layout_fix test_v146_ui_log_polish test_v146_ui_fix
+          python -m unittest -v test_v137_strategy test_v137_cancel_fix
+          python -m unittest -v test_v138_strategy
+          python -m unittest -v test_v139_position
+          python -m unittest -v test_v140_score_dialog
+          python -m unittest -v test_v141_dialog_signal_positions test_v141_history_return_chart test_v141_exit_limit
+          python -m unittest -v test_v142_visual test_v143_score_arbitration test_v143_visual_polish test_v144_ui_polish test_v145_layout_fix
+          python -m unittest -v test_v146_ui_log_polish test_v146_ui_fix
       - name: Run V1.4.7 strategy tests
         run: python -m unittest -v test_v147_strategy
       - name: Verify V1.4.7 wiring and rules
@@ -66,7 +72,10 @@ jobs:
       - name: Re-run V1.4.7 strategy and key regression tests on Intel Mac
         run: |
           python -m py_compile v147_strategy_patch.py test_v147_strategy.py build_icon.py
-          python -m unittest -v test_v138_strategy test_v143_score_arbitration test_v146_ui_log_polish test_v146_ui_fix test_v147_strategy
+          python -m unittest -v test_v138_strategy
+          python -m unittest -v test_v143_score_arbitration
+          python -m unittest -v test_v146_ui_log_polish test_v146_ui_fix
+          python -m unittest -v test_v147_strategy
       - name: Create application icon
         run: |
           python build_icon.py
