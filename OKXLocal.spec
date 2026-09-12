@@ -5,7 +5,7 @@ root = Path(SPECPATH)
 # runtime_hooks=[str(root / 'v136_runtime.py')]
 a = Analysis([str(root / 'desktop.py')], pathex=[str(root)],
              hiddenimports=['unittest.mock'], datas=[], binaries=[],
-             hookspath=[], runtime_hooks=[str(root / 'v136_runtime.py'), str(root / 'v136_entry_fix.py'), str(root / 'v137_strategy_patch.py'), str(root / 'v137_cancel_fix.py'), str(root / 'v138_strategy_patch.py'), str(root / 'v138_user_update.py')], excludes=[])
+             hookspath=[], runtime_hooks=[str(root / 'v136_runtime.py'), str(root / 'v136_entry_fix.py'), str(root / 'v137_strategy_patch.py'), str(root / 'v137_cancel_fix.py'), str(root / 'v138_strategy_patch.py'), str(root / 'v138_user_update.py'), str(root / 'v138_hard_gate_final.py')], excludes=[])
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='KAYTRADE',
           debug=False, strip=False, upx=False, console=False,
