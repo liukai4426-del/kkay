@@ -1,0 +1,53 @@
+name: Backtest KAYTRADE V1.3.8 Final BTC 30D Entry 5
+
+on:
+  push:
+    branches:
+      - research/v138-final-btc-30d-entry5
+    paths:
+      - research_v138_final_30d_entry5_backtest.py
+      - .github/workflows/backtest-v138-final-btc-30d-entry5.yml
+  workflow_dispatch:
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile research backtest
+        run: python -m py_compile research_v146_backtest.py research_v138_final_3m_backtest.py research_v138_final_30d_backtest.py research_v138_final_30d_entry5_backtest.py
+      - name: Verify one-variable comparison
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('research_v138_final_30d_entry5_backtest.py').read_text()
+          base=Path('research_v138_final_3m_backtest.py').read_text()
+          assert 'if value >= 5.0:' in s
+          assert 'if value >= 8.0:' in s
+          assert 'v138.signal_tier = entry5_signal_tier' in s
+          assert '2026, 8, 13, 10, 57' in s and '2026, 9, 12, 10, 57' in s
+          for token in ('FIRST_POSITION = 1_000.0','SECOND_POSITION = 2_000.0','front_r >= 1.3','trigger_ok and macd5 and hstate != "opposite" and space_ok','LOSS_PAUSE_MS = 6 * 60 * 60 * 1000'):
+              assert token in base, token
+          print('PASS: exact-window A/B; only opening threshold changed 6.0 -> 5.0')
+          PY
+      - name: Run 30-day entry-5 backtest
+        run: python research_v138_final_30d_entry5_backtest.py
+      - name: Show result summary
+        run: |
+          cat backtest_output_v138_final_30d_entry5/metrics.json
+          echo '--- REPORT ---'
+          cat backtest_output_v138_final_30d_entry5/V138_FINAL_BTC_SWAP_30D_ENTRY5_Backtest_Report.md
+      - name: Upload result
+        uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V138-FINAL-BTC-SWAP-30D-ENTRY5-BACKTEST
+          path: |
+            backtest_output_v138_final_30d_entry5/V138_FINAL_BTC_SWAP_30D_ENTRY5_Backtest_Report.md
+            backtest_output_v138_final_30d_entry5/V138_FINAL_BTC_SWAP_30D_ENTRY5_Trades.csv
+            backtest_output_v138_final_30d_entry5/V138_FINAL_BTC_SWAP_30D_ENTRY5_Cycles.csv
+            backtest_output_v138_final_30d_entry5/V138_FINAL_BTC_SWAP_30D_ENTRY5_DailyEquity.csv
+            backtest_output_v138_final_30d_entry5/metrics.json
+          retention-days: 14
