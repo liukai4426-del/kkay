@@ -1,0 +1,65 @@
+name: Backtest KAYTRADE V1.3.8 Final BTC 3M 1000-2000U
+on:
+  push:
+    branches: [research/v138-final-btc-3m-1000-2000u-backtest]
+    paths:
+      - research_v146_backtest.py
+      - research_v138_final_3m_backtest.py
+      - .github/workflows/backtest-v138-final-btc-3m.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile research backtest
+        run: python -m py_compile research_v146_backtest.py research_v138_final_3m_backtest.py
+      - name: Verify final V1.3.8 profile and hard gates
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('research_v138_final_3m_backtest.py').read_text()
+          for token in (
+              'FIRST_POSITION = 1_000.0',
+              'SECOND_POSITION = 2_000.0',
+              'if value >= 8.0:',
+              'if value >= 6.0:',
+              'trigger_ok and macd5 and hstate != "opposite" and space_ok',
+              'front_r >= 1.3',
+              'LOSS_PAUSE_MS = 6 * 60 * 60 * 1000',
+              'self.loss_pause_until_ms = ms + LOSS_PAUSE_MS',
+              'mult = {1: 1.0, 2: 2.0}[ti]',
+          ):
+              assert token in s, token
+          assert '"1Dutc"' not in s
+          # Trigger is hard-gate only and must not be part of raw score.
+          raw=s.split('raw = (',1)[1].split(')',1)[0]
+          assert 'trigger' not in raw.lower()
+          print('PASS: final V1.3.8 3M / 1000U+2000U profile verified')
+          PY
+      - name: Run final V1.3.8 BTC-USDT-SWAP 92-day backtest
+        run: python research_v138_final_3m_backtest.py
+      - name: Show result summary
+        if: success()
+        run: |
+          cat backtest_output_v138_final_3m_1000_2000u/metrics.json
+          echo '--- REPORT ---'
+          cat backtest_output_v138_final_3m_1000_2000u/V138_FINAL_BTC_SWAP_3M_Backtest_Report.md
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: KAYTRADE-V138-FINAL-BTC-SWAP-3M-1000-2000U-BACKTEST
+          path: |
+            backtest_output_v138_final_3m_1000_2000u/V138_FINAL_BTC_SWAP_3M_Backtest_Report.md
+            backtest_output_v138_final_3m_1000_2000u/V138_FINAL_BTC_SWAP_3M_Trades.csv
+            backtest_output_v138_final_3m_1000_2000u/V138_FINAL_BTC_SWAP_3M_Cycles.csv
+            backtest_output_v138_final_3m_1000_2000u/V138_FINAL_BTC_SWAP_3M_DailyEquity.csv
+            backtest_output_v138_final_3m_1000_2000u/metrics.json
+          if-no-files-found: error
+          retention-days: 14
