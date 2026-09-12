@@ -193,7 +193,6 @@ def _rebuild_connection_page(owner):
     app.RoundedButton(body, text='测试连接（只读）', command=owner.connect, variant='accent', width=170).grid(
         row=7, column=1, sticky='w', padx=8, pady=(4,18))
 
-    # Keep the callback target alive but hidden, preserving the V1.4.6 compact UI.
     owner.account_view = tk.Text(body, height=1, wrap='word', bg=app.PANEL_ALT, fg='#c8e5f5',
                                  font=('Menlo',12), bd=0, highlightthickness=0, padx=12, pady=10)
     owner._v151_connection_scroll = scroll
@@ -216,8 +215,7 @@ def _translate_runtime_text(text, state=None, settings=None):
         remaining = _pause_remaining(state or {})
         minutes = max(1, int(math.ceil(remaining / 60.0))) if remaining > 0 else 60
         return f'连续净亏损已达 {limit} 次：停止新开仓1小时；约剩余 {minutes} 分钟，已有仓位/TP/SL继续管理'
-    text = text.replace('15m ATR', '1H ATR').replace('15分钟 ATR', '1小时 ATR')
-    return text
+    return text.replace('15m ATR', '1H ATR').replace('15分钟 ATR', '1小时 ATR')
 
 
 def apply():
@@ -226,7 +224,6 @@ def apply():
 
     previous_signal = v138.v138_signal
     previous_prepare = v138._prepare_order
-    previous_refresh = engine.Engine.refresh_market
     previous_cycle = engine.Engine.cycle
     previous_arm_engine = engine.Engine.arm
     previous_app_init = app.App.__init__
@@ -245,6 +242,25 @@ def apply():
         result['strategy_version'] = V151_VERSION
         return v143._apply_arbitration(result)
 
+    def refresh_market(self):
+        q = self.x.candles('4H')
+        h = self.x.candles('1H')
+        m = self.x.candles('15m')
+        f = self.x.candles('5m')
+        o = self.x.candles('1m')
+        self._verify_latest('4H', q[-1]['t'], 14400000)
+        self._verify_latest('1H', h[-1]['t'], 3600000)
+        self._verify_latest('15m', m[-1]['t'], 900000)
+        self._verify_latest('5m', f[-1]['t'], 300000)
+        self._verify_latest('1m', o[-1]['t'], v138.ONE_MINUTE_STEP)
+        value = v151_signal(h, m, f, o, self.settings.stop_atr if self.settings else 1.0, four=q)
+        self.market = dict(value, bar=o[-1]['t'], bar1m=o[-1]['t'], bar5m=f[-1]['t'], bar15=m[-1]['t'],
+                           bar1h=h[-1]['t'], bar4h=q[-1]['t'], close=o[-1]['c'])
+        self.market_at = time.time()
+        self.market_monotonic = time.monotonic()
+        self._candle_recovered()
+        self.emit('market', self.market)
+
     def prepare_order_1h(self, side, score, market, equity, available, remaining):
         proxy, atr1h = _market_with_1h_atr(market)
         original15 = float((market.get('m') or {}).get('atr') or 0.0)
@@ -255,8 +271,6 @@ def apply():
         plan['atr_1h'] = atr1h
         plan['atr_source'] = '1H'
         plan['atr_15m_reference'] = original15
-        # Restore the compatibility field to its true 15m value; stop_distance was
-        # already calculated from the injected 1H ATR above.
         plan['atr_15m'] = original15
         return plan, tier, multiplier, level
 
@@ -306,11 +320,6 @@ def apply():
             state['streak_pause_until'] = 0.0
             state['streak_notice_day'] = ''
             self.store.save()
-
-    def refresh_market(self):
-        result = previous_refresh(self)
-        # Signal output is rewritten by v151_signal via v138.v138_signal below.
-        return result
 
     def cycle(self):
         original_emit = self.emit
