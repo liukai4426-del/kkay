@@ -25,10 +25,11 @@ class V153HiddenScrollTests(unittest.TestCase):
 
     def test_ui_copy_states_v153_and_no_one_minute_confirmation(self):
         source=inspect.getsource(runtime.apply)
+        rewrite=inspect.getsource(runtime._rewrite_text)
         self.assertIn('KAYTRADE 1.5.3',source)
-        self.assertIn('1m不再做EMA/突破/KDJ',source)
-        self.assertIn('单一1×仓位、不加仓',source)
-        self.assertIn('4根1m',source)
+        self.assertIn('1m无EMA/突破/KDJ等确认',source)
+        self.assertIn('单一1×仓位，不进行第二次加仓',source)
+        self.assertIn('4根1m',rewrite)
 
 
 if __name__=='__main__':
