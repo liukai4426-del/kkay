@@ -1,0 +1,76 @@
+name: Backtest KAYTRADE V1.5.2 Selective Cost Gate 30D
+on:
+  push:
+    branches: [research/v152-costgate-selective-30d]
+    paths:
+      - research_v152_costgate_selective.py
+      - .github/workflows/backtest-v152-costgate-selective-30d.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnostic:
+    name: v152-costgate-selective-30d
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Restore OKX market cache
+        uses: actions/cache@v4
+        with:
+          path: .research_market_cache
+          key: v152-costgate-selective-20260814T0316-20260913T0316-w1600-v1
+          restore-keys: |
+            v152-atr15-btc-30d-market-20260814T0316-20260913T0316-w1600-v1
+      - name: Materialize validated OKX public-data loader
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+      - name: Fix report-only formatting typo in inherited backtest file
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('research_v152_30d_backtest.py')
+          s=p.read_text()
+          old='        f"| Profit Factor | {m[\'profit_factor\'] if math.isinf(m[\'profit_factor\']) else f\'{m[\'profit_factor\']:.3f}\'} |",\n'
+          new='        f"| Profit Factor | {\'∞\' if math.isinf(m[\'profit_factor\']) else format(m[\'profit_factor\'], \'.3f\')} |",\n'
+          if old in s:
+              p.write_text(s.replace(old,new))
+          PY
+      - name: Compile diagnostic
+        run: python -m py_compile research_v146_backtest.py v152_model.py v152_backtest_core.py research_v152_30d_backtest.py research_v152_cache_patch.py research_v152_data_cache.py research_v152_atr15_patch.py research_v152_costgate_selective.py
+      - name: Verify research scope
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('research_v152_costgate_selective.py').read_text()
+          for x in ['baseline_030','global_035','long040_short030','long030_short040','score7_040_else030','long_score7_040_else030']:
+              assert x in s
+          assert 'r.STOP_ATR = 1.5' in s
+          assert 'model.COST_MAX_R = 0.40' in s
+          print('PASS: selective research matrix wired')
+          PY
+      - name: Run selective cost-gate diagnostic
+        run: time python research_v152_costgate_selective.py
+      - name: Verify outputs
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('backtest_output_v152_costgate_selective/costgate_selective_results.json')
+          x=json.loads(p.read_text())
+          b=x['scenarios']['baseline_030']
+          assert b['trades']==15
+          assert abs(b['net_pnl']-23.371736868934022)<1e-6
+          assert len(x['scenarios'])==6
+          print(json.dumps({k:{'trades':v['trades'],'net_pnl':v['net_pnl'],'pf':v['profit_factor']} for k,v in x['scenarios'].items()}, ensure_ascii=False, indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.5.2-CostGate-Selective-30D
+          path: backtest_output_v152_costgate_selective/
+          if-no-files-found: error
+          retention-days: 30
