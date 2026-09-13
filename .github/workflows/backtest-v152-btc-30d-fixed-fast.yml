@@ -4,6 +4,7 @@ on:
     branches: [research/v152-btc-30d-backtest]
     paths:
       - research_v152_cache_patch.py
+      - research_v152_data_cache.py
       - research_v152_30d_fixed_runner.py
       - .github/workflows/backtest-v152-btc-30d-fixed-fast.yml
   workflow_dispatch:
@@ -19,6 +20,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+      - name: Restore persistent OKX market cache
+        uses: actions/cache@v4
+        with:
+          path: .research_market_cache
+          key: v152-btc-30d-market-20260814T0316-20260913T0316-w1600-v1
       - name: Materialize validated OKX public-data loader
         run: |
           git fetch --depth=1 origin research/v151-btc-30d-backtest
@@ -35,27 +41,29 @@ jobs:
               raise SystemExit('expected report formatting line not found')
           p.write_text(s.replace(old,new))
           PY
-      - name: Compile fixed-window cached replay
-        run: python -m py_compile research_v146_backtest.py v152_model.py v152_backtest_core.py research_v152_30d_backtest.py research_v152_cache_patch.py research_v152_30d_fixed_runner.py
-      - name: Verify fixed comparison window and pure caching
+      - name: Compile accelerated fixed-window replay
+        run: python -m py_compile research_v146_backtest.py v152_model.py v152_backtest_core.py research_v152_30d_backtest.py research_v152_cache_patch.py research_v152_data_cache.py research_v152_30d_fixed_runner.py
+      - name: Verify acceleration is strategy-neutral
         run: |
           python - <<'PY'
           from pathlib import Path
           import v152_model as m
           p=Path('research_v152_30d_fixed_runner.py').read_text()
           c=Path('research_v152_cache_patch.py').read_text()
+          d=Path('research_v152_data_cache.py').read_text()
           assert m.VERSION=='1.5.2' and m.THRESHOLD==6.0 and m.FRONT_MIN_R==1.5
           assert '2026, 9, 13, 3, 16' in p and '2026, 8, 14, 3, 16' in p
           assert '_orig_indicators(rows)' in c and '_orig_zones(rows, atr, lookback)' in c
-          assert 'model.indicators = indicators_cached' in c
-          print('PASS: exact V1.5.1 comparison window; cache delegates to original deterministic functions')
+          assert 'prime_one_minute' in c and 'model.indicators = indicators_cached' in c
+          assert 'orig_candles(bar)' in d and 'orig_funding()' in d
+          print('PASS: cache layers only reuse raw data / deterministic calculations')
           PY
-      - name: Run V1.5.2 fixed-window 30-day BTC backtest
-        run: python research_v152_30d_fixed_runner.py
-      - name: Verify outputs and fixed timestamps
+      - name: Run accelerated V1.5.2 fixed-window 30-day BTC backtest
+        run: time python research_v152_30d_fixed_runner.py
+      - name: Verify exact baseline outputs
         run: |
           python - <<'PY'
-          import json
+          import json, math
           from pathlib import Path
           out=Path('backtest_output_v152_btc_30d')
           m=json.loads((out/'metrics.json').read_text())
@@ -65,13 +73,16 @@ jobs:
           assert m['front_space_min_r']==1.5
           assert m['start_utc'].startswith('2026-08-14T03:16:00')
           assert m['end_utc'].startswith('2026-09-13T03:16:00')
+          assert m['trades']==26
+          assert abs(m['net_pnl']-16.512145906555816) < 0.0001, m['net_pnl']
+          assert abs(m['profit_factor']-1.1367189171962921) < 1e-9, m['profit_factor']
           assert (out/'V152_BTC_SWAP_30D_Backtest_Report.md').is_file()
           assert (out/'V152_BTC_SWAP_30D_Trades.csv').is_file()
-          print('PASS: V1.5.2 fixed-window outputs verified')
+          print('PASS: accelerated engine reproduces verified V1.5.2 baseline')
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: KAYTRADE-V1.5.2-BTC-30D-Fixed-Backtest
+          name: KAYTRADE-V1.5.2-BTC-30D-Fast-Backtest
           path: backtest_output_v152_btc_30d/
           if-no-files-found: error
           retention-days: 30
