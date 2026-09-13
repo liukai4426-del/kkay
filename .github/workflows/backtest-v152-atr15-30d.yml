@@ -1,0 +1,81 @@
+name: Backtest KAYTRADE V1.5.2 15m ATR 1.5x 30D
+on:
+  push:
+    branches: [research/v152-atr15-30d]
+    paths:
+      - research_v152_atr15_patch.py
+      - research_v152_30d_fixed_runner.py
+      - .github/workflows/backtest-v152-atr15-30d.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backtest:
+    name: v152-atr15-15x-30d
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Restore persistent OKX market cache
+        uses: actions/cache@v4
+        with:
+          path: .research_market_cache
+          key: v152-atr15-btc-30d-market-20260814T0316-20260913T0316-w1600-v1
+      - name: Materialize validated OKX public-data loader
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+      - name: Fix report-only formatting typo
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('research_v152_30d_backtest.py')
+          s=p.read_text()
+          old='        f"| Profit Factor | {m[\'profit_factor\'] if math.isinf(m[\'profit_factor\']) else f\'{m[\'profit_factor\']:.3f}\'} |",\n'
+          new='        f"| Profit Factor | {\'∞\' if math.isinf(m[\'profit_factor\']) else format(m[\'profit_factor\'], \'.3f\')} |",\n'
+          if old not in s:
+              raise SystemExit('expected report formatting line not found')
+          p.write_text(s.replace(old,new))
+          PY
+      - name: Compile research variant
+        run: python -m py_compile research_v146_backtest.py v152_model.py v152_backtest_core.py research_v152_30d_backtest.py research_v152_cache_patch.py research_v152_data_cache.py research_v152_atr15_patch.py research_v152_30d_fixed_runner.py
+      - name: Verify isolated ATR research wiring
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('research_v152_30d_fixed_runner.py').read_text()
+          a=Path('research_v152_atr15_patch.py').read_text()
+          assert "r.STOP_ATR = 1.5" in p
+          assert "m['stop_atr_timeframe'] = '15m'" in p
+          assert "m['target_atr_multiplier'] = 3.0" in p
+          assert 'opp["atr1h"] = float(opp["atr15"])' in a
+          print('PASS: 15m ATR x1.5 stop / 3.0x ATR TP / 2R wired consistently')
+          PY
+      - name: Run V1.5.2 15m ATR 1.5x 30-day backtest
+        run: time python research_v152_30d_fixed_runner.py
+      - name: Verify outputs and ATR parameters
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          out=Path('backtest_output_v152_btc_30d')
+          m=json.loads((out/'metrics.json').read_text())
+          assert m['strategy_version']=='1.5.2'
+          assert m['days']==30
+          assert m['start_utc'].startswith('2026-08-14T03:16:00')
+          assert m['end_utc'].startswith('2026-09-13T03:16:00')
+          assert m['stop_atr_timeframe']=='15m'
+          assert abs(m['stop_atr_multiplier']-1.5)<1e-12
+          assert abs(m['target_atr_multiplier']-3.0)<1e-12
+          assert abs(m['reward_r']-2.0)<1e-12
+          print('PASS: outputs verified', json.dumps({k:m[k] for k in ['trades','net_pnl','net_return_pct','win_rate_pct','profit_factor','max_drawdown_pct']}, ensure_ascii=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.5.2-15mATR-1.5x-30D
+          path: backtest_output_v152_btc_30d/
+          if-no-files-found: error
+          retention-days: 30
