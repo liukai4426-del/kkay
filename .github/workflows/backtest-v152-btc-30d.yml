@@ -1,0 +1,85 @@
+name: Backtest KAYTRADE V1.5.2 BTC 30D
+on:
+  push:
+    branches: [research/v152-btc-30d-backtest]
+    paths:
+      - research_v152_30d_backtest.py
+      - v152_model.py
+      - v152_backtest_core.py
+      - .github/workflows/backtest-v152-btc-30d.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backtest:
+    name: v152-btc-30d
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Materialize validated OKX public-data loader
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+      - name: Fix report-only formatting typo
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('research_v152_30d_backtest.py')
+          s=p.read_text()
+          old='        f"| Profit Factor | {m[\'profit_factor\'] if math.isinf(m[\'profit_factor\']) else f\'{m[\'profit_factor\']:.3f}\'} |",\n'
+          new='        f"| Profit Factor | {\'∞\' if math.isinf(m[\'profit_factor\']) else format(m[\'profit_factor\'], \'.3f\')} |",\n'
+          if old not in s:
+              raise SystemExit('expected report formatting line not found')
+          p.write_text(s.replace(old,new))
+          PY
+      - name: Compile V1.5.2 research simulator
+        run: python -m py_compile research_v146_backtest.py v152_model.py v152_backtest_core.py research_v152_30d_backtest.py
+      - name: Verify V1.5.2 research wiring
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import v152_model as m
+          import v152_backtest_core as bt
+          p=Path('research_v152_30d_backtest.py').read_text()
+          assert m.VERSION=='1.5.2'
+          assert m.THRESHOLD==6.0
+          assert m.FRONT_MIN_R==1.5
+          assert m.COST_MAX_R==0.30
+          assert bt.LOSS_PAUSE_MS==60*60*1000
+          for token in ('model.evaluate(', 'model.execution_checks(', 'ENTRY_VALID_MS = 5 * 60_000', 'STOP_ATR = 1.0', 'REWARD_R = 2.0', 'POSITION_CAP = 1_000.0', 'bt.exit_on_bar('):
+              assert token in p, token
+          print('PASS: V1.5.2 shared model + corrected fill timing + risk controls wired')
+          PY
+      - name: Run V1.5.2 rolling 30-day BTC backtest
+        run: python research_v152_30d_backtest.py
+      - name: Verify outputs
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          out=Path('backtest_output_v152_btc_30d')
+          m=json.loads((out/'metrics.json').read_text())
+          assert m['strategy_version']=='1.5.2'
+          assert m['days']==30
+          assert m['entry_threshold']==6.0
+          assert m['front_space_min_r']==1.5
+          assert m['stop_atr_timeframe']=='1H'
+          assert m['stop_atr_multiplier']==1.0
+          assert m['reward_r']==2.0
+          assert m['loss_pause_hours']==1
+          assert m['entry_order_type']=='LIMIT'
+          assert 'market exit' in m['exit_model']
+          assert (out/'V152_BTC_SWAP_30D_Backtest_Report.md').is_file()
+          assert (out/'V152_BTC_SWAP_30D_Trades.csv').is_file()
+          print('PASS: V1.5.2 30D outputs verified')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.5.2-BTC-30D-Backtest
+          path: backtest_output_v152_btc_30d/
+          if-no-files-found: error
+          retention-days: 30
