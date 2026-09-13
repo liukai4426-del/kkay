@@ -3,9 +3,10 @@
 Research variant only:
 - stop = 1.5 x 15m ATR
 - full take-profit = 3.0 x 15m ATR = 2R
-All entry logic, score threshold, hard gates and risk controls otherwise remain
-V1.5.2-equivalent. The ATR research patch also makes all R-based checks use the
-same 15m ATR stop distance.
+- estimated fee+slippage hard gate = 0.40R
+All entry logic, score threshold, front-space gate and risk controls otherwise
+remain V1.5.2-equivalent. The ATR research patch also makes all R-based checks
+use the same 15m ATR stop distance.
 """
 from datetime import datetime, timezone
 
@@ -23,6 +24,7 @@ r.END_MS = int(END.timestamp() * 1000)
 r.START_MS = int(START.timestamp() * 1000)
 r.STOP_ATR = 1.5
 r.REWARD_R = 2.0
+r.model.COST_MAX_R = 0.40
 
 for mod in (r.base,):
     mod.END = r.END
@@ -41,7 +43,8 @@ def _metrics_atr15(*args, **kwargs):
     m['stop_atr_multiplier'] = 1.5
     m['target_atr_multiplier'] = 3.0
     m['reward_r'] = 2.0
-    m['research_variant'] = 'V1.5.2 / 15m ATR 1.5x SL / 3.0x ATR TP'
+    m['cost_max_r'] = 0.40
+    m['research_variant'] = 'V1.5.2 / 15m ATR 1.5x SL / 3.0x ATR TP / cost gate 0.40R'
     return m
 
 r.metrics = _metrics_atr15
