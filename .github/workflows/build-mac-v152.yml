@@ -21,7 +21,7 @@ jobs:
         with:
           python-version: '3.13'
       - name: Compile V1.5.2 runtime and backtest core
-        run: python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py v138_strategy_patch.py v143_score_arbitration_patch.py v146_ui_fix_patch.py v147_strategy_patch.py v150_strategy_patch.py v151_strategy_patch.py v152_model.py v152_strategy_patch.py v152_safety_patch.py v152_backtest_core.py test_v150_strategy.py test_v151_strategy.py test_v152_strategy.py
+        run: python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py v138_strategy_patch.py v143_score_arbitration_patch.py v146_ui_fix_patch.py v147_strategy_patch.py v150_strategy_patch.py v151_strategy_patch.py v152_model.py v152_strategy_patch.py v152_safety_patch.py v152_ui_busy_fix.py v152_backtest_core.py test_v150_strategy.py test_v151_strategy.py test_v152_strategy.py test_v152_ui_busy_fix.py
       - name: Run preserved V1.4.7 regression tests
         run: |
           python -m unittest -v test_engine test_candles
@@ -42,11 +42,14 @@ jobs:
           python -m unittest -v test_v150_strategy
           python -m unittest -v test_v151_strategy
       - name: Run V1.5.2 tests
-        run: python -m unittest -v test_v152_strategy
+        run: |
+          python -m unittest -v test_v152_strategy
+          python -m unittest -v test_v152_ui_busy_fix
       - name: Verify V1.5.2 production wiring
         run: |
           python - <<'PY'
           from pathlib import Path
+          import app
           import engine
           import exchange
           import v138_strategy_patch as v138
@@ -54,6 +57,7 @@ jobs:
           import v152_model as model
           import v152_backtest_core as bt
           import v152_safety_patch
+          import v152_ui_busy_fix
           spec=Path('OKXLocal.spec').read_text()
           assert model.VERSION == '1.5.2'
           assert model.THRESHOLD == 6.0
@@ -67,12 +71,15 @@ jobs:
           assert engine.Engine.refresh_market.__module__ == 'v152_safety_patch'
           assert v138._prepare_order.__module__ == 'v152_strategy_patch'
           assert exchange.Exchange.post.__module__ == 'v152_strategy_patch'
+          assert app.App.worker.__module__ == 'v152_ui_busy_fix'
+          assert app.App._kaytrade_v152_ui_busy_fix_applied
           assert bt.model is model
           assert 'v152_strategy_patch.py' in spec
           assert 'v152_safety_patch.py' in spec
+          assert 'v152_ui_busy_fix.py' in spec
           assert "CFBundleShortVersionString': '1.5.2'" in spec
           assert "CFBundleVersion': '152'" in spec
-          print('PASS: V1.5.2 shared pullback model + persistent opportunity + execution gates + backtest core are wired')
+          print('PASS: V1.5.2 strategy + safety + UI operation-lock hotfix are wired')
           PY
   build:
     name: intel-mac-package
@@ -91,7 +98,7 @@ jobs:
         run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0'
       - name: Re-run key tests on Intel Mac
         run: |
-          python -m py_compile v147_strategy_patch.py v150_strategy_patch.py v151_strategy_patch.py v152_model.py v152_strategy_patch.py v152_safety_patch.py v152_backtest_core.py test_v150_strategy.py test_v151_strategy.py test_v152_strategy.py build_icon.py
+          python -m py_compile v147_strategy_patch.py v150_strategy_patch.py v151_strategy_patch.py v152_model.py v152_strategy_patch.py v152_safety_patch.py v152_ui_busy_fix.py v152_backtest_core.py test_v150_strategy.py test_v151_strategy.py test_v152_strategy.py test_v152_ui_busy_fix.py build_icon.py
           python -m unittest -v test_v138_strategy
           python -m unittest -v test_v143_score_arbitration
           python -m unittest -v test_v146_ui_log_polish test_v146_ui_fix
@@ -99,6 +106,7 @@ jobs:
           python -m unittest -v test_v150_strategy
           python -m unittest -v test_v151_strategy
           python -m unittest -v test_v152_strategy
+          python -m unittest -v test_v152_ui_busy_fix
       - name: Create application icon
         run: |
           python build_icon.py
@@ -116,7 +124,7 @@ jobs:
           mkdir -p installer
           ditto dist/KAYTRADE.app installer/KAYTRADE.app
           cp RELEASE-1.5.2.md installer/RELEASE-1.5.2.md
-          printf 'PASS: V1.5.2 pullback state machine; fixed score 6; front space 1.5R; 1.0x 1H ATR validation stop; one-hour 3-loss pause; market TP/SL exits; shared live/backtest model.\n' > installer/BUILD-TEST.txt
+          printf 'PASS: V1.5.2 pullback state machine; fixed score 6; front space 1.5R; 1.0x 1H ATR validation stop; one-hour 3-loss pause; market TP/SL exits; UI busy-lock hotfix; shared live/backtest model.\n' > installer/BUILD-TEST.txt
           ln -s /Applications installer/Applications
           hdiutil create -volname KAYTRADE-1.5.2 -srcfolder installer -ov -format UDZO KAYTRADE-1.5.2-Intel-test.dmg
           shasum -a 256 KAYTRADE-1.5.2-Intel-test.dmg > SHA256.txt
