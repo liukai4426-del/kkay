@@ -28,12 +28,13 @@ class V154ExecutionTests(unittest.TestCase):
             leverage=5.0, reward_r=2.0, consecutive_losses=3, daily_loss=500.0,
         )
         settings.validate=lambda:settings
-        ticker={'askPx':'100.10','bidPx':'100.00'}
+        # Keep the synthetic spread inside the preserved 5 bps spread hard gate.
+        ticker={'askPx':'100.04','bidPx':'100.00'}
         meta={'tickSz':'0.01','ctVal':'0.01','ctMult':'1','minSz':'0.01','lotSz':'0.01'}
         with patch.object(runtime.v136_runtime,'_live_equity_for',return_value=10_000.0), \
              patch.object(runtime.v136_entry_fix,'_engine_gate_multiple',return_value=1.0):
             plan=runtime._v154_make_plan(settings,'做多',ticker,meta,10.0,10_000.0,500.0,1.0)
-        self.assertEqual(float(plan['px']),100.10)
+        self.assertEqual(float(plan['px']),100.04)
         self.assertEqual(plan['entry_order_type'],'market')
         self.assertTrue(plan['market_entry'])
         self.assertEqual(plan['entry_fee_budget_bps'],5.0)
