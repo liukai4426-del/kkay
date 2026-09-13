@@ -40,14 +40,17 @@ def _zone_for_rearm(opportunity):
 
 
 def _rearm_ready(rearm, one):
+    """A consumed/invalid opportunity can rearm only after price leaves its frozen zone.
+
+    The next opportunity still has to enter from the correct side in v152_model, so
+    leaving either edge is safe and also allows a genuine trend reversal to rearm.
+    """
     if not isinstance(rearm, dict) or not one:
         return True
     close = float(one[-1]["c"])
-    if rearm.get("side") == "做多":
-        return close > float(rearm.get("zone_high") or 0.0)
-    if rearm.get("side") == "做空":
-        return close < float(rearm.get("zone_low") or 0.0)
-    return True
+    low = float(rearm.get("zone_low") or 0.0)
+    high = float(rearm.get("zone_high") or 0.0)
+    return close < low or close > high
 
 
 def _update_mfe_mae(active, bar):
