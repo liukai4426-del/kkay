@@ -254,12 +254,10 @@ jobs:
                       if bar_open>=r.END_MS: break
                       last_bar=bar; bar_close=bar_open+60_000
 
-                      # Funding/position state at the instant the new minute opens.
                       sim.apply_funding_until(bar_open,float(bar['o']))
                       if sim.rearm and r.rearm_ready(sim.rearm,bar_open):
                           sim.rearm=None; sim.stats['rearmed']+=1
 
-                      # Every slice contains only candles already CLOSED at bar_open.
                       slices={}; valid=True
                       for tf in ('1m','5m','15m','1H','4H'):
                           rows=r.closed_slice(data,ts,tf,bar_open)
@@ -287,7 +285,6 @@ jobs:
                           if result.get('status')=='允许开仓': sim.stats['allow_entry_states']+=1
                           sim.submit(result,bar_open,float(bar['o']),bar)
 
-                      # Existing positions and just-filled market positions can exit inside this minute.
                       sim.process_exit(bar)
                       sim.apply_funding_until(bar_close,float(bar['c']))
                       sim.mark_risk(bar_close,float(bar['c']))
@@ -403,3 +400,5 @@ jobs:
         with:
           path: .research_market_cache
           key: v154-btc-90d-market-20260615T0316-20260913T0316-w1600-v1
+
+# trigger: V1.5.4 90D replay
