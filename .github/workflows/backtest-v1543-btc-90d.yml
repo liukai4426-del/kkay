@@ -1,0 +1,75 @@
+name: Backtest KAYTRADE V1.5.4 Build1543 BTC 90D
+on:
+  push:
+    branches: [research/v1543-btc-90d-backtest]
+    paths:
+      - research_v1543_90d_backtest.py
+      - research_v1543_cache_patch.py
+      - .github/workflows/backtest-v1543-btc-90d.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backtest:
+    name: v1543-btc-90d
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Materialize audited OKX research data helper
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+
+      - name: Compile and verify exact Build 1543 replay wiring
+        run: |
+          python -m py_compile \
+            research_v146_backtest.py research_v1543_cache_patch.py research_v1543_90d_backtest.py \
+            v152_model.py v153_model.py v154_model.py v154_build1543_patch.py
+          python -m unittest -v test_v154_strategy test_v154_build1543
+          python - <<'PY'
+          import research_v1543_90d_backtest as r
+          import v154_model as m
+          import v154_build1543_patch as b
+          assert r.START.isoformat().startswith('2026-06-15T03:16:00')
+          assert r.END.isoformat().startswith('2026-09-13T03:16:00')
+          assert r.FIRST_SIGNAL_NOTIONAL == 1000.0
+          assert r.SECOND_SIGNAL_NOTIONAL == 2000.0
+          assert m.VERSION == '1.5.4' and m.ENTRY_WINDOW_MS == 0 and m.TIME_WINDOW_ENABLED is False
+          assert b.BUILD == '154.3' and b.PATH_C_LABEL == 'path_c_lower_band'
+          print('PASS: Build1543 = persistent BOLL + LIMIT + long Path C 2x + no loss-pause')
+          PY
+
+      - name: Run fixed-window V1.5.4 Build1543 90-day BTC backtest
+        run: time python research_v1543_90d_backtest.py
+
+      - name: Verify output integrity
+        run: |
+          python - <<'PY'
+          import csv,json
+          from pathlib import Path
+          out=Path('backtest_output_v1543_btc_90d')
+          m=json.loads((out/'metrics.json').read_text())
+          s=json.loads((out/'summary_90d.json').read_text())
+          legs=list(csv.DictReader((out/'V1543_BTC_SWAP_90D_Legs.csv').open()))
+          cycles=list(csv.DictReader((out/'V1543_BTC_SWAP_90D_Cycles.csv').open()))
+          assert m['strategy_version']=='1.5.4' and m['build']=='1543' and m['days']==90
+          assert m['loss_pause_enabled'] is False and m['path_c_enabled'] is True
+          assert m['second_signal_notional']==2*m['first_signal_notional']
+          assert m['boll_wall_clock_expiry_enabled'] is False
+          assert len(legs)==m['legs_closed'] and len(cycles)==m['cycles']
+          assert 'metrics' in s and 'cycles_by_path_c_usage' in s
+          print('PASS output integrity')
+          print(json.dumps(m,ensure_ascii=False,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.5.4-Build1543-BTC-90D-Backtest
+          path: backtest_output_v1543_btc_90d/
+          if-no-files-found: error
+          retention-days: 30
