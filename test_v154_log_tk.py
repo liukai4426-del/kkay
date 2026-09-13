@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import app
-import v154_limit_log_fix  # noqa: F401 - applies the repair overlay
+import v154_log_layout_fix  # noqa: F401 - applies LIMIT/log + footer layout repairs
 
 
 @unittest.skipUnless(sys.platform == "darwin", "real Tk visibility smoke runs on the Intel Mac job")
@@ -28,6 +28,7 @@ class V154MacLogVisibilityTests(unittest.TestCase):
                     root.update()
                     text = ui.log.get("1.0", "end")
                     self.assertIn("修复版历史日志可见性测试", text)
+                    self.assertTrue(getattr(ui, "_v154_log_layout_ready", False))
                     self.assertTrue(ui.log.winfo_ismapped())
                     self.assertGreater(ui.log.winfo_height(), 20)
 
