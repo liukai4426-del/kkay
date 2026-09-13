@@ -1,0 +1,66 @@
+name: Backtest KAYTRADE V1.5.4 Build1544 BTC 180D Factors
+on:
+  push:
+    branches: [research/v1544-btc-180d-factors]
+    paths:
+      - research_v1544_180d_backtest.py
+      - research_v1544_cache_patch.py
+      - .github/workflows/backtest-v1544-btc-180d-factors.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backtest:
+    name: v1544-btc-180d-factors
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Materialize audited OKX research data helper
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+      - name: Compile and verify Build 1544 research wiring
+        run: |
+          python -m py_compile research_v146_backtest.py research_v1544_cache_patch.py research_v1544_180d_backtest.py v152_model.py v153_model.py v154_model.py v154_build1543_patch.py v154_build1544_patch.py
+          python - <<'PY'
+          import research_v1544_180d_backtest as r
+          import v154_model as m
+          import v154_build1544_patch as b
+          assert r.BUILD == '1544' and r.START.isoformat().startswith('2026-03-17T03:16:00')
+          assert r.END.isoformat().startswith('2026-09-13T03:16:00') and (r.END-r.START).days == 180
+          assert b.PATH_C_ENABLED is False
+          assert m.ENTRY_WINDOW_MS == 0 and m.TIME_WINDOW_ENABLED is False
+          assert r.FIRST_SIGNAL_NOTIONAL == 1000.0 and r.ORDER_TTL_MS == 60000
+          assert 'baseline' in r.VARIANTS and 'middle_requires_macd' in r.VARIANTS
+          print('PASS: Build1544 180D = Path C OFF + persistent BOLL + LIMIT + factor variants')
+          PY
+      - name: Run fixed-window Build 1544 180-day factor backtest
+        run: time python research_v1544_180d_backtest.py
+      - name: Verify output integrity
+        run: |
+          python - <<'PY'
+          import csv,json
+          from pathlib import Path
+          out=Path('backtest_output_v1544_btc_180d')
+          m=json.loads((out/'metrics.json').read_text())
+          f=json.loads((out/'factor_analysis.json').read_text())
+          v=json.loads((out/'variant_comparison.json').read_text())
+          s=json.loads((out/'summary_180d.json').read_text())
+          rows=list(csv.DictReader((out/'V1544_BTC_SWAP_180D_Trades.csv').open()))
+          assert m['build']=='1544' and m['days']==180 and m['path_c_enabled'] is False
+          assert len(rows)==m['trades']
+          assert 'binary_ranking_by_expectancy_delta' in f
+          assert len(v)>=8 and 'baseline' in v and 'middle_requires_macd' in v
+          assert 'robustness_ranking' in s and (out/'REPORT.md').stat().st_size>100
+          print('PASS output integrity', m['trades'], 'trades')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.5.4-Build1544-BTC-180D-Factor-Backtest
+          path: backtest_output_v1544_btc_180d/
+          if-no-files-found: error
+          retention-days: 30
