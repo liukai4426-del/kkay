@@ -49,3 +49,5 @@ V1.5.4 is a focused execution/UI update on top of the verified V1.5.3 BOLL pullb
 - TP/SL triggers close at market.
 - Post-close cooldown remains 30 minutes.
 - Three consecutive net losses pause new entries for exactly one hour.
+
+Build target: Intel Mac, macOS 14+.
