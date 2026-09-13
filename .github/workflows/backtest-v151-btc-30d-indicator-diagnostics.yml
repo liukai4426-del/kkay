@@ -1,0 +1,40 @@
+name: Diagnose KAYTRADE V1.5.1 BTC 30D Indicators
+
+on:
+  push:
+    branches:
+      - research/v151-btc-30d-indicator-diagnostics
+    paths:
+      - research_v151_30d_indicator_diagnostics.py
+      - .github/workflows/backtest-v151-btc-30d-indicator-diagnostics.yml
+  workflow_dispatch:
+
+jobs:
+  indicator-diagnostics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile diagnostic simulator
+        run: python -m py_compile research_v151_30d_indicator_diagnostics.py research_v151_30d_backtest.py research_v146_backtest.py research_v138_final_3m_backtest.py
+      - name: Run V1.5.1 fixed-window indicator diagnostics
+        run: python research_v151_30d_indicator_diagnostics.py
+      - name: Verify baseline and outputs
+        run: |
+          python - <<'PY'
+          import json, pathlib
+          p=pathlib.Path('backtest_output_v151_30d_indicator_diagnostics/indicator_diagnostics.json')
+          d=json.loads(p.read_text())
+          assert d['baseline']['trades'] == 56, d['baseline']
+          assert abs(d['baseline']['net_pnl'] - 66.70003203794295) < 0.05, d['baseline']
+          assert pathlib.Path('backtest_output_v151_30d_indicator_diagnostics/V151_BTC_30D_Indicator_Trades.csv').exists()
+          print('baseline matched:', d['baseline'])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.5.1-BTC-30D-Indicator-Diagnostics
+          path: backtest_output_v151_30d_indicator_diagnostics/
+          retention-days: 30
