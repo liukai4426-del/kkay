@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import app
 import visual
-import v154_record_card_boll_fix  # noqa: F401 - applies final V1.5.4 UI/runtime repair
+import v154_fixed_card_precision_fix  # noqa: F401 - applies final V1.5.4 UI/runtime repair stack
 
 
 def _walk(root):
@@ -71,6 +71,7 @@ class V154RecordCardVisibilityTests(unittest.TestCase):
                     fixed_cards=[w for w in _walk(root) if isinstance(w,visual.Card) and getattr(w,'_v154_fixed_cost_gutter_removed',False)]
                     self.assertEqual(len(fixed_cards),1)
                     self.assertEqual(fixed_cards[0].cget('bg'),app.PANEL)
+                    self.assertTrue(getattr(ui,'_v154_fixed_cost_card_clean',False))
             finally:
                 if ui is not None:
                     try:
