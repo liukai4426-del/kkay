@@ -1,0 +1,31 @@
+name: Audit OKX Aug20 Candles
+on:
+  push:
+    branches: [research/v154-limit-90d-backtest]
+    paths: [.github/workflows/audit-okx-aug20.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query OKX BTC-USDT-SWAP around trade time
+        run: |
+          python - <<'PY'
+          import json, urllib.parse, urllib.request
+          from datetime import datetime, timezone
+          target = datetime(2026,8,20,14,15,tzinfo=timezone.utc)
+          ms = int(target.timestamp()*1000)
+          params = urllib.parse.urlencode({'instId':'BTC-USDT-SWAP','bar':'1m','after':str(ms+5*60_000),'limit':'15'})
+          url = 'https://www.okx.com/api/v5/market/history-candles?' + params
+          req = urllib.request.Request(url, headers={'Accept':'application/json','User-Agent':'KAYTRADE-AUDIT/1.0'})
+          with urllib.request.urlopen(req, timeout=30) as r:
+              payload=json.loads(r.read().decode())
+          print('URL',url)
+          print('code',payload.get('code'),'msg',payload.get('msg'))
+          for row in sorted(payload.get('data') or [], key=lambda x:int(x[0])):
+              t=int(row[0]); dt=datetime.fromtimestamp(t/1000,tz=timezone.utc)
+              if abs(t-ms) <= 5*60_000:
+                  print(dt.isoformat(), 'O',row[1],'H',row[2],'L',row[3],'C',row[4],'confirm',row[8])
+          PY
