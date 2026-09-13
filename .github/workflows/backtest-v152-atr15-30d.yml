@@ -1,7 +1,7 @@
-name: Backtest KAYTRADE V1.5.2 15m ATR 1.5x 30D
+name: Backtest KAYTRADE V1.5.2 15m ATR 1.5x Cost0.40R 30D
 on:
   push:
-    branches: [research/v152-atr15-30d]
+    branches: [research/v152-atr15-cost040-30d]
     paths:
       - research_v152_atr15_patch.py
       - research_v152_30d_fixed_runner.py
@@ -11,7 +11,7 @@ permissions:
   contents: read
 jobs:
   backtest:
-    name: v152-atr15-15x-30d
+    name: v152-atr15-15x-cost040-30d
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -42,21 +42,23 @@ jobs:
           PY
       - name: Compile research variant
         run: python -m py_compile research_v146_backtest.py v152_model.py v152_backtest_core.py research_v152_30d_backtest.py research_v152_cache_patch.py research_v152_data_cache.py research_v152_atr15_patch.py research_v152_30d_fixed_runner.py
-      - name: Verify isolated ATR research wiring
+      - name: Verify isolated ATR and cost-gate research wiring
         run: |
           python - <<'PY'
           from pathlib import Path
           p=Path('research_v152_30d_fixed_runner.py').read_text()
           a=Path('research_v152_atr15_patch.py').read_text()
           assert "r.STOP_ATR = 1.5" in p
+          assert "r.model.COST_MAX_R = 0.40" in p
           assert "m['stop_atr_timeframe'] = '15m'" in p
           assert "m['target_atr_multiplier'] = 3.0" in p
+          assert "m['cost_max_r'] = 0.40" in p
           assert 'opp["atr1h"] = float(opp["atr15"])' in a
-          print('PASS: 15m ATR x1.5 stop / 3.0x ATR TP / 2R wired consistently')
+          print('PASS: 15m ATR x1.5 stop / 3.0x ATR TP / 2R / cost gate 0.40R wired consistently')
           PY
-      - name: Run V1.5.2 15m ATR 1.5x 30-day backtest
+      - name: Run V1.5.2 15m ATR 1.5x cost0.40R 30-day backtest
         run: time python research_v152_30d_fixed_runner.py
-      - name: Verify outputs and ATR parameters
+      - name: Verify outputs and research parameters
         run: |
           python - <<'PY'
           import json
@@ -71,11 +73,12 @@ jobs:
           assert abs(m['stop_atr_multiplier']-1.5)<1e-12
           assert abs(m['target_atr_multiplier']-3.0)<1e-12
           assert abs(m['reward_r']-2.0)<1e-12
-          print('PASS: outputs verified', json.dumps({k:m[k] for k in ['trades','net_pnl','net_return_pct','win_rate_pct','profit_factor','max_drawdown_pct']}, ensure_ascii=False))
+          assert abs(m['cost_max_r']-0.40)<1e-12
+          print('PASS: outputs verified', json.dumps({k:m[k] for k in ['trades','net_pnl','net_return_pct','win_rate_pct','profit_factor','max_drawdown_pct','cost_max_r']}, ensure_ascii=False))
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: KAYTRADE-V1.5.2-15mATR-1.5x-30D
+          name: KAYTRADE-V1.5.2-15mATR-1.5x-Cost040R-30D
           path: backtest_output_v152_btc_30d/
           if-no-files-found: error
           retention-days: 30
