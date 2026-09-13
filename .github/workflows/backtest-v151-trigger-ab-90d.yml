@@ -1,0 +1,46 @@
+name: Backtest KAYTRADE V1.5.1 Trigger AB 90D
+
+on:
+  push:
+    branches:
+      - research/v151-trigger-ab-90d-exec
+    paths:
+      - research_v151_trigger_ab_90d.py
+      - .github/workflows/backtest-v151-trigger-ab-90d.yml
+  workflow_dispatch:
+
+jobs:
+  trigger-ab-90d:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile A/B simulator
+        run: python -m py_compile research_v151_trigger_ab_90d.py
+      - name: Run 90-day A/B backtest
+        run: python research_v151_trigger_ab_90d.py
+      - name: Verify A/B outputs
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('backtest_output_v151_trigger_ab_90d/trigger_ab_90d.json')
+          assert p.exists(), 'missing trigger_ab_90d.json'
+          d = json.loads(p.read_text())
+          assert d['days'] == 90
+          a = d['A_current_v151']
+          b = d['B_dual_trigger']
+          assert a['trades'] > 0 and b['trades'] > 0
+          assert b['trades'] <= a['trades']
+          assert d['common_rules']['stop'] == '1H ATR x 1.0'
+          assert d['common_rules']['three_losses_pause_hours'] == 1
+          print('PASS:', a['trades'], b['trades'], a['net_pnl'], b['net_pnl'])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.5.1-Trigger-AB-90D
+          path: backtest_output_v151_trigger_ab_90d/
+          retention-days: 30
