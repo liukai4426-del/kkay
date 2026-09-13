@@ -103,3 +103,11 @@ V1.5.1 behavior is preserved:
 - per-trade opportunity id, score components, trigger combination, front-space R, cost R and MFE/MAE fields
 
 Runtime logs deduplicate unchanged no-entry reasons for the same state/opportunity and keep explicit opportunity transitions.
+
+## UI operation-lock hotfix
+
+- Read-only account connection now finishes and releases the GUI operation lock after account/state verification; it no longer waits for multi-timeframe candle warm-up.
+- Auto-trading authorization also releases its GUI operation lock before the first expensive strategy refresh.
+- 4H / 1H / 15m / 5m / 1m candle warm-up starts on the following background strategy tick after authorization. Until valid closed candles are ready, the engine remains fail-closed and does not use stale signals.
+- An idle connected session does not start candle warm-up before the user authorizes auto trading, unless a persisted local active order/position requires reconciliation.
+- Trading writes remain serialized and ambiguous write states are never force-unlocked or retried by this UI fix.
