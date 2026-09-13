@@ -42,6 +42,17 @@ def new_opportunity(hour, quarter, five, one, side, signal):
     return opp
 
 
+def _normalize_opportunity(opportunity):
+    """Never inherit V1.5.3's old 4-minute expiry across an app upgrade/restart."""
+    if not isinstance(opportunity, dict):
+        return opportunity
+    opp = dict(opportunity)
+    start = int(opp.get("signal_close_ms") or opp.get("created_ms") or 0)
+    if start > 0:
+        opp["expires_ms"] = start + ENTRY_WINDOW_MS
+    return opp
+
+
 def _rewrite_text(value):
     if not isinstance(value, str):
         return value
@@ -90,7 +101,8 @@ def evaluate(hour, quarter, five, one, four, opportunity=None, stop_atr=1.0,
              now_ms=None, allow_new=True):
     """Evaluate V1.5.3 signals using V1.5.4 market-entry execution economics."""
     base.ENTRY_WINDOW_MS = ENTRY_WINDOW_MS
-    # Market entry consumes taker fee and can slip.  The inherited cost formula
+    opportunity = _normalize_opportunity(opportunity)
+    # Market entry consumes taker fee and can slip. The inherited cost formula
     # treats the first argument as entry cost bps, so feed taker+slippage there.
     entry_cost_bps = float(taker_bps) + float(slippage_bps)
     result, opp, transition = base.evaluate(
