@@ -1,0 +1,127 @@
+name: Build KAYTRADE Intel Mac 1.5.4 Build1543
+on:
+  push:
+    branches: [codex/v1-5-4-build1543-pathc-risk]
+    paths:
+      - '**.py'
+      - OKXLocal.spec
+      - RELEASE-1.5.4-B1543.md
+      - .github/workflows/build-mac-v154-build1543.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  unit:
+    name: v154-build1543-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile V1.5.4 Build 1543
+        run: >-
+          python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py
+          v151_strategy_patch.py v152_model.py v152_strategy_patch.py v152_safety_patch.py
+          v152_ui_busy_fix.py v152_backtest_core.py v153_model.py v153_runtime_patch.py
+          v153_backtest_core.py v154_model.py v154_runtime_patch.py v154_limit_log_fix.py
+          v154_record_card_boll_fix.py v154_fixed_card_precision_fix.py v154_build1543_patch.py
+          test_v154_strategy.py test_v154_round2_runtime.py test_v154_build1543.py
+          test_v154_build1543_tk.py
+      - name: Run preserved strategy and safety regressions
+        run: |
+          python -m unittest -v test_engine test_candles
+          python -m unittest -v test_v135_execution test_v135_safety2 test_v135_order_state
+          python -m unittest -v test_v136_runtime test_v137_strategy test_v138_strategy
+          python -m unittest -v test_v141_exit_limit test_v143_score_arbitration
+          python -m unittest -v test_v146_ui_fix test_v147_strategy
+          python -m unittest -v test_v150_strategy
+          python -m unittest -v test_v151_strategy
+          python -m unittest -v test_v152_strategy
+          python -m unittest -v test_v152_ui_busy_fix
+          python -m unittest -v test_v153_strategy
+          python -m unittest -v test_v153_ui_scroll
+          python -m unittest -v test_v154_strategy
+          python -m unittest -v test_v154_round2_runtime
+          python -m unittest -v test_v154_ui_scroll
+      - name: Run Build 1543 regressions
+        run: python -m unittest -v test_v154_build1543
+      - name: Verify Build 1543 production wiring
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import inspect
+          import app
+          import engine
+          import v154_model as model
+          import v154_fixed_card_precision_fix  # noqa
+          import v154_build1543_patch as fix
+          spec=Path('OKXLocal.spec').read_text()
+          assert model.VERSION == '1.5.4' and model.THRESHOLD == 6.0
+          assert model.ENTRY_WINDOW_MS == 0 and model.TIME_WINDOW_ENABLED is False
+          assert fix.BUILD == '154.3'
+          assert engine.Engine._kaytrade_v154_build1543_applied
+          assert app.App._kaytrade_v154_build1543_applied
+          assert 'consecutive_losses' not in inspect.getsource(fix._remove_loss_control).split('owner.fields.pop(')[0]
+          assert '2.0)' in inspect.getsource(fix._make_path_c_plan)
+          assert '"ordType": "limit"' in inspect.getsource(fix._submit_path_c)
+          assert 'path_c_rsi_required' in inspect.getsource(fix._new_path_c_opportunity)
+          assert 'v154_build1543_patch.py' in spec
+          assert "CFBundleShortVersionString': '1.5.4'" in spec
+          assert "CFBundleVersion': '1543'" in spec
+          print('PASS: V1.5.4 Build 1543 = no loss pause + Path C + 1x/2x signal funds')
+          PY
+  build:
+    name: intel-mac-package-build1543
+    needs: unit
+    runs-on: macos-15-intel
+    timeout-minutes: 50
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - name: Install packaging dependencies
+        run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0'
+      - name: Re-run Build 1543 tests on Intel Mac
+        run: |
+          python -m py_compile v152_model.py v152_strategy_patch.py v152_safety_patch.py v152_ui_busy_fix.py v153_model.py v153_runtime_patch.py v154_model.py v154_runtime_patch.py v154_limit_log_fix.py v154_record_card_boll_fix.py v154_fixed_card_precision_fix.py v154_build1543_patch.py test_v154_build1543.py test_v154_build1543_tk.py build_icon.py
+          python -m unittest -v test_v153_strategy
+          python -m unittest -v test_v154_strategy
+          python -m unittest -v test_v154_round2_runtime
+          python -m unittest -v test_v154_build1543
+          python -m unittest -v test_v154_build1543_tk
+      - name: Create application icon
+        run: |
+          python build_icon.py
+          test -s OKXLocal.icns
+      - name: Build Intel application
+        run: python -m PyInstaller --noconfirm OKXLocal.spec
+      - name: Verify bundle and Build 1543 hook
+        run: |
+          python verify_bundle.py
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1.5.4'
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1543'
+          test -s dist/KAYTRADE.app/Contents/Resources/assets/kaytrade-v142-logo.png || find dist/KAYTRADE.app -name 'kaytrade-v142-logo.png' -print -quit | grep .
+          codesign --verify --deep --strict dist/KAYTRADE.app
+      - name: Create Build 1543 installer
+        run: |
+          mkdir -p installer
+          ditto dist/KAYTRADE.app installer/KAYTRADE.app
+          cp RELEASE-1.5.4-B1543.md installer/RELEASE-1.5.4-B1543.md
+          printf 'PASS: V1.5.4 Build 1543 removes consecutive-loss entry pauses, removes that Risk-page control, exposes first-signal funds plus read-only automatic 2x second-signal funds, and adds long Path C after a filled/protected middle+RSI first entry when a later closed 5m touches the lower BOLL band. Path C ignores RSI but retains score>=6, hard blockers, LIMIT entry, 1H ATR stop, 2R TP and fail-closed execution.\n' > installer/BUILD-TEST.txt
+          ln -s /Applications installer/Applications
+          hdiutil create -volname KAYTRADE-1.5.4-B1543 -srcfolder installer -ov -format UDZO KAYTRADE-1.5.4-Intel-build1543.dmg
+          shasum -a 256 KAYTRADE-1.5.4-Intel-build1543.dmg > SHA256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-1.5.4-Intel-build1543
+          path: |
+            KAYTRADE-1.5.4-Intel-build1543.dmg
+            SHA256.txt
+          if-no-files-found: error
+          retention-days: 14
