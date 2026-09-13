@@ -1,10 +1,20 @@
-"""V1.5.2 UI operation-lock hotfix.
+"""V1.5.2 UI operation-lock and event-pump hotfix.
 
 The account-connect and auto-trading authorization actions must finish as soon as
 their own control work is complete. Expensive 4H/1H/15m/5m/1m candle warm-up
 belongs to the subsequent strategy tick and must not keep the GUI ``busy`` flag
-latched. Trading writes stay serialized by the single worker thread and all
-existing fail-closed engine/exchange guards remain unchanged.
+latched.
+
+V1.4.7+ strategy payloads intentionally removed the old 1D ``d`` field and use
+``q`` for 4H instead. The legacy Tk event renderer still indexed ``data['d']``;
+once the first V1.5.2 market event arrived this raised KeyError on the Tk thread,
+stopped future drain scheduling, left the live BTC quote at "waiting", and could
+leave later GUI actions permanently busy. This hotfix adapts V1.5.2 market events
+to the four-column legacy renderer (4H/1H/15m/5m) and makes the UI event pump
+self-rescheduling if a rendering exception ever occurs again.
+
+Trading writes stay serialized by the single worker thread and all existing
+fail-closed engine/exchange guards remain unchanged.
 """
 from __future__ import annotations
 
@@ -20,6 +30,10 @@ from candles import CandlePending
 from exchange import Exchange, NetworkError
 
 V152_UI_BUSY_FIX = True
+
+_PREVIOUS_EMIT = app.App.emit
+_PREVIOUS_DRAIN = app.App.drain
+_PREVIOUS_INIT = app.App.__init__
 
 
 def _active_local(engine_obj):
@@ -43,6 +57,73 @@ def _should_cycle(kind, engine_obj):
     if kind == 'tick' and getattr(engine_obj, 'settings', None) is None and not _active_local(engine_obj):
         return False
     return True
+
+
+def _market_for_legacy_ui(data):
+    """Adapt V1.5.2's 4H/1H/15m/5m payload to the inherited four-column renderer.
+
+    The old first column key is named ``d`` because it used to mean 1D. V1.5.2
+    has no 1D strategy data, so the UI first column now deliberately displays 4H
+    and receives a copy of ``q`` under the compatibility key ``d``.
+    """
+    if not isinstance(data, dict):
+        return data
+    out = dict(data)
+    if 'd' not in out:
+        out['d'] = out.get('q') or {}
+    return out
+
+
+def emit_v152_ui(self, kind, data):
+    if kind == 'market':
+        data = _market_for_legacy_ui(data)
+    return _PREVIOUS_EMIT(self, kind, data)
+
+
+def drain_v152_ui(self):
+    """Never allow one display-only event to permanently kill Tk event draining."""
+    try:
+        return _PREVIOUS_DRAIN(self)
+    except Exception as exc:
+        # The engine/worker is separate from Tk rendering. A rendering exception
+        # must not silently freeze all later ticker/done/status events.
+        self._v152_ui_drain_error = f'{type(exc).__name__}: {exc}'
+        try:
+            self.status.set('界面行情显示异常 · 已自动恢复事件循环')
+        except Exception:
+            pass
+
+        # It is safe to release a purely read/control UI lock if its completion
+        # event was lost to a renderer exception. Never auto-release while a
+        # flatten write is still being reconciled.
+        pending = getattr(self, '_v140_pending_action', None)
+        flatten_waiting = bool(
+            getattr(self, 'engine', None)
+            and getattr(self.engine, '_v140_flatten_waiting', False)
+        )
+        if getattr(self, 'busy', False) and not flatten_waiting and pending in (None, 'connect', 'arm', 'ack'):
+            self.busy = False
+            try:
+                self.update_trade_button()
+            except Exception:
+                pass
+
+        try:
+            self.root.after(150, self.drain)
+        except Exception:
+            pass
+        return None
+
+
+def app_init_v152_ui(self, *args, **kwargs):
+    _PREVIOUS_INIT(self, *args, **kwargs)
+    # The inherited Treeview still calls its first data column "d" internally.
+    # Relabel it to what V1.5.2 actually renders: 4H.
+    try:
+        self.matrix.heading('d', text='4小时', anchor='w')
+        self._v152_indicator_first_column = '4H'
+    except Exception:
+        pass
 
 
 def worker_v152(self):
@@ -97,7 +178,8 @@ def worker_v152(self):
                 self.recovery_count = 0
                 self.history_key = None
                 self.refresh_history()
-                self.emit('log', 'V1.5.2连接核对完成；行情历史将在启动自动交易后由后台策略循环加载')
+                self.public_at = 0
+                self.emit('log', 'V1.5.2连接核对完成；实时BTC价格由空闲行情轮询更新，指标历史将在启动自动交易后加载')
 
             elif kind == 'arm':
                 if not self.engine:
@@ -120,8 +202,6 @@ def worker_v152(self):
                 if _should_cycle(kind, self.engine):
                     self.engine.cycle()
                 self.refresh_history()
-                # Do not add an unrelated ticker GET to connect/arm before their
-                # ``done`` event. The next idle tick will resume public updates.
                 if kind not in ('connect', 'arm') and time.monotonic() - self.public_at > 5:
                     self.emit('ticker', self.engine.x.ticker())
                     self.public_at = time.monotonic()
@@ -168,6 +248,9 @@ def worker_v152(self):
 def apply():
     if getattr(app.App, '_kaytrade_v152_ui_busy_fix_applied', False):
         return
+    app.App.emit = emit_v152_ui
+    app.App.drain = drain_v152_ui
+    app.App.__init__ = app_init_v152_ui
     app.App.worker = worker_v152
     app.App._kaytrade_v152_ui_busy_fix_applied = True
 
