@@ -1,0 +1,265 @@
+name: Backtest KAYTRADE V1.5.3 BTC 30D
+on:
+  push:
+    branches: [research/v153-btc-30d-backtest]
+    paths:
+      - .github/workflows/backtest-v153-btc-30d.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backtest:
+    name: v153-btc-30d
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Restore OKX public market cache
+        uses: actions/cache@v4
+        with:
+          path: .research_market_cache
+          key: v153-btc-30d-market-20260814T0316-20260913T0316-w1600-v1
+
+      - name: Materialize audited 30-day replay harness
+        run: |
+          git fetch --depth=1 origin research/v152-btc-30d-backtest
+          git show FETCH_HEAD:research_v152_30d_backtest.py > research_v153_30d_backtest.py
+          git show FETCH_HEAD:research_v152_data_cache.py > research_v153_data_cache.py
+          git show FETCH_HEAD:research_v152_window_patch.py > research_v153_window_patch.py
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+
+      - name: Adapt replay harness to exact V1.5.3 runtime model
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p=Path('research_v153_30d_backtest.py')
+          s=p.read_text()
+          replacements = [
+              ('import v152_model as model', 'import v153_model as model'),
+              ('import v152_backtest_core as bt', 'import v153_backtest_core as bt'),
+              ("backtest_output_v152_btc_30d", "backtest_output_v153_btc_30d"),
+              ("'strategy_version':'1.5.2'", "'strategy_version':'1.5.3'"),
+              ('V152_BTC_SWAP_30D', 'V153_BTC_SWAP_30D'),
+              ('KAYTRADE V1.5.2', 'KAYTRADE V1.5.3'),
+              ('V1.5.2 30D backtest', 'V1.5.3 30D backtest'),
+              ('V152_30D_METRICS', 'V153_30D_METRICS'),
+              ('正式版 `v152_model.py`', '正式版 `v153_model.py`'),
+              ('当前正式V1.5.2；1H方向→15m固定回调→5m确认→1m触发→6分/Hard Gate→限价开仓；1H ATR×1止损；整仓2R；当前正式版TP/SL触发后市价退出。',
+               '当前正式V1.5.3；1H/15m趋势→5m BOLL回调信号→4根1m执行窗口→6分/Hard Gate→限价开仓；1m不做技术确认；1H ATR×1止损；整仓2R；TP/SL触发后市价退出。'),
+          ]
+          for old,new in replacements:
+              if old in s:
+                  s=s.replace(old,new)
+
+          old_rearm = '''def rearm_ready(rearm, close):\n    if not rearm:\n        return True\n    return float(close) < float(rearm['zone_low']) or float(close) > float(rearm['zone_high'])\n'''
+          new_rearm = '''def rearm_ready(rearm, close_ms):\n    if not rearm:\n        return True\n    return int(close_ms) >= int(rearm.get('rearm_after_ms') or 0)\n'''
+          if old_rearm not in s:
+              raise SystemExit('old rearm function not found')
+          s=s.replace(old_rearm,new_rearm)
+          s=s.replace("if sim.rearm and rearm_ready(sim.rearm, bar['c']):", "if sim.rearm and rearm_ready(sim.rearm, bar_close):")
+
+          old_submit = "self.rearm = {'zone_low': float(opp['zone_low']), 'zone_high': float(opp['zone_high']), 'side': side, 'id': opp['id']}"
+          new_submit = "self.rearm = {'zone_low': float(opp['zone_low']), 'zone_high': float(opp['zone_high']), 'side': side, 'id': opp['id'], 'signal_bar_t': int(opp.get('signal_bar_t') or 0), 'rearm_after_ms': int(opp.get('signal_close_ms') or opp.get('created_ms') or now_ms) + 5*60_000}"
+          if old_submit not in s:
+              raise SystemExit('submit rearm line not found')
+          s=s.replace(old_submit,new_submit)
+
+          old_invalid = "sim.rearm = {'zone_low':old_opp['zone_low'],'zone_high':old_opp['zone_high'],'side':old_opp['side'],'id':old_opp['id']}"
+          new_invalid = "sim.rearm = {'zone_low':old_opp['zone_low'],'zone_high':old_opp['zone_high'],'side':old_opp['side'],'id':old_opp['id'],'signal_bar_t':int(old_opp.get('signal_bar_t') or 0),'rearm_after_ms':int(old_opp.get('signal_close_ms') or old_opp.get('created_ms') or bar_close)+5*60_000}"
+          if old_invalid not in s:
+              raise SystemExit('invalidated rearm line not found')
+          s=s.replace(old_invalid,new_invalid)
+
+          s=s.replace("if result.get('status') == '等待5m确认': sim.stats['waiting_5m_bars'] += 1", "if result.get('status') == '等待5m BOLL回调信号': sim.stats['waiting_boll_signal_bars'] += 1")
+          s=s.replace("if result.get('status') == '等待1m触发': sim.stats['waiting_1m_bars'] += 1", "if str(result.get('status') or '').startswith('BOLL信号执行窗口'): sim.stats['boll_window_bars'] += 1")
+
+          old_pf='        f"| Profit Factor | {m[\'profit_factor\'] if math.isinf(m[\'profit_factor\']) else f\'{m[\'profit_factor\']:.3f}\'} |",\n'
+          new_pf='        f"| Profit Factor | {\'∞\' if math.isinf(m[\'profit_factor\']) else format(m[\'profit_factor\'], \'.3f\')} |",\n'
+          if old_pf in s:
+              s=s.replace(old_pf,new_pf)
+
+          p.write_text(s)
+
+          d=Path('research_v153_data_cache.py')
+          ds=d.read_text().replace('V1.5.2','V1.5.3').replace('V152_MARKET_CACHE_DIR','V153_MARKET_CACHE_DIR')
+          d.write_text(ds)
+          w=Path('research_v153_window_patch.py')
+          w.write_text(w.read_text().replace('V1.5.2','V1.5.3'))
+          PY
+
+          cat > research_v153_cache_patch.py <<'PY'
+          """Strategy-neutral acceleration for the V1.5.3 shared model."""
+          from __future__ import annotations
+          import v152_model as base_model
+          import v153_model as model
+
+          _orig_indicators = base_model.indicators
+          _orig_zones = base_model.strategy._zones
+          _orig_macd_hist = base_model._macd_hist
+          _orig_ema50_move = base_model._ema50_move
+          _orig_ema = base_model.ema
+          _indicator_cache = {}
+          _zone_cache = {}
+          _macd_cache = {}
+          _ema50_cache = {}
+          _one_minute_ema20 = {}
+          _one_minute_window = 1000
+
+          def _rows_key(rows):
+              if not rows: return (0,0,0)
+              return (len(rows), int(rows[0]['t']), int(rows[-1]['t']))
+
+          def _is_one_minute(rows):
+              return len(rows)>=2 and int(rows[-1]['t'])-int(rows[-2]['t'])==60_000
+
+          def _exact_ema20(rows):
+              return float(_orig_ema([float(r['c']) for r in rows],20)[-1])
+
+          def prime_one_minute(rows, window=1000):
+              global _one_minute_window
+              _one_minute_window=int(window); _one_minute_ema20.clear()
+              if not rows: return
+              closes=[float(r['c']) for r in rows]; n=min(_one_minute_window,len(rows))
+              alpha=2.0/21.0; q=1.0-alpha; value=closes[0]
+              for x in closes[1:n]: value += alpha*(x-value)
+              _one_minute_ema20[int(rows[n-1]['t'])]=float(value)
+              if len(rows)<=n: return
+              qn=q**n
+              for end in range(n,len(rows)):
+                  old0=closes[end-n]; old1=closes[end-n+1]; new=closes[end]
+                  value=q*value + qn*(old1-old0) + alpha*new
+                  _one_minute_ema20[int(rows[end]['t'])]=float(value)
+
+          def indicators_cached(rows):
+              key=_rows_key(rows); hit=_indicator_cache.get(key)
+              if hit is None:
+                  if _is_one_minute(rows):
+                      last_t=int(rows[-1]['t'])
+                      ema20=_one_minute_ema20.get(last_t)
+                      if ema20 is None or len(rows)!=_one_minute_window: ema20=_exact_ema20(rows)
+                      hit={'ema20':float(ema20)}
+                  else:
+                      hit=_orig_indicators(rows)
+                  _indicator_cache[key]=hit
+              return hit
+
+          def zones_cached(rows, atr, lookback):
+              key=(_rows_key(rows),float(atr),int(lookback)); hit=_zone_cache.get(key)
+              if hit is None:
+                  hit=_orig_zones(rows,atr,lookback); _zone_cache[key]=hit
+              return hit
+
+          def macd_hist_cached(rows):
+              key=_rows_key(rows); hit=_macd_cache.get(key)
+              if hit is None:
+                  hit=_orig_macd_hist(rows); _macd_cache[key]=hit
+              return hit
+
+          def ema50_move_cached(rows, side):
+              key=(_rows_key(rows),str(side)); hit=_ema50_cache.get(key)
+              if hit is None:
+                  hit=_orig_ema50_move(rows,side); _ema50_cache[key]=hit
+              return hit
+
+          def apply():
+              model.indicators=indicators_cached
+              base_model.indicators=indicators_cached
+              base_model.strategy._zones=zones_cached
+              base_model._macd_hist=macd_hist_cached
+              base_model._ema50_move=ema50_move_cached
+
+          def stats():
+              return {'indicator_entries':len(_indicator_cache),'zone_entries':len(_zone_cache),
+                      'macd_entries':len(_macd_cache),'ema50_entries':len(_ema50_cache),
+                      'precomputed_1m_ema20':len(_one_minute_ema20)}
+          apply()
+          PY
+
+          cat > research_v153_30d_fixed_runner.py <<'PY'
+          from datetime import datetime, timezone
+          import research_v153_cache_patch as cache_patch
+          import research_v153_30d_backtest as r
+          import research_v153_data_cache as data_cache
+          import research_v153_window_patch as window_patch
+
+          END=datetime(2026,9,13,3,16,tzinfo=timezone.utc)
+          START=datetime(2026,8,14,3,16,tzinfo=timezone.utc)
+          r.END=END; r.START=START
+          r.END_MS=int(END.timestamp()*1000); r.START_MS=int(START.timestamp()*1000)
+          for mod in (r.base,):
+              mod.END=r.END; mod.START=r.START; mod.END_MS=r.END_MS; mod.START_MS=r.START_MS
+          data_cache.install(r.base,cache_patch=cache_patch)
+          window_patch.install(r)
+          if __name__=='__main__':
+              r.main()
+              print('COMPUTE_CACHE_STATS',cache_patch.stats(),flush=True)
+              print('MARKET_CACHE_STATS',data_cache.stats(),flush=True)
+              print('WINDOW_VIEW_STATS',window_patch.stats(),flush=True)
+          PY
+
+      - name: Compile and verify V1.5.3 replay wiring
+        run: |
+          python -m py_compile research_v146_backtest.py v152_model.py v152_backtest_core.py v153_model.py v153_backtest_core.py research_v153_30d_backtest.py research_v153_cache_patch.py research_v153_data_cache.py research_v153_window_patch.py research_v153_30d_fixed_runner.py
+          python - <<'PY'
+          from pathlib import Path
+          import v153_model as m
+          s=Path('research_v153_30d_backtest.py').read_text()
+          c=Path('research_v153_cache_patch.py').read_text()
+          assert m.VERSION=='1.5.3' and m.THRESHOLD==6.0 and m.ENTRY_WINDOW_MS==4*60*1000
+          assert 'import v153_model as model' in s and 'import v153_backtest_core as bt' in s
+          assert "'strategy_version':'1.5.3'" in s
+          assert 'rearm_after_ms' in s
+          assert 'base_model.indicators=indicators_cached' in c
+          assert 'model.indicators=indicators_cached' in c
+          print('PASS: V1.5.3 live model is the replay decision engine')
+          PY
+
+      - name: Run fixed-window V1.5.3 30-day BTC backtest
+        run: time python research_v153_30d_fixed_runner.py
+
+      - name: Verify and summarize outputs
+        run: |
+          python - <<'PY'
+          import csv, json, math
+          from collections import Counter
+          from pathlib import Path
+          out=Path('backtest_output_v153_btc_30d')
+          m=json.loads((out/'metrics.json').read_text())
+          assert m['strategy_version']=='1.5.3'
+          assert m['days']==30 and m['entry_threshold']==6.0 and m['front_space_min_r']==1.5
+          assert m['start_utc'].startswith('2026-08-14T03:16:00')
+          assert m['end_utc'].startswith('2026-09-13T03:16:00')
+          trades=list(csv.DictReader((out/'V153_BTC_SWAP_30D_Trades.csv').open()))
+          paths=Counter()
+          for t in trades:
+              try:
+                  detail=json.loads(t.get('trigger_combination') or '{}')
+                  paths[detail.get('boll_path') or 'unknown']+=1
+              except Exception:
+                  paths['parse_error']+=1
+          summary={
+              'trades':m['trades'],'wins':m['wins'],'losses':m['losses'],'win_rate_pct':m['win_rate_pct'],
+              'net_pnl':m['net_pnl'],'net_return_pct':m['net_return_pct'],'profit_factor':m['profit_factor'],
+              'expectancy':m['expectancy'],'max_drawdown_usdt':m['max_drawdown_usdt'],'max_drawdown_pct':m['max_drawdown_pct'],
+              'fees':m['fees'],'funding_pnl':m['funding_pnl'],'avg_hold_min':m['avg_hold_min'],
+              'by_side':m['by_side'],'by_reason':m['by_reason'],'by_score':m['by_score'],
+              'funnel':m['funnel'],'transition_counts':m['transition_counts'],'execution_blockers':m['execution_blockers'],
+              'boll_path_trades':dict(paths),'stress_net_pnl':m['stress_net_pnl'],'stress_return_pct':m['stress_return_pct'],
+          }
+          (out/'summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2))
+          print('V153_30D_SUMMARY')
+          print(json.dumps(summary,ensure_ascii=False,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.5.3-BTC-30D-Backtest
+          path: backtest_output_v153_btc_30d/
+          if-no-files-found: error
+          retention-days: 30
