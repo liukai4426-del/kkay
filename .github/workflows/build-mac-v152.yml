@@ -1,0 +1,130 @@
+name: Build KAYTRADE Intel Mac 1.5.2
+on:
+  push:
+    branches: [codex/v1-5-2-update]
+    paths:
+      - '**.py'
+      - OKXLocal.spec
+      - RELEASE-1.5.2.md
+      - .github/workflows/build-mac-v152.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  unit:
+    name: v152-strategy-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile V1.5.2 runtime and backtest core
+        run: python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py v138_strategy_patch.py v143_score_arbitration_patch.py v146_ui_fix_patch.py v147_strategy_patch.py v150_strategy_patch.py v151_strategy_patch.py v152_model.py v152_strategy_patch.py v152_safety_patch.py v152_backtest_core.py test_v150_strategy.py test_v151_strategy.py test_v152_strategy.py
+      - name: Run preserved V1.4.7 regression tests
+        run: |
+          python -m unittest -v test_engine test_candles
+          python -m unittest -v test_v134 test_v135 test_v135_execution test_v135_safety2
+          python -m unittest -v test_v135_order_state test_v135_ack test_v135_fills test_v135_runtime_stability
+          python -m unittest -v test_v135_auto_entry_guard
+          python -m unittest -v test_v136_runtime test_v136_entry_fix
+          python -m unittest -v test_v137_strategy test_v137_cancel_fix
+          python -m unittest -v test_v138_strategy
+          python -m unittest -v test_v139_position
+          python -m unittest -v test_v140_score_dialog
+          python -m unittest -v test_v141_dialog_signal_positions test_v141_history_return_chart test_v141_exit_limit
+          python -m unittest -v test_v142_visual test_v143_score_arbitration test_v143_visual_polish test_v144_ui_polish test_v145_layout_fix
+          python -m unittest -v test_v146_ui_log_polish test_v146_ui_fix
+          python -m unittest -v test_v147_strategy
+      - name: Run V1.5.0 and V1.5.1 regression tests
+        run: |
+          python -m unittest -v test_v150_strategy
+          python -m unittest -v test_v151_strategy
+      - name: Run V1.5.2 tests
+        run: python -m unittest -v test_v152_strategy
+      - name: Verify V1.5.2 production wiring
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import engine
+          import exchange
+          import v138_strategy_patch as v138
+          import v151_strategy_patch as v151
+          import v152_model as model
+          import v152_backtest_core as bt
+          import v152_safety_patch
+          spec=Path('OKXLocal.spec').read_text()
+          assert model.VERSION == '1.5.2'
+          assert model.THRESHOLD == 6.0
+          assert model.FRONT_MIN_R == 1.5
+          assert model.COST_MAX_R == 0.30
+          assert model.STOP_BUFFER_ATR == 0.10
+          assert model.OVERLAP_ATR_TOL == 0.25
+          assert v151.LOSS_PAUSE_SECONDS == 3600
+          assert engine.Engine._kaytrade_v152_applied
+          assert engine.Engine._kaytrade_v152_safety_applied
+          assert engine.Engine.refresh_market.__module__ == 'v152_safety_patch'
+          assert v138._prepare_order.__module__ == 'v152_strategy_patch'
+          assert exchange.Exchange.post.__module__ == 'v152_strategy_patch'
+          assert bt.model is model
+          assert 'v152_strategy_patch.py' in spec
+          assert 'v152_safety_patch.py' in spec
+          assert "CFBundleShortVersionString': '1.5.2'" in spec
+          assert "CFBundleVersion': '152'" in spec
+          print('PASS: V1.5.2 shared pullback model + persistent opportunity + execution gates + backtest core are wired')
+          PY
+  build:
+    name: intel-mac-package
+    needs: unit
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - name: Install packaging dependencies
+        run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0'
+      - name: Re-run key tests on Intel Mac
+        run: |
+          python -m py_compile v147_strategy_patch.py v150_strategy_patch.py v151_strategy_patch.py v152_model.py v152_strategy_patch.py v152_safety_patch.py v152_backtest_core.py test_v150_strategy.py test_v151_strategy.py test_v152_strategy.py build_icon.py
+          python -m unittest -v test_v138_strategy
+          python -m unittest -v test_v143_score_arbitration
+          python -m unittest -v test_v146_ui_log_polish test_v146_ui_fix
+          python -m unittest -v test_v147_strategy
+          python -m unittest -v test_v150_strategy
+          python -m unittest -v test_v151_strategy
+          python -m unittest -v test_v152_strategy
+      - name: Create application icon
+        run: |
+          python build_icon.py
+          test -s OKXLocal.icns
+      - name: Build Intel application
+        run: python -m PyInstaller --noconfirm OKXLocal.spec
+      - name: Verify bundle
+        run: |
+          python verify_bundle.py
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1.5.2'
+          test -s dist/KAYTRADE.app/Contents/Resources/assets/kaytrade-v142-logo.png || find dist/KAYTRADE.app -name 'kaytrade-v142-logo.png' -print -quit | grep .
+          codesign --verify --deep --strict dist/KAYTRADE.app
+      - name: Create installer
+        run: |
+          mkdir -p installer
+          ditto dist/KAYTRADE.app installer/KAYTRADE.app
+          cp RELEASE-1.5.2.md installer/RELEASE-1.5.2.md
+          printf 'PASS: V1.5.2 pullback state machine; fixed score 6; front space 1.5R; 1.0x 1H ATR validation stop; one-hour 3-loss pause; market TP/SL exits; shared live/backtest model.\n' > installer/BUILD-TEST.txt
+          ln -s /Applications installer/Applications
+          hdiutil create -volname KAYTRADE-1.5.2 -srcfolder installer -ov -format UDZO KAYTRADE-1.5.2-Intel-test.dmg
+          shasum -a 256 KAYTRADE-1.5.2-Intel-test.dmg > SHA256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-1.5.2-Intel-test
+          path: |
+            KAYTRADE-1.5.2-Intel-test.dmg
+            SHA256.txt
+          if-no-files-found: error
+          retention-days: 14
