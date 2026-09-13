@@ -5,6 +5,7 @@ on:
     paths:
       - research_v152_cache_patch.py
       - research_v152_data_cache.py
+      - research_v152_window_patch.py
       - research_v152_30d_fixed_runner.py
       - .github/workflows/backtest-v152-btc-30d-fixed-fast.yml
   workflow_dispatch:
@@ -42,7 +43,7 @@ jobs:
           p.write_text(s.replace(old,new))
           PY
       - name: Compile accelerated fixed-window replay
-        run: python -m py_compile research_v146_backtest.py v152_model.py v152_backtest_core.py research_v152_30d_backtest.py research_v152_cache_patch.py research_v152_data_cache.py research_v152_30d_fixed_runner.py
+        run: python -m py_compile research_v146_backtest.py v152_model.py v152_backtest_core.py research_v152_30d_backtest.py research_v152_cache_patch.py research_v152_data_cache.py research_v152_window_patch.py research_v152_30d_fixed_runner.py
       - name: Verify acceleration is strategy-neutral
         run: |
           python - <<'PY'
@@ -51,19 +52,21 @@ jobs:
           p=Path('research_v152_30d_fixed_runner.py').read_text()
           c=Path('research_v152_cache_patch.py').read_text()
           d=Path('research_v152_data_cache.py').read_text()
+          w=Path('research_v152_window_patch.py').read_text()
           assert m.VERSION=='1.5.2' and m.THRESHOLD==6.0 and m.FRONT_MIN_R==1.5
           assert '2026, 9, 13, 3, 16' in p and '2026, 8, 14, 3, 16' in p
           assert '_orig_indicators(rows)' in c and '_orig_zones(rows, atr, lookback)' in c
           assert 'prime_one_minute' in c and 'model.indicators = indicators_cached' in c
           assert 'orig_candles(bar)' in d and 'orig_funding()' in d
-          print('PASS: cache layers only reuse raw data / deterministic calculations')
+          assert 'class CandleWindow' in w and 'backtest_module.closed_slice = closed_slice_view' in w
+          print('PASS: acceleration layers preserve strategy inputs and timing')
           PY
       - name: Run accelerated V1.5.2 fixed-window 30-day BTC backtest
         run: time python research_v152_30d_fixed_runner.py
       - name: Verify exact baseline outputs
         run: |
           python - <<'PY'
-          import json, math
+          import json
           from pathlib import Path
           out=Path('backtest_output_v152_btc_30d')
           m=json.loads((out/'metrics.json').read_text())
