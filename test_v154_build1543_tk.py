@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import app
 import v154_fixed_card_precision_fix  # noqa: F401
-import v154_build1543_patch  # noqa: F401
+import v154_build1543_ui_cleanup  # noqa: F401 - applies Build 1543 + final risk UI cleanup
 
 
 def _walk(root):
@@ -44,11 +44,13 @@ class Build1543TkTests(unittest.TestCase):
                     root.update_idletasks(); root.update()
                     self.assertTrue(getattr(ui,'_v1543_ready',False))
                     self.assertTrue(getattr(ui,'_v1543_loss_control_removed',False))
+                    self.assertGreaterEqual(getattr(ui,'_v1543_loss_widgets_destroyed',0),3)
                     self.assertTrue(getattr(ui,'_v1543_signal_funds_ready',False))
                     self.assertNotIn('consecutive_losses',ui.fields)
                     texts=' '.join(_texts(root))
                     self.assertNotIn('中国时间连续亏损停开次数',texts)
                     self.assertNotIn('除连续亏损停开次数外',texts)
+                    self.assertNotIn('3（固定）',texts)
                     self.assertIn('第一信号仓位 / 开仓资金 USDT',texts)
                     self.assertIn('第二信号仓位 / 加仓资金 USDT（自动=第一信号×2）',texts)
                     self.assertEqual(ui._v1543_second_signal_entry.entry.cget('state'),'disabled')
