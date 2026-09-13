@@ -1,8 +1,10 @@
-"""Pure memoization helpers for V1.5.2 research backtests.
+"""Strategy-equivalent acceleration helpers for V1.5.2 research backtests.
 
-This module does not alter strategy values. It only caches deterministic results
-for identical closed-candle inputs so the 30-day replay can reuse repeated
-1H/15m/5m/4H calculations and the baseline/stress pass can share work.
+For 1H/15m/5m/4H inputs this module memoizes the exact production indicator and
+structure functions. For 1m inputs V1.5.2 scoring only consumes EMA20 (the
+closed-1m recovery trigger); therefore the adapter computes that exact EMA20 and
+omits unused diagnostic fields. No direction, score, gate, opportunity or order
+rule is changed.
 """
 from __future__ import annotations
 
@@ -25,11 +27,26 @@ def _rows_key(rows):
     return (len(rows), int(rows[0]['t']), int(rows[-1]['t']))
 
 
+def _is_one_minute(rows):
+    return len(rows) >= 2 and int(rows[-1]['t']) - int(rows[-2]['t']) == 60_000
+
+
+def _exact_ema20(rows):
+    close = [float(r['c']) for r in rows]
+    return float(model.ema(close, 20)[-1])
+
+
 def indicators_cached(rows):
     key = _rows_key(rows)
     hit = _indicator_cache.get(key)
     if hit is None:
-        hit = _orig_indicators(rows)
+        if _is_one_minute(rows):
+            # V1.5.2 uses 1m indicators only for EMA20 reclaim. Break-3 uses raw
+            # closed candles. Returning only the consumed field preserves every
+            # trading decision while avoiding unused RSI/KDJ/EMA200 work.
+            hit = {'ema20': _exact_ema20(rows)}
+        else:
+            hit = _orig_indicators(rows)
         _indicator_cache[key] = hit
     return hit
 
