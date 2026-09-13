@@ -19,7 +19,7 @@ jobs:
           python-version: '3.13'
 
       - name: Restore OKX public market cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: .research_market_cache
           key: v153-btc-30d-market-20260814T0316-20260913T0316-w1600-v1
@@ -83,14 +83,17 @@ jobs:
           new_pf='        f"| Profit Factor | {\'∞\' if math.isinf(m[\'profit_factor\']) else format(m[\'profit_factor\'], \'.3f\')} |",\n'
           if old_pf in s:
               s=s.replace(old_pf,new_pf)
-
           p.write_text(s)
 
           d=Path('research_v153_data_cache.py')
-          ds=d.read_text().replace('V1.5.2','V1.5.3').replace('V152_MARKET_CACHE_DIR','V153_MARKET_CACHE_DIR')
-          d.write_text(ds)
+          d.write_text(d.read_text().replace('V1.5.2','V1.5.3').replace('V152_MARKET_CACHE_DIR','V153_MARKET_CACHE_DIR'))
+
           w=Path('research_v153_window_patch.py')
-          w.write_text(w.read_text().replace('V1.5.2','V1.5.3'))
+          ws=w.read_text().replace('V1.5.2','V1.5.3')
+          # strategy._swing_points uses left + right. Preserve normal sequence semantics
+          # while keeping the zero-copy window everywhere else.
+          ws += '''\n\ndef _cw_add(self, other):\n    return list(self) + list(other)\n\ndef _cw_radd(self, other):\n    return list(other) + list(self)\n\nCandleWindow.__add__ = _cw_add\nCandleWindow.__radd__ = _cw_radd\n'''
+          w.write_text(ws)
           PY
 
           cat > research_v153_cache_patch.py <<'PY'
@@ -140,8 +143,7 @@ jobs:
               key=_rows_key(rows); hit=_indicator_cache.get(key)
               if hit is None:
                   if _is_one_minute(rows):
-                      last_t=int(rows[-1]['t'])
-                      ema20=_one_minute_ema20.get(last_t)
+                      last_t=int(rows[-1]['t']); ema20=_one_minute_ema20.get(last_t)
                       if ema20 is None or len(rows)!=_one_minute_window: ema20=_exact_ema20(rows)
                       hit={'ema20':float(ema20)}
                   else:
@@ -209,15 +211,17 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           import v153_model as m
+          import research_v153_window_patch as w
           s=Path('research_v153_30d_backtest.py').read_text()
           c=Path('research_v153_cache_patch.py').read_text()
           assert m.VERSION=='1.5.3' and m.THRESHOLD==6.0 and m.ENTRY_WINDOW_MS==4*60*1000
           assert 'import v153_model as model' in s and 'import v153_backtest_core as bt' in s
-          assert "'strategy_version':'1.5.3'" in s
-          assert 'rearm_after_ms' in s
-          assert 'base_model.indicators=indicators_cached' in c
-          assert 'model.indicators=indicators_cached' in c
-          print('PASS: V1.5.3 live model is the replay decision engine')
+          assert "'strategy_version':'1.5.3'" in s and 'rearm_after_ms' in s
+          assert 'base_model.indicators=indicators_cached' in c and 'model.indicators=indicators_cached' in c
+          sample=[{'t':i} for i in range(5)]
+          a=w.CandleWindow(sample,0,2); b=w.CandleWindow(sample,2,4)
+          assert a+b == sample[:4]
+          print('PASS: V1.5.3 live model + list-compatible zero-copy replay are wired')
           PY
 
       - name: Run fixed-window V1.5.3 30-day BTC backtest
@@ -226,8 +230,8 @@ jobs:
       - name: Verify and summarize outputs
         run: |
           python - <<'PY'
-          import csv, json, math
-          from collections import Counter
+          import csv, json
+          from collections import defaultdict
           from pathlib import Path
           out=Path('backtest_output_v153_btc_30d')
           m=json.loads((out/'metrics.json').read_text())
@@ -236,21 +240,32 @@ jobs:
           assert m['start_utc'].startswith('2026-08-14T03:16:00')
           assert m['end_utc'].startswith('2026-09-13T03:16:00')
           trades=list(csv.DictReader((out/'V153_BTC_SWAP_30D_Trades.csv').open()))
-          paths=Counter()
+          path_rows=defaultdict(list)
           for t in trades:
               try:
                   detail=json.loads(t.get('trigger_combination') or '{}')
-                  paths[detail.get('boll_path') or 'unknown']+=1
+                  path=detail.get('boll_path') or 'unknown'
               except Exception:
-                  paths['parse_error']+=1
+                  path='parse_error'
+              path_rows[path].append(t)
+          path_perf={}
+          for path,rows in sorted(path_rows.items()):
+              pnls=[float(x['net_pnl']) for x in rows]
+              path_perf[path]={
+                  'trades':len(rows),
+                  'wins':sum(x>0 for x in pnls),
+                  'win_rate_pct':100*sum(x>0 for x in pnls)/len(rows) if rows else 0,
+                  'net_pnl':sum(pnls),
+              }
           summary={
               'trades':m['trades'],'wins':m['wins'],'losses':m['losses'],'win_rate_pct':m['win_rate_pct'],
               'net_pnl':m['net_pnl'],'net_return_pct':m['net_return_pct'],'profit_factor':m['profit_factor'],
-              'expectancy':m['expectancy'],'max_drawdown_usdt':m['max_drawdown_usdt'],'max_drawdown_pct':m['max_drawdown_pct'],
-              'fees':m['fees'],'funding_pnl':m['funding_pnl'],'avg_hold_min':m['avg_hold_min'],
+              'expectancy':m['expectancy'],'avg_win':m['avg_win'],'avg_loss':m['avg_loss'],'payoff_ratio':m['payoff_ratio'],
+              'max_drawdown_usdt':m['max_drawdown_usdt'],'max_drawdown_pct':m['max_drawdown_pct'],
+              'fees':m['fees'],'funding_pnl':m['funding_pnl'],'avg_hold_min':m['avg_hold_min'],'median_hold_min':m['median_hold_min'],
               'by_side':m['by_side'],'by_reason':m['by_reason'],'by_score':m['by_score'],
               'funnel':m['funnel'],'transition_counts':m['transition_counts'],'execution_blockers':m['execution_blockers'],
-              'boll_path_trades':dict(paths),'stress_net_pnl':m['stress_net_pnl'],'stress_return_pct':m['stress_return_pct'],
+              'boll_path_performance':path_perf,'stress_net_pnl':m['stress_net_pnl'],'stress_return_pct':m['stress_return_pct'],
           }
           (out/'summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2))
           print('V153_30D_SUMMARY')
@@ -263,3 +278,10 @@ jobs:
           path: backtest_output_v153_btc_30d/
           if-no-files-found: error
           retention-days: 30
+
+      - name: Save OKX public market cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .research_market_cache
+          key: v153-btc-30d-market-20260814T0316-20260913T0316-w1600-v1
