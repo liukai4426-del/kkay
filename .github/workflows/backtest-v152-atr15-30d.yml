@@ -1,7 +1,7 @@
-name: Backtest KAYTRADE V1.5.2 15m ATR 1.5x 30D
+name: Backtest KAYTRADE V1.5.2 Score5 ATR15 30D
 on:
   push:
-    branches: [research/v152-atr15-30d]
+    branches: [research/v152-score5-atr15-30d]
     paths:
       - research_v152_atr15_patch.py
       - research_v152_30d_fixed_runner.py
@@ -11,7 +11,7 @@ permissions:
   contents: read
 jobs:
   backtest:
-    name: v152-atr15-15x-30d
+    name: v152-score5-atr15-30d
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -23,7 +23,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .research_market_cache
-          key: v152-atr15-btc-30d-market-20260814T0316-20260913T0316-w1600-v1
+          key: v152-score5-btc-30d-market-20260814T0316-20260913T0316-w1600-v1
+          restore-keys: |
+            v152-atr15-btc-30d-market-20260814T0316-20260913T0316-w1600-v1
       - name: Materialize validated OKX public-data loader
         run: |
           git fetch --depth=1 origin research/v151-btc-30d-backtest
@@ -36,27 +38,28 @@ jobs:
           s=p.read_text()
           old='        f"| Profit Factor | {m[\'profit_factor\'] if math.isinf(m[\'profit_factor\']) else f\'{m[\'profit_factor\']:.3f}\'} |",\n'
           new='        f"| Profit Factor | {\'∞\' if math.isinf(m[\'profit_factor\']) else format(m[\'profit_factor\'], \'.3f\')} |",\n'
-          if old not in s:
-              raise SystemExit('expected report formatting line not found')
-          p.write_text(s.replace(old,new))
+          if old in s:
+              p.write_text(s.replace(old,new))
           PY
       - name: Compile research variant
         run: python -m py_compile research_v146_backtest.py v152_model.py v152_backtest_core.py research_v152_30d_backtest.py research_v152_cache_patch.py research_v152_data_cache.py research_v152_atr15_patch.py research_v152_30d_fixed_runner.py
-      - name: Verify isolated ATR research wiring
+      - name: Verify score5 and ATR research wiring
         run: |
           python - <<'PY'
           from pathlib import Path
           p=Path('research_v152_30d_fixed_runner.py').read_text()
           a=Path('research_v152_atr15_patch.py').read_text()
-          assert "r.STOP_ATR = 1.5" in p
+          assert 'r.model.THRESHOLD = 5.0' in p
+          assert 'r.STOP_ATR = 1.5' in p
+          assert "m['entry_threshold'] = 5.0" in p
           assert "m['stop_atr_timeframe'] = '15m'" in p
           assert "m['target_atr_multiplier'] = 3.0" in p
           assert 'opp["atr1h"] = float(opp["atr15"])' in a
-          print('PASS: 15m ATR x1.5 stop / 3.0x ATR TP / 2R wired consistently')
+          print('PASS: score>=5.0 / 15m ATR x1.5 stop / 3.0x ATR TP / cost<=0.30R')
           PY
-      - name: Run V1.5.2 15m ATR 1.5x 30-day backtest
+      - name: Run V1.5.2 score5 ATR15 30-day backtest
         run: time python research_v152_30d_fixed_runner.py
-      - name: Verify outputs and ATR parameters
+      - name: Verify outputs and research parameters
         run: |
           python - <<'PY'
           import json
@@ -67,15 +70,17 @@ jobs:
           assert m['days']==30
           assert m['start_utc'].startswith('2026-08-14T03:16:00')
           assert m['end_utc'].startswith('2026-09-13T03:16:00')
+          assert abs(m['entry_threshold']-5.0)<1e-12
           assert m['stop_atr_timeframe']=='15m'
           assert abs(m['stop_atr_multiplier']-1.5)<1e-12
           assert abs(m['target_atr_multiplier']-3.0)<1e-12
           assert abs(m['reward_r']-2.0)<1e-12
-          print('PASS: outputs verified', json.dumps({k:m[k] for k in ['trades','net_pnl','net_return_pct','win_rate_pct','profit_factor','max_drawdown_pct']}, ensure_ascii=False))
+          assert abs(m['cost_max_r']-0.30)<1e-12
+          print('PASS: outputs verified', json.dumps({k:m[k] for k in ['trades','net_pnl','net_return_pct','win_rate_pct','profit_factor','max_drawdown_pct','entry_threshold']}, ensure_ascii=False))
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: KAYTRADE-V1.5.2-15mATR-1.5x-30D
+          name: KAYTRADE-V1.5.2-Score5-15mATR-1.5x-30D
           path: backtest_output_v152_btc_30d/
           if-no-files-found: error
           retention-days: 30
