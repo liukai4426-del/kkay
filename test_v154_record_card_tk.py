@@ -63,8 +63,8 @@ class V154RecordCardVisibilityTests(unittest.TestCase):
                     self.assertIn('当前会话运行记录卡片测试',rendered)
                     self.assertIn('运行记录',_texts(ui._v146_log_surface))
 
-                    # Score-detail header tells the user the role labels are explicit.
-                    self.assertIn('必要/辅助',ui.score_table.heading('#0')['text'])
+                    # ScoreTable is custom-drawn; headings are stored in titles.
+                    self.assertIn('必要/辅助',ui.score_table.titles['#0'])
 
                     # The fixed execution-cost Card must blend into PANEL rather
                     # than expose the rectangular BG/black canvas gutter.
