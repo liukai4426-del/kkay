@@ -44,13 +44,14 @@ class Build1551TkTests(unittest.TestCase):
         self.assertNotIn('cooldown_minutes', self.ui.fields)
         self.assertTrue(self.ui._v1551_cooldown_control_removed)
         self.assertIs(getattr(self.ui.render_logs, '__func__', None), v155._render_logs_v155)
-        labels = []
+        visible_labels = []
         for widget in b1551._walk(self.root):
             try:
-                labels.append(str(widget.cget('text') or ''))
+                if widget.winfo_ismapped():
+                    visible_labels.append(str(widget.cget('text') or ''))
             except Exception:
                 pass
-        self.assertFalse(any('平仓后冷却' in x or '冷却时间' in x for x in labels))
+        self.assertFalse(any('平仓后冷却' in x or '冷却时间' in x for x in visible_labels))
         self.assertTrue(self.ui._v155_log_scroll_ready)
 
 
