@@ -1,0 +1,84 @@
+name: Backtest KAYTRADE V1.5.6 Middle MACD 180D
+on:
+  push:
+    branches: [research/v156-middle-macd-required-180d]
+    paths:
+      - run_v156_middle_macd_180d.py
+      - .github/workflows/backtest-v156-middle-macd-180d.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backtest:
+    name: v156-middle-macd-required-180d
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install runtime dependency
+        run: pip install requests
+      - name: Materialize audited Build1544 research harness
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+          git fetch --depth=1 origin research/v155-outer-bands-180d
+          git show FETCH_HEAD:research_v1544_cache_patch.py > research_v1544_cache_patch.py
+          git show FETCH_HEAD:research_v1544_180d_backtest.py > research_v1544_180d_backtest.py
+          git show FETCH_HEAD:run_v1544_180d_fixed.py > run_v1544_180d_fixed.py
+      - name: Compile and verify single-change lock
+        run: |
+          python -m py_compile research_v146_backtest.py research_v1544_cache_patch.py research_v1544_180d_backtest.py run_v1544_180d_fixed.py v152_model.py v153_model.py v154_model.py v154_build1544_patch.py run_v156_middle_macd_180d.py
+          python - <<'PY'
+          import inspect
+          import run_v156_middle_macd_180d as r
+          import v152_model as m152
+          import v154_model as m154
+          harness=r.research
+          src=inspect.getsource(m152._macd_state)
+          assert 'improving = c > b > a' in src
+          assert 'improving = c < b < a' in src
+          assert m154.THRESHOLD == 6.0
+          assert m154.ENTRY_WINDOW_MS == 0 and m154.TIME_WINDOW_ENABLED is False
+          assert harness.build1544.PATH_C_ENABLED is False
+          assert harness.COOLDOWN_MS == 0
+          r._verify_single_change_lock()
+          print('PASS: only middle_rsi requires existing macd_improving; outer paths and baseline rules unchanged')
+          PY
+      - name: Run 180D backtest
+        run: time python run_v156_middle_macd_180d.py
+      - name: Verify result files
+        run: |
+          python - <<'PY'
+          import csv,json
+          from pathlib import Path
+          out=Path('backtest_output_v156_middle_macd_180d')
+          m=json.loads((out/'metrics_180d.json').read_text())
+          rows=list(csv.DictReader((out/'trades_180d.csv').open())) if (out/'trades_180d.csv').stat().st_size else []
+          assert m['days']==180
+          assert m['release']=='1.5.6'
+          assert m['experiment']=='middle_rsi_macd_improving_required'
+          assert m['single_strategy_change'] is True
+          assert m['score_threshold']==6.0
+          assert m['middle_rsi_macd_required'] is True
+          assert m['closed_5m_only'] is True
+          assert m['outer_band_rules_changed'] is False
+          assert m['path_reclassification'] is False
+          assert m['opportunity_lifecycle_changed'] is False
+          assert m['path_c_enabled'] is False
+          assert m['cooldown_minutes']==0
+          assert m['loss_pause_enabled'] is False
+          assert m['entry_order_type']=='LIMIT'
+          assert m['stop_atr_multiplier']==1.0 and m['reward_r']==2.0
+          assert len(rows)==m['trades']
+          print('RESULT_METRICS_JSON')
+          print(json.dumps(m,ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.5.6-Middle-MACD-Required-180D
+          path: backtest_output_v156_middle_macd_180d/
+          if-no-files-found: error
+          retention-days: 30
