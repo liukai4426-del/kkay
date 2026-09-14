@@ -57,11 +57,15 @@ class V156UiTests(unittest.TestCase):
         if "CFBundleShortVersionString': '1.5.6'" in spec:
             self.assertIn("runtime_hooks=[str(root / 'v156_build1561_patch.py')]", spec)
             self.assertIn("CFBundleVersion': '1561'", spec)
-        else:
+        elif "CFBundleShortVersionString': '1.6.0'" in spec:
             self.assertIn("runtime_hooks=[str(root / 'v160_update_patch.py')]", spec)
             self.assertNotIn("runtime_hooks=[str(root / 'v156_build1561_patch.py')]", spec)
-            self.assertIn("CFBundleShortVersionString': '1.6.0'", spec)
             self.assertIn("CFBundleVersion': '1600'", spec)
+        else:
+            self.assertIn("runtime_hooks=[str(root / 'v161_update_patch.py')]", spec)
+            self.assertNotIn("runtime_hooks=[str(root / 'v156_build1561_patch.py')]", spec)
+            self.assertIn("CFBundleShortVersionString': '1.6.1'", spec)
+            self.assertIn("CFBundleVersion': '1610'", spec)
 
     def test_51054_place_order_is_ambiguous_and_has_expiry_header(self):
         x = Exchange(key='k', secret='s', phrase='p', demo=True)
