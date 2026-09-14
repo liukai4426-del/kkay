@@ -13,6 +13,13 @@ from datetime import datetime, timezone
 from core import Client, HOSTS, INSTRUMENT
 from candles import CandleCache
 
+# OKX can return these codes after a write reached its gateway but before the
+# client receives a definitive order result. They must never be treated as an
+# explicit rejection because doing so could clear the local idempotency slot
+# while an exchange order actually exists.
+AMBIGUOUS_OKX_CODES={'51054'}
+ORDER_EXPIRY_MS=8000
+
 class APIError(RuntimeError):
     def __init__(self,message,code='',deterministic=False,http_status=None,method='',path=''):
         super().__init__(message)
@@ -77,6 +84,11 @@ class Exchange(Client):
             headers.update({'OK-ACCESS-KEY':self.key,'OK-ACCESS-SIGN':signature,
                 'OK-ACCESS-TIMESTAMP':timestamp,'OK-ACCESS-PASSPHRASE':self.phrase,
                 'x-simulated-trading':'1' if self.demo else '0'})
+            # OKX supports expTime on Place Order. If a delayed request arrives
+            # after this deadline, the exchange discards it instead of creating a
+            # stale entry long after the local strategy decision.
+            if method=='POST' and path=='/api/v5/trade/order':
+                headers['expTime']=str(int(self.server_now()*1000)+ORDER_EXPIRY_MS)
         req=urllib.request.Request('https://'+self.host+target,data=raw.encode() if raw else None,headers=headers,method=method)
         try:
             with self.opener.open(req,timeout=10) as response:
@@ -87,7 +99,6 @@ class Exchange(Client):
             # this request, so fail closed and reconcile instead of assuming reject.
             ambiguous_http={408,409,425,429}
             rejected_http=400<=exc.code<500 and exc.code not in ambiguous_http
-            suffix='只读请求失败，不会下单' if method=='GET' else '写入请求被拒绝' if rejected_http else '写入结果需核对，禁止重复提交'
             code=''; msg=''
             try:
                 payload=json.loads(exc.read(4096))
@@ -97,7 +108,12 @@ class Exchange(Client):
             except Exception:
                 pass
             detail=(f' / OKX {code}' if code else '')+(f'：{msg}' if msg else '')
+            if code in AMBIGUOUS_OKX_CODES:
+                suffix=('只读请求超时，不会下单' if method=='GET' else
+                        '写入结果未知，禁止重复提交；需按clOrdId、订单、成交和持仓核对')
+                raise NetworkError(f'HTTP {exc.code}{detail}；{method} {path}；{suffix}',code,exc.code,method,path) from None
             write_rejected=bool(method=='POST' and rejected_http)
+            suffix='只读请求失败，不会下单' if method=='GET' else '写入请求被拒绝' if write_rejected else '写入结果需核对，禁止重复提交'
             if write_rejected:
                 raise APIError(f'HTTP {exc.code}{detail}；{suffix}',code,True,exc.code,method,path) from None
             if exc.code in (408,429,500,502,503,504):
@@ -121,6 +137,10 @@ class Exchange(Client):
             if code=='51603':
                 raise APIError('OKX错误码 51603：订单不存在或暂未可查询',code,False,None,method,path)
             suffix=('：'+msg) if msg else ''
+            if code in AMBIGUOUS_OKX_CODES:
+                outcome=('只读请求超时，不会下单' if method=='GET' else
+                         '写入结果未知，禁止重复提交；需按clOrdId、订单、成交和持仓核对')
+                raise NetworkError(f'OKX错误码 {code}{suffix}；{method} {path}；{outcome}',code,None,method,path)
             raise APIError('OKX错误码 '+code+suffix,code,method=='POST',None,method,path)
         data=result.get('data')
         if not isinstance(data,list):
@@ -132,6 +152,10 @@ class Exchange(Client):
                     code=str(scode or '')
                     msg=str(row.get('sMsg') or '')[:160]
                     suffix=('：'+msg) if msg else ''
+                    if code in AMBIGUOUS_OKX_CODES:
+                        outcome=('只读请求超时，不会下单' if method=='GET' else
+                                 '写入结果未知，禁止重复提交；需按clOrdId、订单、成交和持仓核对')
+                        raise NetworkError(f'OKX订单级错误码 {code}{suffix}；{method} {path}；{outcome}',code,None,method,path)
                     raise APIError('OKX订单级错误码 '+code+suffix,code,method=='POST',None,method,path)
         return data
 
