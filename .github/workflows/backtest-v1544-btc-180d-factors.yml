@@ -5,6 +5,7 @@ on:
     paths:
       - research_v1544_180d_backtest.py
       - research_v1544_cache_patch.py
+      - run_v1544_180d_fixed.py
       - .github/workflows/backtest-v1544-btc-180d-factors.yml
   workflow_dispatch:
 permissions:
@@ -25,9 +26,10 @@ jobs:
           git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
       - name: Compile and verify Build 1544 research wiring
         run: |
-          python -m py_compile research_v146_backtest.py research_v1544_cache_patch.py research_v1544_180d_backtest.py v152_model.py v153_model.py v154_model.py v154_build1543_patch.py v154_build1544_patch.py
+          python -m py_compile research_v146_backtest.py research_v1544_cache_patch.py research_v1544_180d_backtest.py run_v1544_180d_fixed.py v152_model.py v153_model.py v154_model.py v154_build1543_patch.py v154_build1544_patch.py
           python - <<'PY'
           import research_v1544_180d_backtest as r
+          import run_v1544_180d_fixed as fixed
           import v154_model as m
           import v154_build1544_patch as b
           assert r.BUILD == '1544' and r.START.isoformat().startswith('2026-03-17T03:16:00')
@@ -36,10 +38,12 @@ jobs:
           assert m.ENTRY_WINDOW_MS == 0 and m.TIME_WINDOW_ENABLED is False
           assert r.FIRST_SIGNAL_NOTIONAL == 1000.0 and r.ORDER_TTL_MS == 60000
           assert 'baseline' in r.VARIANTS and 'middle_requires_macd' in r.VARIANTS
-          print('PASS: Build1544 180D = Path C OFF + persistent BOLL + LIMIT + factor variants')
+          a=r.CandleWindow([1,2,3,4],0,2); c=r.CandleWindow([1,2,3,4],2,4)
+          assert a+c == [1,2,3,4]
+          print('PASS: Build1544 180D = Path C OFF + persistent BOLL + LIMIT + fixed CandleWindow + factor variants')
           PY
       - name: Run fixed-window Build 1544 180-day factor backtest
-        run: time python research_v1544_180d_backtest.py
+        run: time python run_v1544_180d_fixed.py
       - name: Verify output integrity
         run: |
           python - <<'PY'
@@ -56,6 +60,7 @@ jobs:
           assert 'binary_ranking_by_expectancy_delta' in f
           assert len(v)>=8 and 'baseline' in v and 'middle_requires_macd' in v
           assert 'robustness_ranking' in s and (out/'REPORT.md').stat().st_size>100
+          assert (out/'RESEARCH_RUN_NOTE.json').exists()
           print('PASS output integrity', m['trades'], 'trades')
           PY
       - uses: actions/upload-artifact@v4
