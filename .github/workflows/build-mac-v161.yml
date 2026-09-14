@@ -146,31 +146,63 @@ jobs:
       - name: Launch packaged app and verify startup probe
         run: |
           rm -f /tmp/kaytrade-v161-startup.txt /tmp/kaytrade-v161-startup.txt.error /tmp/kaytrade-v161.log
-          KAYTRADE_STARTUP_PROBE=/tmp/kaytrade-v161-startup.txt dist/KAYTRADE.app/Contents/MacOS/KAYTRADE >/tmp/kaytrade-v161.log 2>&1 &
-          pid=$!
-          ok=0
-          for i in $(seq 1 80); do
-            if [ -s /tmp/kaytrade-v161-startup.txt ]; then ok=1; break; fi
-            if [ -s /tmp/kaytrade-v161-startup.txt.error ]; then break; fi
-            if ! kill -0 "$pid" 2>/dev/null; then break; fi
-            sleep 0.25
-          done
-          if [ "$ok" != "1" ]; then
-            echo 'Packaged startup probe failed'
-            echo '--- stdout/stderr ---'
-            cat /tmp/kaytrade-v161.log || true
-            echo '--- App init traceback ---'
-            cat /tmp/kaytrade-v161-startup.txt.error || true
-            kill "$pid" 2>/dev/null || true
-            exit 1
-          fi
-          cat /tmp/kaytrade-v161-startup.txt
-          grep '1.6.1 Build 1610' /tmp/kaytrade-v161-startup.txt
-          grep 'outer_4h=aligned_required' /tmp/kaytrade-v161-startup.txt
-          grep 'be_1r=on' /tmp/kaytrade-v161-startup.txt
-          grep 'clock_sync=3sample_auto_recover' /tmp/kaytrade-v161-startup.txt
-          kill "$pid" 2>/dev/null || true
-          wait "$pid" 2>/dev/null || true
+          python - <<'PY'
+          import os
+          import pathlib
+          import subprocess
+          import time
+
+          probe = pathlib.Path('/tmp/kaytrade-v161-startup.txt')
+          error = pathlib.Path('/tmp/kaytrade-v161-startup.txt.error')
+          log = pathlib.Path('/tmp/kaytrade-v161.log')
+          env = dict(os.environ)
+          env['KAYTRADE_STARTUP_PROBE'] = str(probe)
+          with log.open('wb') as out:
+              proc = subprocess.Popen(
+                  ['dist/KAYTRADE.app/Contents/MacOS/KAYTRADE'],
+                  stdout=out,
+                  stderr=subprocess.STDOUT,
+                  env=env,
+              )
+              try:
+                  deadline = time.monotonic() + 25.0
+                  while time.monotonic() < deadline:
+                      if probe.exists() and probe.stat().st_size:
+                          break
+                      if error.exists() and error.stat().st_size:
+                          break
+                      if proc.poll() is not None:
+                          break
+                      time.sleep(0.25)
+              finally:
+                  if proc.poll() is None:
+                      proc.terminate()
+                      try:
+                          proc.wait(timeout=2.0)
+                      except subprocess.TimeoutExpired:
+                          proc.kill()
+                          proc.wait(timeout=2.0)
+
+          if not (probe.exists() and probe.stat().st_size):
+              print('Packaged startup probe failed')
+              print('--- stdout/stderr ---')
+              print(log.read_text(errors='replace') if log.exists() else '')
+              print('--- App init traceback ---')
+              print(error.read_text(errors='replace') if error.exists() else '')
+              raise SystemExit(1)
+
+          text = probe.read_text()
+          print(text, end='')
+          required = [
+              '1.6.1 Build 1610',
+              'outer_4h=aligned_required',
+              'be_1r=on',
+              'clock_sync=3sample_auto_recover',
+          ]
+          for marker in required:
+              if marker not in text:
+                  raise SystemExit(f'missing startup marker: {marker}')
+          PY
 
       - name: Verify bundle and V1.6.1 runtime hook
         run: |
