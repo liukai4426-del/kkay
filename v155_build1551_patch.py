@@ -9,6 +9,7 @@ removed from the visible Execution Settings UI.
 from __future__ import annotations
 
 import os
+import traceback
 from pathlib import Path
 
 from v155_update_patch import apply as apply_v155
@@ -126,9 +127,13 @@ def _call_without_cooldown(owner, previous_cycle):
     return result
 
 
+def _probe_target():
+    return os.environ.get("KAYTRADE_STARTUP_PROBE", "").strip()
+
+
 def _write_startup_probe(owner):
     """CI-only packaged-app probe written only after App init fully succeeds."""
-    target = os.environ.get("KAYTRADE_STARTUP_PROBE", "").strip()
+    target = _probe_target()
     if not target:
         return
     try:
@@ -140,30 +145,44 @@ def _write_startup_probe(owner):
         pass
 
 
+def _write_startup_error():
+    target = _probe_target()
+    if not target:
+        return
+    try:
+        Path(target + ".error").write_text(traceback.format_exc(), encoding="utf-8")
+    except Exception:
+        pass
+
+
 def apply():
     if getattr(engine.Engine, "_kaytrade_v1551_applied", False):
         return
 
     def app_init(self, *args, **kwargs):
-        _PREVIOUS_INIT(self, *args, **kwargs)
-        _remove_cooldown_row(self)
-        # V1.5.4 installs an instance-level renderer during its init chain.
-        # Rebind only once, after the whole inherited stack has completed.
-        self.render_logs = v155._render_logs_v155.__get__(self, app.App)
-        self.render_logs()
         try:
-            self.root.title("KAYTRADE 1.5.5 · BTC 策略控制台 · Build 1551")
+            _PREVIOUS_INIT(self, *args, **kwargs)
+            _remove_cooldown_row(self)
+            # V1.5.4 installs an instance-level renderer during its init chain.
+            # Rebind only once, after the whole inherited stack has completed.
+            self.render_logs = v155._render_logs_v155.__get__(self, app.App)
+            self.render_logs()
+            try:
+                self.root.title("KAYTRADE 1.5.5 · BTC 策略控制台 · Build 1551")
+            except Exception:
+                pass
+            try:
+                text = str(self.signal.get() or "")
+                for old in ("平仓后30分钟冷却", "30分钟冷却", "平仓冷却30分钟"):
+                    text = text.replace(old, "平仓冷却已关闭")
+                self.signal.set(text)
+            except Exception:
+                pass
+            self._v1551_ready = True
+            _write_startup_probe(self)
         except Exception:
-            pass
-        try:
-            text = str(self.signal.get() or "")
-            for old in ("平仓后30分钟冷却", "30分钟冷却", "平仓冷却30分钟"):
-                text = text.replace(old, "平仓冷却已关闭")
-            self.signal.set(text)
-        except Exception:
-            pass
-        self._v1551_ready = True
-        _write_startup_probe(self)
+            _write_startup_error()
+            raise
 
     def cycle(self):
         result = _call_without_cooldown(self, _PREVIOUS_CYCLE)
