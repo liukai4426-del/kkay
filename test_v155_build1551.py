@@ -15,10 +15,17 @@ class Build1551Tests(unittest.TestCase):
         self.assertFalse(b1551.COOLDOWN_ENABLED)
         self.assertFalse(b1544.PATH_C_ENABLED)
         spec = Path('OKXLocal.spec').read_text()
-        self.assertIn("str(root / 'v155_build1551_patch.py')", spec)
         self.assertNotIn("str(root / 'v155_update_patch.py')", spec)
         self.assertNotIn("v155_log_binding_fix", spec)
-        self.assertIn("CFBundleVersion': '1551'", spec)
+        if "CFBundleVersion': '1551'" in spec:
+            # Native Build1551 packaging: Build1551 itself is the single hook.
+            self.assertIn("runtime_hooks=[str(root / 'v155_build1551_patch.py')]", spec)
+        else:
+            # Later releases inherit Build1551 as a normal module and promote only
+            # their final overlay to the single runtime hook.  This preserves the
+            # recursion fix without forcing a historical bundle version forever.
+            self.assertIn("'v155_build1551_patch'", spec)
+            self.assertIn("runtime_hooks=[str(root / 'v156_ui_patch.py')]", spec)
 
     def test_cooldown_gate_sees_zero_last_close_then_restores_history_value(self):
         state = {'last_close': 12345}
