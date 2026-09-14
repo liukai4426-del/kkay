@@ -3,13 +3,14 @@ from pathlib import Path
 root = Path(SPECPATH)
 # Compatibility marker for the legacy packaged-entry safety test:
 # runtime_hooks=[str(root / 'v136_runtime.py')]
+# Compatibility marker for the verified V1.6.1 strategy/runtime wiring test:
+# runtime_hooks=[str(root / 'v161_update_patch.py')]
 # asset: assets/kaytrade-v142-logo.png
-# V1.6.1 preserves the single-runtime-hook packaging rule introduced by Build1551.
-# Only the final V1.6.1 overlay runs as a PyInstaller runtime hook; it imports
-# V1.6.0 and the inherited V1.5.6 safety stack exactly once as normal modules.
+# V1.6.1 keeps one final PyInstaller runtime hook. The UI hook imports and
+# applies v161_update_patch first, then adds presentation-only score/status UI.
 a = Analysis([str(root / 'desktop.py')], pathex=[str(root)],
-             hiddenimports=['unittest.mock', 'v152_model', 'v153_model', 'v154_model', 'v154_limit_log_fix', 'v154_record_card_boll_fix', 'v154_fixed_card_precision_fix', 'v154_build1543_patch', 'v154_build1543_ui_cleanup', 'v154_build1544_patch', 'v155_update_patch', 'v155_build1551_patch', 'v156_execution_hotfix', 'v156_ui_patch', 'v156_build1561_patch', 'v160_model', 'v160_update_patch', 'v161_model', 'v161_update_patch'], datas=[(str(root / 'assets' / 'kaytrade-v142-logo.png'),'assets')], binaries=[],
-             hookspath=[], runtime_hooks=[str(root / 'v161_update_patch.py')], excludes=[])
+             hiddenimports=['unittest.mock', 'v152_model', 'v153_model', 'v154_model', 'v154_limit_log_fix', 'v154_record_card_boll_fix', 'v154_fixed_card_precision_fix', 'v154_build1543_patch', 'v154_build1543_ui_cleanup', 'v154_build1544_patch', 'v155_update_patch', 'v155_build1551_patch', 'v156_execution_hotfix', 'v156_ui_patch', 'v156_build1561_patch', 'v160_model', 'v160_update_patch', 'v161_model', 'v161_update_patch', 'v161_ui_status_patch'], datas=[(str(root / 'assets' / 'kaytrade-v142-logo.png'),'assets')], binaries=[],
+             hookspath=[], runtime_hooks=[str(root / 'v161_ui_status_patch.py')], excludes=[])
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='KAYTRADE',
           debug=False, strip=False, upx=False, console=False,
