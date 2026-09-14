@@ -1,4 +1,4 @@
-name: Build KAYTRADE Intel Mac 1.5.6 Build1560
+name: Build KAYTRADE Intel Mac 1.5.6 Build1561
 on:
   push:
     branches: [codex/v1-5-6-log-ui-cleanup]
@@ -12,7 +12,7 @@ permissions:
   contents: read
 jobs:
   unit:
-    name: v156-build1560-tests
+    name: v156-build1561-tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -20,7 +20,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Compile V1.5.6 Build1560
+      - name: Compile V1.5.6 Build1561
         run: >-
           python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py
           v151_strategy_patch.py v152_model.py v152_strategy_patch.py v152_safety_patch.py
@@ -28,9 +28,10 @@ jobs:
           v153_backtest_core.py v154_model.py v154_runtime_patch.py v154_limit_log_fix.py
           v154_record_card_boll_fix.py v154_fixed_card_precision_fix.py v154_build1543_patch.py
           v154_build1543_ui_cleanup.py v154_build1544_patch.py v155_update_patch.py
-          v155_build1551_patch.py v156_ui_patch.py test_v154_strategy.py test_v154_round2_runtime.py
-          test_v154_build1543.py test_v154_build1544.py test_v155_update.py test_v155_build1551.py
-          test_v156_ui.py
+          v155_build1551_patch.py v156_execution_hotfix.py v156_ui_patch.py v156_build1561_patch.py
+          test_v154_strategy.py test_v154_round2_runtime.py test_v154_build1543.py
+          test_v154_build1544.py test_v155_update.py test_v155_build1551.py test_v156_ui.py
+          test_v156_build1561.py
       - name: Run preserved strategy and safety regressions
         run: |
           python -m unittest -v test_engine test_candles
@@ -52,7 +53,8 @@ jobs:
           python -m unittest -v test_v155_update
           python -m unittest -v test_v155_build1551
           python -m unittest -v test_v156_ui
-      - name: Verify V1.5.6 production wiring
+          python -m unittest -v test_v156_build1561
+      - name: Verify V1.5.6 Build1561 production wiring
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -60,7 +62,9 @@ jobs:
           import v154_model as model
           import v154_build1544_patch as b1544
           import v155_build1551_patch as b1551
+          import v156_execution_hotfix as execfix
           import v156_ui_patch as v156
+          import v156_build1561_patch as b1561
           spec=Path('OKXLocal.spec').read_text()
           assert model.VERSION == '1.5.4' and model.THRESHOLD == 6.0
           assert model.ENTRY_WINDOW_MS == 0 and model.TIME_WINDOW_ENABLED is False
@@ -69,15 +73,24 @@ jobs:
           assert v156.VERSION == '1.5.6' and v156.BUILD == '1560'
           assert v156.PATH_C_ENABLED is False and v156.COOLDOWN_ENABLED is False
           assert v156.LOG_CARD_HEIGHT == 140
-          assert engine.Engine._kaytrade_v156_applied and app.App._kaytrade_v156_applied
-          assert "runtime_hooks=[str(root / 'v156_ui_patch.py')]" in spec
+          assert b1561.VERSION == '1.5.6' and b1561.BUILD == '1561'
+          assert b1561.PATH_C_ENABLED is False and b1561.COOLDOWN_ENABLED is False
+          assert b1561.CONSECUTIVE_LOSS_PAUSE_ENABLED is False
+          assert engine.Engine._kaytrade_v156_execution_hotfix_applied
+          assert engine.Engine._kaytrade_v1561_applied and app.App._kaytrade_v1561_applied
+          assert callable(execfix._set_leverage_v156)
+          assert "runtime_hooks=[str(root / 'v156_build1561_patch.py')]" in spec
+          assert "runtime_hooks=[str(root / 'v156_ui_patch.py')]" not in spec
           assert "runtime_hooks=[str(root / 'v155_build1551_patch.py')]" not in spec
           assert "CFBundleShortVersionString': '1.5.6'" in spec
-          assert "CFBundleVersion': '1560'" in spec
-          print('PASS: V1.5.6 compact structured logs + legacy controls removed; trading core preserved')
+          assert "CFBundleVersion': '1561'" in spec
+          rows=b1561._ordered_rows([('log','old'),('log','new')])
+          assert rows[0][1]=='new' and rows[-1][1]=='old'
+          assert '3（固定）' in b1561.FIXED_LOSS_MARKERS
+          print('PASS: V1.5.6 Build1561 newest-first logs + fixed loss UI removed; trading core preserved')
           PY
   build:
-    name: intel-mac-package-v156-build1560
+    name: intel-mac-package-v156-build1561
     needs: unit
     runs-on: macos-15-intel
     timeout-minutes: 55
@@ -91,9 +104,9 @@ jobs:
           architecture: x64
       - name: Install packaging dependencies
         run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0'
-      - name: Re-run V1.5.6 tests on Intel Mac
+      - name: Re-run V1.5.6 Build1561 tests on Intel Mac
         run: |
-          python -m py_compile v152_model.py v152_strategy_patch.py v152_safety_patch.py v152_ui_busy_fix.py v153_model.py v153_runtime_patch.py v154_model.py v154_runtime_patch.py v154_limit_log_fix.py v154_record_card_boll_fix.py v154_fixed_card_precision_fix.py v154_build1543_patch.py v154_build1543_ui_cleanup.py v154_build1544_patch.py v155_update_patch.py v155_build1551_patch.py v156_ui_patch.py test_v154_build1544.py test_v155_update.py test_v155_tk.py test_v155_build1551.py test_v155_build1551_tk.py test_v156_ui.py test_v156_tk.py build_icon.py
+          python -m py_compile v152_model.py v152_strategy_patch.py v152_safety_patch.py v152_ui_busy_fix.py v153_model.py v153_runtime_patch.py v154_model.py v154_runtime_patch.py v154_limit_log_fix.py v154_record_card_boll_fix.py v154_fixed_card_precision_fix.py v154_build1543_patch.py v154_build1543_ui_cleanup.py v154_build1544_patch.py v155_update_patch.py v155_build1551_patch.py v156_execution_hotfix.py v156_ui_patch.py v156_build1561_patch.py test_v154_build1544.py test_v155_update.py test_v155_tk.py test_v155_build1551.py test_v155_build1551_tk.py test_v156_ui.py test_v156_tk.py test_v156_build1561.py build_icon.py
           python -m unittest -v test_v153_strategy
           python -m unittest -v test_v154_strategy
           python -m unittest -v test_v154_round2_runtime
@@ -106,6 +119,7 @@ jobs:
           python -m unittest -v test_v155_build1551_tk
           python -m unittest -v test_v156_ui
           python -m unittest -v test_v156_tk
+          python -m unittest -v test_v156_build1561
       - name: Create application icon
         run: |
           python build_icon.py
@@ -134,34 +148,36 @@ jobs:
             exit 1
           fi
           cat /tmp/kaytrade-v156-startup.txt
-          grep 'Build 1560' /tmp/kaytrade-v156-startup.txt
+          grep 'Build 1561' /tmp/kaytrade-v156-startup.txt
           grep 'compact_log=on' /tmp/kaytrade-v156-startup.txt
+          grep 'newest_log=top' /tmp/kaytrade-v156-startup.txt
+          grep 'fixed_loss_control=off' /tmp/kaytrade-v156-startup.txt
           grep 'legacy_controls=off' /tmp/kaytrade-v156-startup.txt
           grep 'cooldown=off' /tmp/kaytrade-v156-startup.txt
           grep 'path_c=off' /tmp/kaytrade-v156-startup.txt
           kill "$pid" 2>/dev/null || true
           wait "$pid" 2>/dev/null || true
-      - name: Verify bundle and V1.5.6 hook
+      - name: Verify bundle and V1.5.6 Build1561 hook
         run: |
           python verify_bundle.py
           /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1.5.6'
-          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1560'
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1561'
           test -s dist/KAYTRADE.app/Contents/Resources/assets/kaytrade-v142-logo.png || find dist/KAYTRADE.app -name 'kaytrade-v142-logo.png' -print -quit | grep .
           codesign --verify --deep --strict dist/KAYTRADE.app
-      - name: Create V1.5.6 Build1560 installer
+      - name: Create V1.5.6 Build1561 installer
         run: |
           mkdir -p installer
           ditto dist/KAYTRADE.app installer/KAYTRADE.app
           cp RELEASE-1.5.6.md installer/RELEASE-1.5.6.md
-          printf 'PASS: V1.5.6 Build1560 keeps the verified Build1551 trading core, compacts and restyles Run Log, uses yellow/green/red status dots, removes scrollbar black edge, and physically removes second-signal/cooldown controls.\n' > installer/BUILD-TEST.txt
+          printf 'PASS: V1.5.6 Build1561 keeps the 51054 execution hotfix and verified trading core, shows newest Run Log events at the top with history below, and removes the obsolete fixed consecutive-loss Risk field.\n' > installer/BUILD-TEST.txt
           ln -s /Applications installer/Applications
-          hdiutil create -volname KAYTRADE-1.5.6-B1560 -srcfolder installer -ov -format UDZO KAYTRADE-1.5.6-Intel-build1560.dmg
-          shasum -a 256 KAYTRADE-1.5.6-Intel-build1560.dmg > SHA256.txt
+          hdiutil create -volname KAYTRADE-1.5.6-B1561 -srcfolder installer -ov -format UDZO KAYTRADE-1.5.6-Intel-build1561.dmg
+          shasum -a 256 KAYTRADE-1.5.6-Intel-build1561.dmg > SHA256.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: KAYTRADE-1.5.6-Intel-build1560
+          name: KAYTRADE-1.5.6-Intel-build1561
           path: |
-            KAYTRADE-1.5.6-Intel-build1560.dmg
+            KAYTRADE-1.5.6-Intel-build1561.dmg
             SHA256.txt
           if-no-files-found: error
           retention-days: 14
