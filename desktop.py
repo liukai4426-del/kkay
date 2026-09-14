@@ -17,6 +17,8 @@ from v135_auto_entry_guard import apply as apply_v135_auto_entry_guard
 apply_v135_auto_entry_guard()
 from v136_runtime import apply as apply_v136_runtime
 apply_v136_runtime()
+from v161_ui_status_patch import apply as apply_v161_ui_status_patch
+apply_v161_ui_status_patch()
 
 
 def smoke_test():
