@@ -1,0 +1,56 @@
+name: Backtest KAYTRADE V1.5.6 BTC 90D 4H BOLL Score Only Fast
+on:
+  push:
+    branches: [research/v156-4h-boll-score-only-90d]
+    paths:
+      - run_v156_4h_boll_score_only_90d_only.py
+      - .github/workflows/backtest-v156-4h-boll-score-only-90d-only.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backtest:
+    name: v156-4h-boll-score-only-90d-only
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install runtime dependency
+        run: pip install requests
+      - name: Materialize audited research harness
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+          git fetch --depth=1 origin research/v155-outer-bands-180d
+          git show FETCH_HEAD:research_v1544_cache_patch.py > research_v1544_cache_patch.py
+          git show FETCH_HEAD:research_v1544_180d_backtest.py > research_v1544_180d_backtest.py
+          git show FETCH_HEAD:run_v1544_180d_fixed.py > run_v1544_180d_fixed.py
+      - name: Compile and test
+        run: |
+          python -m py_compile research_v146_backtest.py research_v1544_cache_patch.py research_v1544_180d_backtest.py run_v1544_180d_fixed.py v152_model.py v153_model.py v154_model.py v154_build1544_patch.py v156_4h_boll_score_only_model.py run_v156_4h_boll_score_only_90d_only.py
+          python -m unittest -v test_v156_4h_boll_score_only_model.py
+      - name: Run experiment-only 90-day backtest
+        run: time python run_v156_4h_boll_score_only_90d_only.py
+      - name: Verify result
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('backtest_output_v156_4h_boll_score_only_90d_only/experiment_metrics_90d.json')
+          m=json.loads(p.read_text())
+          assert m['days']==90
+          assert m['requested_rule']['4h_boll_required'] is False
+          assert m['requested_rule']['4h_boll_score']==1.0
+          assert m['requested_rule']['15m_correct_direction_pullback_score']==1.0
+          print('EXPERIMENT_METRICS')
+          print(json.dumps(m, ensure_ascii=False, indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.5.6-BTC-90D-4H-BOLL-Score-Only-Fast
+          path: backtest_output_v156_4h_boll_score_only_90d_only/
+          if-no-files-found: error
+          retention-days: 30
