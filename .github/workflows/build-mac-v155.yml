@@ -110,18 +110,22 @@ jobs:
         run: python -m PyInstaller --noconfirm OKXLocal.spec
       - name: Launch packaged app and verify startup probe
         run: |
-          rm -f /tmp/kaytrade-v1551-startup.txt /tmp/kaytrade-v1551.log
+          rm -f /tmp/kaytrade-v1551-startup.txt /tmp/kaytrade-v1551-startup.txt.error /tmp/kaytrade-v1551.log
           KAYTRADE_STARTUP_PROBE=/tmp/kaytrade-v1551-startup.txt dist/KAYTRADE.app/Contents/MacOS/KAYTRADE >/tmp/kaytrade-v1551.log 2>&1 &
           pid=$!
           ok=0
           for i in $(seq 1 60); do
             if [ -s /tmp/kaytrade-v1551-startup.txt ]; then ok=1; break; fi
+            if [ -s /tmp/kaytrade-v1551-startup.txt.error ]; then break; fi
             if ! kill -0 "$pid" 2>/dev/null; then break; fi
             sleep 0.25
           done
           if [ "$ok" != "1" ]; then
             echo 'Packaged startup probe failed'
+            echo '--- stdout/stderr ---'
             cat /tmp/kaytrade-v1551.log || true
+            echo '--- App init traceback ---'
+            cat /tmp/kaytrade-v1551-startup.txt.error || true
             kill "$pid" 2>/dev/null || true
             exit 1
           fi
