@@ -39,11 +39,15 @@ class V156Build1561Tests(unittest.TestCase):
         if "CFBundleShortVersionString': '1.5.6'" in spec:
             self.assertIn("runtime_hooks=[str(root / 'v156_build1561_patch.py')]", spec)
             self.assertIn("CFBundleVersion': '1561'", spec)
-        else:
+        elif "CFBundleShortVersionString': '1.6.0'" in spec:
             self.assertIn("runtime_hooks=[str(root / 'v160_update_patch.py')]", spec)
             self.assertNotIn("runtime_hooks=[str(root / 'v156_build1561_patch.py')]", spec)
-            self.assertIn("CFBundleShortVersionString': '1.6.0'", spec)
             self.assertIn("CFBundleVersion': '1600'", spec)
+        else:
+            self.assertIn("runtime_hooks=[str(root / 'v161_update_patch.py')]", spec)
+            self.assertNotIn("runtime_hooks=[str(root / 'v156_build1561_patch.py')]", spec)
+            self.assertIn("CFBundleShortVersionString': '1.6.1'", spec)
+            self.assertIn("CFBundleVersion': '1610'", spec)
 
 
 if __name__ == '__main__':
