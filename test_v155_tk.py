@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import app
 import v155_update_patch as v155
+import v155_log_binding_fix  # final runtime hook must win over inherited instance renderer
 
 
 class V155TkTests(unittest.TestCase):
@@ -72,15 +73,16 @@ class V155TkTests(unittest.TestCase):
         self.assertTrue(self.ui._v155_second_signal_removed)
 
     def test_run_log_shows_timestamp_scrolls_and_preserves_history_position(self):
+        self.assertTrue(self.ui._v155_final_log_renderer_bound)
         self.ui.log_lines = [
             ('log', f'2026-09-14 13:{i//60:02d}:{i%60:02d} 测试运行记录 {i}')
             for i in range(90)
         ]
         self.ui.render_logs()
-        self.root.update()
         text = self.ui._v155_log_text
         self.assertIn('2026-09-14 13:', text.get('1.0', 'end'))
         self.assertTrue(self.ui._v155_log_scroll_ready)
+        self.root.update()
 
         text.yview_moveto(0.0)
         self.root.update()
