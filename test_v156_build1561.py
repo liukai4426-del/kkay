@@ -32,12 +32,18 @@ class V156Build1561Tests(unittest.TestCase):
         self.assertIn('3（固定）', markers)
         self.assertTrue(any('除连续亏损停开次数外' in x for x in markers))
 
-    def test_spec_points_only_to_build1561_runtime_hook(self):
+    def test_spec_preserves_build1561_but_promotes_only_final_release_hook(self):
         spec = Path('OKXLocal.spec').read_text()
-        self.assertIn("runtime_hooks=[str(root / 'v156_build1561_patch.py')]", spec)
+        self.assertIn("'v156_build1561_patch'", spec)
         self.assertNotIn("runtime_hooks=[str(root / 'v156_ui_patch.py')]", spec)
-        self.assertIn("CFBundleShortVersionString': '1.5.6'", spec)
-        self.assertIn("CFBundleVersion': '1561'", spec)
+        if "CFBundleShortVersionString': '1.5.6'" in spec:
+            self.assertIn("runtime_hooks=[str(root / 'v156_build1561_patch.py')]", spec)
+            self.assertIn("CFBundleVersion': '1561'", spec)
+        else:
+            self.assertIn("runtime_hooks=[str(root / 'v160_update_patch.py')]", spec)
+            self.assertNotIn("runtime_hooks=[str(root / 'v156_build1561_patch.py')]", spec)
+            self.assertIn("CFBundleShortVersionString': '1.6.0'", spec)
+            self.assertIn("CFBundleVersion': '1600'", spec)
 
 
 if __name__ == '__main__':
