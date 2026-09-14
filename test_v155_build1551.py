@@ -22,10 +22,14 @@ class Build1551Tests(unittest.TestCase):
             self.assertIn("runtime_hooks=[str(root / 'v155_build1551_patch.py')]", spec)
         else:
             # Later releases inherit Build1551 as a normal module and promote only
-            # their final overlay to the single runtime hook.  This preserves the
+            # their final overlay to the single runtime hook. This preserves the
             # recursion fix without forcing a historical bundle version forever.
             self.assertIn("'v155_build1551_patch'", spec)
-            self.assertIn("runtime_hooks=[str(root / 'v156_ui_patch.py')]", spec)
+            self.assertEqual(spec.count('runtime_hooks=['), 2)  # one legacy comment + one live Analysis entry
+            self.assertTrue(
+                "runtime_hooks=[str(root / 'v156_ui_patch.py')]" in spec
+                or "runtime_hooks=[str(root / 'v156_build1561_patch.py')]" in spec
+            )
 
     def test_cooldown_gate_sees_zero_last_close_then_restores_history_value(self):
         state = {'last_close': 12345}
