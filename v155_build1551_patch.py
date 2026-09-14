@@ -18,6 +18,13 @@ apply_v155()
 import app
 import engine
 import v155_update_patch as v155
+from v156_execution_hotfix import apply as apply_v156_execution_hotfix
+
+# V1.5.6 packages Build1551 as an inherited normal module. Load the execution
+# stability hotfix here so the final v156_ui_patch runtime hook still remains
+# the single PyInstaller runtime hook and the historical wrapper chain is not
+# duplicated.
+apply_v156_execution_hotfix()
 
 VERSION = "1.5.5"
 BUILD = "1551"
