@@ -1,12 +1,15 @@
 """KAYTRADE V1.5.5 Build 1551 hotfix.
 
 Fixes the packaged-app startup recursion by making the V1.5.5 overlay load once
-from desktop.py instead of as a PyInstaller runtime hook, keeps the final
-scrollable log renderer bound on each App instance, and disables the inherited
-post-close cooldown gate.  The old cooldown setting remains compatibility data
-only and is removed from the visible Execution Settings UI.
+through a single PyInstaller runtime hook, keeps the final scrollable log
+renderer bound on each App instance, and disables the inherited post-close
+cooldown gate.  The old cooldown setting remains compatibility data only and is
+removed from the visible Execution Settings UI.
 """
 from __future__ import annotations
+
+import os
+from pathlib import Path
 
 from v155_update_patch import apply as apply_v155
 apply_v155()
@@ -123,6 +126,20 @@ def _call_without_cooldown(owner, previous_cycle):
     return result
 
 
+def _write_startup_probe(owner):
+    """CI-only packaged-app probe written only after App init fully succeeds."""
+    target = os.environ.get("KAYTRADE_STARTUP_PROBE", "").strip()
+    if not target:
+        return
+    try:
+        Path(target).write_text(
+            f"PASS KAYTRADE {VERSION} Build {BUILD} cooldown=off path_c=off\n",
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
 def apply():
     if getattr(engine.Engine, "_kaytrade_v1551_applied", False):
         return
@@ -146,6 +163,7 @@ def apply():
         except Exception:
             pass
         self._v1551_ready = True
+        _write_startup_probe(self)
 
     def cycle(self):
         result = _call_without_cooldown(self, _PREVIOUS_CYCLE)
