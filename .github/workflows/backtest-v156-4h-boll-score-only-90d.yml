@@ -1,0 +1,74 @@
+name: Backtest KAYTRADE V1.5.6 BTC 90D 4H BOLL Score Only
+on:
+  push:
+    branches: [research/v156-4h-boll-score-only-90d]
+    paths:
+      - v156_4h_boll_score_only_model.py
+      - test_v156_4h_boll_score_only_model.py
+      - run_v156_4h_boll_score_only_90d.py
+      - .github/workflows/backtest-v156-4h-boll-score-only-90d.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backtest:
+    name: v156-4h-boll-score-only-90d
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install runtime dependency
+        run: pip install requests
+      - name: Materialize audited research harness
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+          git fetch --depth=1 origin research/v155-outer-bands-180d
+          git show FETCH_HEAD:research_v1544_cache_patch.py > research_v1544_cache_patch.py
+          git show FETCH_HEAD:research_v1544_180d_backtest.py > research_v1544_180d_backtest.py
+          git show FETCH_HEAD:run_v1544_180d_fixed.py > run_v1544_180d_fixed.py
+      - name: Compile and test score-only overlay
+        run: |
+          python -m py_compile research_v146_backtest.py research_v1544_cache_patch.py research_v1544_180d_backtest.py run_v1544_180d_fixed.py v152_model.py v153_model.py v154_model.py v154_build1544_patch.py v156_4h_boll_score_only_model.py run_v156_4h_boll_score_only_90d.py
+          python -m unittest -v test_v156_4h_boll_score_only_model.py
+          python - <<'PY'
+          import run_v156_4h_boll_score_only_90d as r
+          assert (r.END-r.START).days == 90
+          assert r.experiment.THRESHOLD == 6.0
+          assert r.experiment.ENTRY_WINDOW_MS == 0
+          assert r.experiment.TIME_WINDOW_ENABLED is False
+          assert r.research.build1544.PATH_C_ENABLED is False
+          assert r.research.STOP_ATR == 1.0 and r.research.REWARD_R == 2.0
+          print('PASS: 90D paired research wiring; 4H BOLL score-only +1; 15m pullback +1')
+          PY
+      - name: Run paired 90-day backtest
+        run: time python run_v156_4h_boll_score_only_90d.py
+      - name: Verify and print result summary
+        run: |
+          python - <<'PY'
+          import csv,json
+          from pathlib import Path
+          out=Path('backtest_output_v156_4h_boll_score_only_90d')
+          c=json.loads((out/'comparison_90d.json').read_text())
+          b=c['baseline']; e=c['experiment']
+          br=list(csv.DictReader((out/'baseline_trades_90d.csv').open())) if (out/'baseline_trades_90d.csv').stat().st_size else []
+          er=list(csv.DictReader((out/'experiment_trades_90d.csv').open())) if (out/'experiment_trades_90d.csv').stat().st_size else []
+          assert c['window_days']==90
+          assert c['requested_rule']['4h_boll_required'] is False
+          assert c['requested_rule']['4h_boll_score']==1.0
+          assert c['requested_rule']['15m_correct_direction_pullback_score']==1.0
+          assert c['requested_rule']['score_threshold']==6.0
+          assert b['cooldown_minutes']==0 and e['cooldown_minutes']==0
+          assert len(br)==b['trades'] and len(er)==e['trades']
+          print('RESULT_COMPARISON_JSON')
+          print(json.dumps(c, ensure_ascii=False, indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.5.6-BTC-90D-4H-BOLL-Score-Only
+          path: backtest_output_v156_4h_boll_score_only_90d/
+          if-no-files-found: error
+          retention-days: 30
