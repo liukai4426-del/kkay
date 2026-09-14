@@ -1,0 +1,83 @@
+name: Backtest KAYTRADE V1.5.5 BTC 180D Outer Bands Only
+on:
+  push:
+    branches: [research/v155-outer-bands-180d]
+    paths:
+      - run_v155_outer_bands_180d.py
+      - .github/workflows/backtest-v155-outer-bands-180d.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backtest:
+    name: v155-outer-bands-180d
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Materialize audited OKX research data helper
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+      - name: Verify current V1.5.5 strategy core matches research base
+        run: |
+          git fetch --depth=1 origin codex/v1-5-5-ui-margin-log
+          PROD=$(git rev-parse FETCH_HEAD:v154_model.py)
+          CURR=$(git rev-parse HEAD:v154_model.py)
+          echo "production v154_model blob=$PROD"
+          echo "research   v154_model blob=$CURR"
+          test "$PROD" = "$CURR"
+          PROD153=$(git rev-parse FETCH_HEAD:v153_model.py)
+          CURR153=$(git rev-parse HEAD:v153_model.py)
+          test "$PROD153" = "$CURR153"
+          echo "PASS: V1.5.5 uses the same BOLL/scoring/Hard-Block core as the audited research base"
+      - name: Compile and verify outer-band-only research wiring
+        run: |
+          python -m py_compile research_v146_backtest.py research_v1544_cache_patch.py research_v1544_180d_backtest.py run_v1544_180d_fixed.py run_v155_outer_bands_180d.py v152_model.py v153_model.py v154_model.py v154_build1544_patch.py
+          python - <<'PY'
+          import run_v155_outer_bands_180d as r
+          q=r.research
+          assert q.START.isoformat().startswith('2026-03-17T03:16:00')
+          assert q.END.isoformat().startswith('2026-09-13T03:16:00') and (q.END-q.START).days == 180
+          assert q.VARIANTS == ('baseline',)
+          assert q.model.THRESHOLD == 6.0 and q.model.COST_MAX_R == 0.30
+          assert q.model.ENTRY_WINDOW_MS == 0 and q.model.TIME_WINDOW_ENABLED is False
+          assert q.build1544.PATH_C_ENABLED is False
+          assert q.STOP_ATR == 1.0 and q.REWARD_R == 2.0
+          assert q.FIRST_SIGNAL_NOTIONAL == 1000.0 and q.LEVERAGE == 5
+          a=q.CandleWindow([1,2,3,4],0,2); b=q.CandleWindow([1,2,3,4],2,4)
+          assert a+b == [1,2,3,4]
+          assert r.v153.boll_entry_signal is r.outer_only_boll_entry_signal
+          print('PASS: true model-level middle_rsi OFF; long lower-band only; short upper-band only')
+          PY
+      - name: Run fixed-window 180-day outer-band-only backtest
+        run: time python run_v155_outer_bands_180d.py
+      - name: Verify output integrity
+        run: |
+          python - <<'PY'
+          import csv,json
+          from pathlib import Path
+          out=Path('backtest_output_v155_outer_bands_180d')
+          m=json.loads((out/'metrics.json').read_text())
+          s=json.loads((out/'summary_180d.json').read_text())
+          rows=list(csv.DictReader((out/'V155_OUTER_BANDS_BTC_SWAP_180D_Trades.csv').open()))
+          assert m['days']==180 and m['path_c_enabled'] is False
+          assert m['outer_bands_only'] is True and m['cost_max_r']==0.30
+          assert len(rows)==m['trades']
+          paths={r['boll_path'] for r in rows}
+          assert 'middle_rsi' not in paths
+          assert paths.issubset({'lower_band','upper_band'})
+          assert s['research_notes']['middle_rsi_enabled'] is False
+          assert (out/'RESEARCH_RUN_NOTE_V155_OUTER_BANDS.json').exists()
+          assert (out/'REPORT.md').stat().st_size > 100
+          print('PASS output integrity', m['trades'], 'trades', 'paths=', sorted(paths))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.5.5-BTC-180D-Outer-Bands-Only
+          path: backtest_output_v155_outer_bands_180d/
+          if-no-files-found: error
+          retention-days: 30
