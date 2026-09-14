@@ -1,0 +1,78 @@
+name: Backtest KAYTRADE V1.5.6 Baseline 90D 180D
+on:
+  push:
+    branches: [research/v156-baseline-90d-180d]
+    paths:
+      - run_v156_baseline_window.py
+      - .github/workflows/backtest-v156-baseline-90d-180d.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backtest:
+    name: v156-baseline-${{ matrix.days }}d
+    strategy:
+      fail-fast: false
+      matrix:
+        days: [90, 180]
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install runtime dependency
+        run: pip install requests
+      - name: Materialize audited Build1544 research harness
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+          git fetch --depth=1 origin research/v155-outer-bands-180d
+          git show FETCH_HEAD:research_v1544_cache_patch.py > research_v1544_cache_patch.py
+          git show FETCH_HEAD:research_v1544_180d_backtest.py > research_v1544_180d_backtest.py
+          git show FETCH_HEAD:run_v1544_180d_fixed.py > run_v1544_180d_fixed.py
+      - name: Compile and verify current V1.5.6 strategy lock
+        run: |
+          python -m py_compile research_v146_backtest.py research_v1544_cache_patch.py research_v1544_180d_backtest.py run_v1544_180d_fixed.py v152_model.py v153_model.py v154_model.py v154_build1544_patch.py run_v156_baseline_window.py
+          python - <<'PY'
+          import v154_model as m
+          import run_v1544_180d_fixed as c
+          r=c.research
+          assert m.THRESHOLD == 6.0
+          assert m.ENTRY_WINDOW_MS == 0 and m.TIME_WINDOW_ENABLED is False
+          assert r.build1544.PATH_C_ENABLED is False
+          assert r.STOP_ATR == 1.0 and r.REWARD_R == 2.0
+          print('PASS: official V1.5.6 current-core baseline lock; no experimental overlays')
+          PY
+      - name: Run baseline backtest
+        run: time python run_v156_baseline_window.py ${{ matrix.days }}
+      - name: Verify result files
+        run: |
+          python - <<'PY'
+          import csv,json,os
+          from pathlib import Path
+          days=int(os.environ['DAYS'])
+          out=Path(f'backtest_output_v156_baseline_{days}d')
+          m=json.loads((out/f'metrics_{days}d.json').read_text())
+          rows=list(csv.DictReader((out/f'trades_{days}d.csv').open())) if (out/f'trades_{days}d.csv').stat().st_size else []
+          assert m['days']==days
+          assert m['release']=='1.5.6'
+          assert m['score_threshold']==6.0
+          assert m['path_c_enabled'] is False
+          assert m['cooldown_minutes']==0
+          assert m['loss_pause_enabled'] is False
+          assert m['entry_order_type']=='LIMIT'
+          assert m['stop_atr_multiplier']==1.0 and m['reward_r']==2.0
+          assert len(rows)==m['trades']
+          print('RESULT_METRICS_JSON')
+          print(json.dumps(m,ensure_ascii=False,indent=2))
+          PY
+        env:
+          DAYS: ${{ matrix.days }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.5.6-Baseline-${{ matrix.days }}D
+          path: backtest_output_v156_baseline_${{ matrix.days }}d/
+          if-no-files-found: error
+          retention-days: 30
