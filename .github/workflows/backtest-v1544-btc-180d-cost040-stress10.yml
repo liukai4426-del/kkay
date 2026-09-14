@@ -1,0 +1,74 @@
+name: Backtest KAYTRADE V1.5.4 Build1544 BTC 180D Cost040 Stress10
+on:
+  push:
+    branches: [research/v1544-180d-cost040-stress10]
+    paths:
+      - run_v1544_180d_cost040_stress10.py
+      - run_v1544_180d_fixed.py
+      - research_v1544_180d_backtest.py
+      - research_v1544_cache_patch.py
+      - .github/workflows/backtest-v1544-btc-180d-cost040-stress10.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backtest:
+    name: v1544-btc-180d-cost040-stress10
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Materialize audited OKX research data helper
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+      - name: Compile and verify research wiring
+        run: |
+          python -m py_compile research_v146_backtest.py research_v1544_cache_patch.py research_v1544_180d_backtest.py run_v1544_180d_fixed.py run_v1544_180d_cost040_stress10.py v152_model.py v153_model.py v154_model.py v154_build1543_patch.py v154_build1544_patch.py
+          python - <<'PY'
+          import research_v1544_180d_backtest as r
+          import run_v1544_180d_cost040_stress10 as x
+          import v154_build1544_patch as b
+          assert r.BUILD == '1544'
+          assert (r.END-r.START).days == 180
+          assert b.PATH_C_ENABLED is False
+          assert x.COST_MAX_R == 0.40
+          assert x.STRESS_EXTRA_EXIT_BPS == 10.0
+          assert r.model.ENTRY_WINDOW_MS == 0 and r.model.TIME_WINDOW_ENABLED is False
+          a=r.CandleWindow([1,2,3,4],0,2); c=r.CandleWindow([1,2,3,4],2,4)
+          assert a+c == [1,2,3,4]
+          print('PASS: Build1544 180D research = Path C OFF + cost max 0.40R + extra 10bps stress')
+          PY
+      - name: Run fixed-window 180-day backtest
+        run: time python run_v1544_180d_cost040_stress10.py
+      - name: Verify output integrity
+        run: |
+          python - <<'PY'
+          import csv,json
+          from pathlib import Path
+          out=Path('backtest_output_v1544_btc_180d')
+          m=json.loads((out/'metrics.json').read_text())
+          f=json.loads((out/'factor_analysis.json').read_text())
+          v=json.loads((out/'variant_comparison.json').read_text())
+          s=json.loads((out/'summary_180d.json').read_text())
+          note=json.loads((out/'RESEARCH_RUN_NOTE_COST040_STRESS10.json').read_text())
+          rows=list(csv.DictReader((out/'V1544_BTC_SWAP_180D_Trades.csv').open()))
+          assert m['build']=='1544' and m['days']==180 and m['path_c_enabled'] is False
+          assert len(rows)==m['trades']
+          assert m['research_cost_max_r']==0.40
+          assert m['stress_extra_exit_bps']==10.0
+          assert note['stress_total_exit_slippage_bps']==15.0
+          assert 'binary_ranking_by_expectancy_delta' in f
+          assert len(v)>=8 and 'baseline' in v and 'middle_requires_macd' in v
+          assert 'robustness_ranking' in s and (out/'REPORT.md').stat().st_size>100
+          print('PASS output integrity', m['trades'], 'trades', 'stress', m['stress_net_pnl'])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.5.4-Build1544-BTC-180D-Cost040-Stress10
+          path: backtest_output_v1544_btc_180d/
+          if-no-files-found: error
+          retention-days: 30
