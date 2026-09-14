@@ -37,6 +37,7 @@ jobs:
           import v152_model as m152
           import v154_model as m154
           harness=r.research
+          harness.COOLDOWN_MS=0
           src=inspect.getsource(m152._macd_state)
           assert 'improving = c > b > a' in src
           assert 'improving = c < b < a' in src
