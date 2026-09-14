@@ -50,11 +50,13 @@ class V156UiTests(unittest.TestCase):
 
     def test_spec_uses_only_final_runtime_hook(self):
         spec = Path('OKXLocal.spec').read_text()
-        self.assertIn("runtime_hooks=[str(root / 'v156_ui_patch.py')]", spec)
+        self.assertIn("runtime_hooks=[str(root / 'v156_build1561_patch.py')]", spec)
+        self.assertNotIn("runtime_hooks=[str(root / 'v156_ui_patch.py')]", spec)
         self.assertNotIn("runtime_hooks=[str(root / 'v155_build1551_patch.py')]", spec)
         self.assertIn("'v156_execution_hotfix'", spec)
+        self.assertIn("'v156_build1561_patch'", spec)
         self.assertIn("CFBundleShortVersionString': '1.5.6'", spec)
-        self.assertIn("CFBundleVersion': '1560'", spec)
+        self.assertIn("CFBundleVersion': '1561'", spec)
 
     def test_51054_place_order_is_ambiguous_and_has_expiry_header(self):
         x = Exchange(key='k', secret='s', phrase='p', demo=True)
