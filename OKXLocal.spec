@@ -8,7 +8,7 @@ root = Path(SPECPATH)
 # Only the final V1.5.6 overlay runs as a PyInstaller runtime hook; it imports
 # and applies the inherited patch chain exactly once as normal Python modules.
 a = Analysis([str(root / 'desktop.py')], pathex=[str(root)],
-             hiddenimports=['unittest.mock', 'v152_model', 'v153_model', 'v154_model', 'v154_limit_log_fix', 'v154_record_card_boll_fix', 'v154_fixed_card_precision_fix', 'v154_build1543_patch', 'v154_build1543_ui_cleanup', 'v154_build1544_patch', 'v155_update_patch', 'v155_build1551_patch', 'v156_ui_patch'], datas=[(str(root / 'assets' / 'kaytrade-v142-logo.png'),'assets')], binaries=[],
+             hiddenimports=['unittest.mock', 'v152_model', 'v153_model', 'v154_model', 'v154_limit_log_fix', 'v154_record_card_boll_fix', 'v154_fixed_card_precision_fix', 'v154_build1543_patch', 'v154_build1543_ui_cleanup', 'v154_build1544_patch', 'v155_update_patch', 'v155_build1551_patch', 'v156_execution_hotfix', 'v156_ui_patch'], datas=[(str(root / 'assets' / 'kaytrade-v142-logo.png'),'assets')], binaries=[],
              hookspath=[], runtime_hooks=[str(root / 'v156_ui_patch.py')], excludes=[])
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='KAYTRADE',
