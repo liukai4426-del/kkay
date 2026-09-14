@@ -29,6 +29,7 @@ class Build1551Tests(unittest.TestCase):
             self.assertTrue(
                 "runtime_hooks=[str(root / 'v156_ui_patch.py')]" in spec
                 or "runtime_hooks=[str(root / 'v156_build1561_patch.py')]" in spec
+                or "runtime_hooks=[str(root / 'v160_update_patch.py')]" in spec
             )
 
     def test_cooldown_gate_sees_zero_last_close_then_restores_history_value(self):
