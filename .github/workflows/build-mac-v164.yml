@@ -2,7 +2,7 @@ name: Build KAYTRADE Intel Mac 1.6.4 Build1641
 
 on:
   push:
-    branches: [release/v1.6.4, fix/v164-build1641]
+    branches: [release/v1.6.4]
   workflow_dispatch:
 
 permissions:
