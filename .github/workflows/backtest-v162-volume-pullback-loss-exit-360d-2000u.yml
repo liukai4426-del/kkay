@@ -1,0 +1,120 @@
+name: Backtest V1.6.2 Pullback15 + Volume Loss Exit 360D 2000U
+
+on:
+  push:
+    branches: [research/v162-volume-pullback-loss-exit-360d-2000u]
+    paths:
+      - run_v162_volume_pullback_loss_exit_360d_2000u.py
+      - .github/workflows/backtest-v162-volume-pullback-loss-exit-360d-2000u.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    name: pullback15-volume-loss-exit-360d-2000u
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Materialize audited historical simulator
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+          git fetch --depth=1 origin research/v155-outer-bands-180d
+          git show FETCH_HEAD:research_v1544_cache_patch.py > research_v1544_cache_patch.py
+          git show FETCH_HEAD:research_v1544_180d_backtest.py > research_v1544_180d_backtest.py
+          git show FETCH_HEAD:run_v1544_180d_fixed.py > run_v1544_180d_fixed.py
+          git fetch --depth=1 origin research/v161-4h-only-no-be-360d-2000u
+          git show FETCH_HEAD:run_v161_360d_2000u.py > run_v161_360d_2000u.py
+          git show FETCH_HEAD:run_v161_4h_only_no_be_360d_2000u.py > run_v161_4h_only_no_be_360d_2000u.py
+          git fetch --depth=1 origin research/v162-360d-2000u
+          git show FETCH_HEAD:run_v162_360d_2000u.py > run_v162_360d_2000u.py
+
+      - name: Compile and verify strict A/B lock
+        run: |
+          python -m py_compile \
+            research_v146_backtest.py \
+            research_v1544_cache_patch.py \
+            research_v1544_180d_backtest.py \
+            run_v1544_180d_fixed.py \
+            v152_model.py v153_model.py v154_model.py v160_model.py v161_model.py v162_model.py \
+            v154_build1544_patch.py \
+            run_v161_360d_2000u.py \
+            run_v161_4h_only_no_be_360d_2000u.py \
+            run_v162_360d_2000u.py \
+            research_v162_outer_rsi_macd_model.py \
+            run_v162_outer_rsi30_70_macd_360d_2000u.py \
+            run_v162_volume_pullback_loss_exit_360d_2000u.py
+          python - <<'PY'
+          import run_v162_volume_pullback_loss_exit_360d_2000u as bt
+          start, end = bt._configure_and_patch()
+          bt._verify_exit_patch()
+          assert start.isoformat() == '2025-09-19T20:20:00+00:00'
+          assert end.isoformat() == '2026-09-14T20:20:00+00:00'
+          assert bt.baseline.DAYS == 360
+          assert bt.baseline.CAPITAL == 2000.0
+          assert bt.baseline.BASE_POSITION_NOTIONAL == 2000.0
+          assert bt.baseline.LEVERAGE == 5
+          assert bt.baseline.RISK_USDT == 20.0
+          assert bt.baseline.DAILY_LOSS == 60.0
+          assert bt.production.RSI_MIN == 30.0
+          assert bt.production.RSI_MAX == 70.0
+          assert bt.baseline.BE_ENABLED is False
+          assert bt.VOLUME_RATIO_THRESHOLD == 1.2
+          print('PASS: exact baseline + only dynamic 15m-pullback & volume losing market exit')
+          print('WINDOW', start.isoformat(), end.isoformat())
+          PY
+
+      - name: Run 360-day A/B backtest
+        run: time python run_v162_volume_pullback_loss_exit_360d_2000u.py
+
+      - name: Verify result files and exit diagnostics
+        run: |
+          python - <<'PY'
+          import csv, json
+          from pathlib import Path
+          out = Path('backtest_output_v162_pullback15_volume_loss_exit_360d_2000u')
+          m = json.loads((out/'metrics_360d.json').read_text())
+          rows = list(csv.DictReader((out/'trades_360d.csv').open())) if (out/'trades_360d.csv').stat().st_size else []
+          assert m['release_base'] == '1.6.2'
+          assert m['research_variant'] == 'outer_only_rsi30_70_macd_pullback15_volume_loss_exit'
+          assert m['days'] == 360
+          assert m['start_utc'] == '2025-09-19T20:20:00+00:00'
+          assert m['end_utc'] == '2026-09-14T20:20:00+00:00'
+          assert m['entry_volume_score_retained'] is True
+          assert m['entry_volume_score_points'] == 0.5
+          assert m['dynamic_exit_requires_15m_pullback_resonance'] is True
+          assert m['dynamic_exit_requires_volume'] is True
+          assert m['dynamic_exit_volume_ratio_threshold'] == 1.2
+          assert m['dynamic_exit_requires_mark_to_market_loss'] is True
+          assert m['dynamic_exit_min_hold_min'] == 0
+          assert m['dynamic_exit_max_hold_min'] is None
+          assert m['dynamic_exit_signal_must_form_after_fill'] is True
+          assert m['outer_only'] is True
+          assert m['be_enabled'] is False
+          assert m['stop_atr_timeframe'] == '1H'
+          assert m['reward_r'] == 2.0
+          assert len(rows) == m['trades']
+          exits = [r for r in rows if r.get('reason') == 'PULLBACK15_VOLUME_LOSS_EXIT']
+          assert len(exits) == m['pullback15_volume_loss_exit_trades']
+          for r in exits:
+              assert float(r['exit_volume_ratio']) >= 1.2
+              assert int(float(r['exit_signal_5m_bar_start'])) >= int(float(r['entry_time']))
+          print('RESULT_METRICS_JSON')
+          print(json.dumps(m, ensure_ascii=False, indent=2))
+          print('PULLBACK15_VOLUME_LOSS_EXIT_COUNT', len(exits))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.6.2-PULLBACK15-VOLUME-LOSS-EXIT-360D-2000U
+          path: backtest_output_v162_pullback15_volume_loss_exit_360d_2000u/
+          if-no-files-found: error
+          retention-days: 30
