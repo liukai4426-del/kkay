@@ -3,8 +3,9 @@ from pathlib import Path
 root = Path(SPECPATH)
 # Compatibility marker for legacy packaged-entry safety tests:
 # runtime_hooks=[str(root / 'v136_runtime.py')]
-# V1.6.4 keeps the verified V1.6.3 production lifecycle and adds the final
-# Volume Hard Gate / outer-BOLL score-transfer overlay.
+# V1.6.4 Build1641 keeps the verified V1.6.3 production lifecycle and adds
+# Volume Hard Gate / outer-BOLL score transfer / four-minute signal lifecycle
+# plus the final entry guard.
 a = Analysis([str(root / 'desktop.py')], pathex=[str(root)],
              hiddenimports=['unittest.mock', 'v152_model', 'v153_model', 'v154_model', 'v154_limit_log_fix', 'v154_record_card_boll_fix', 'v154_fixed_card_precision_fix', 'v154_build1543_patch', 'v154_build1543_ui_cleanup', 'v154_build1544_patch', 'v155_update_patch', 'v155_build1551_patch', 'v156_execution_hotfix', 'v156_ui_patch', 'v156_build1561_patch', 'v160_model', 'v160_update_patch', 'v161_model', 'v161_update_patch', 'v161_ui_status_patch', 'v162_model', 'v162_update_patch', 'v163_model', 'v163_update_patch', 'v163_ui_patch', 'v164_model', 'v164_update_patch', 'v164_ui_patch'], datas=[(str(root / 'assets' / 'kaytrade-v142-logo.png'),'assets')], binaries=[],
              hookspath=[], runtime_hooks=[str(root / 'v164_update_patch.py')], excludes=[])
@@ -16,6 +17,6 @@ collection = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name='KAY
 bundle = BUNDLE(collection, name='KAYTRADE.app',icon=str(root / 'OKXLocal.icns'),
                 bundle_identifier='design.kkay.kaytrade',
                 info_plist={'CFBundleShortVersionString': '1.6.4',
-                            'CFBundleVersion': '1640',
+                            'CFBundleVersion': '1641',
                             'LSMinimumSystemVersion': '14.0',
                             'NSHighResolutionCapable': True})
