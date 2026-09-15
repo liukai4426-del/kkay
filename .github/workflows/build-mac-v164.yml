@@ -1,0 +1,119 @@
+name: Build KAYTRADE Intel Mac 1.6.4 Build1640
+
+on:
+  push:
+    branches: [release/v1.6.4]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile V1.6.4
+        run: python -m py_compile v160_model.py v160_update_patch.py v161_model.py v161_update_patch.py v162_model.py v162_update_patch.py v163_model.py v163_update_patch.py v163_ui_patch.py v164_model.py v164_update_patch.py v164_ui_patch.py test_v164_update.py test_v164_ui.py desktop.py
+      - name: Preserved regressions
+        run: |
+          # Versioned overlays monkey-patch shared modules, so each suite runs in
+          # its own interpreter to preserve historical expectations.
+          python -m unittest -v test_engine
+          python -m unittest -v test_candles
+          python -m unittest -v test_v152_strategy
+          python -m unittest -v test_v153_strategy
+          python -m unittest -v test_v154_strategy
+          python -m unittest -v test_v155_update
+          # V1.5.6 contains one historical packaging lock that intentionally
+          # rejects every future promoted bundle version. Preserve its runtime/UI
+          # regressions without applying that obsolete release-number assertion.
+          python -m unittest -v \
+            test_v156_build1561.V156Build1561Tests.test_fixed_loss_control_markers_cover_value_row_and_note \
+            test_v156_build1561.V156Build1561Tests.test_identity_and_preserved_flags \
+            test_v156_build1561.V156Build1561Tests.test_log_order_helper_is_newest_first_and_capped
+          python -m unittest -v test_v160_update
+          python -m unittest -v test_v161_update
+          python -m unittest -v test_v162_update
+          python -m unittest -v test_v163_update
+          python -m unittest -v test_v163_ui
+          python -m unittest -v test_v164_update
+          python -m unittest -v test_v164_ui
+      - name: Verify V1.6.4 wiring
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import v138_strategy_patch as v138
+          import v162_update_patch as v162
+          import v164_model as model
+          import v164_update_patch as runtime
+          import v164_ui_patch as ui
+          import v161_ui_status_patch as ui161
+          spec=Path('OKXLocal.spec').read_text()
+          desktop=Path('desktop.py').read_text()
+          assert model.VERSION=='1.6.4' and model.THRESHOLD==6.0
+          assert model.VOLUME_HARD_GATE==1.20
+          assert model.BOLL_OUTER_BONUS==0.50 and model.BOLL_OUTER_SCORE==2.50
+          assert runtime.VERSION=='1.6.4' and runtime.BUILD=='1640'
+          assert v138._prepare_order is v162._prepare_order_v162
+          assert v138._submit_initial is runtime._submit_v164
+          assert ui.VERSION_SUBTITLE=='BTC / USDT   ·   V1.6.4'
+          labels=dict(ui161._STATUS_ITEMS)
+          assert 'funds' not in labels
+          assert labels['volume_gate']=='量能 Hard Gate'
+          assert labels['boll']=='外轨BOLL'
+          assert "runtime_hooks=[str(root / 'v164_update_patch.py')]" in spec
+          assert "CFBundleShortVersionString': '1.6.4'" in spec
+          assert "CFBundleVersion': '1640'" in spec
+          assert 'apply_v164_update_patch' in desktop and 'apply_v164_ui_patch' in desktop
+          print('PASS V1.6.4 wiring')
+          PY
+
+  build:
+    needs: unit
+    runs-on: macos-15-intel
+    timeout-minutes: 70
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0'
+      - run: python -m unittest -v test_v164_update
+      - run: python -m unittest -v test_v164_ui
+      - run: python build_icon.py
+      - run: python -m PyInstaller --noconfirm OKXLocal.spec
+      - name: Verify Intel bundle and metadata
+        run: |
+          python verify_bundle.py
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1.6.4'
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1640'
+          codesign --verify --deep --strict dist/KAYTRADE.app
+      - name: Packaged UI smoke test
+        run: |
+          TMPDIR_CHECK="$(mktemp -d)"
+          dist/KAYTRADE.app/Contents/MacOS/KAYTRADE --smoke-test "$TMPDIR_CHECK/smoke.txt"
+          cat "$TMPDIR_CHECK/smoke.txt"
+          grep 'V1.6.4' "$TMPDIR_CHECK/smoke.txt"
+      - name: Create installer
+        run: |
+          mkdir -p installer
+          ditto dist/KAYTRADE.app installer/KAYTRADE.app
+          cp RELEASE-1.6.4.md installer/RELEASE-1.6.4.md
+          printf 'KAYTRADE V1.6.4 Build1640\nVolume score removed; outer BOLL +0.5; Volume >=1.20x prior-20 5m average is a hard opening block; opening status uses green/red and no Available Funds item.\n' > installer/RELEASE-1.6.4.txt
+          hdiutil create -volname 'KAYTRADE 1.6.4' -srcfolder installer -ov -format UDZO KAYTRADE-1.6.4-Intel-build1640.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-1.6.4-Intel-build1640
+          path: |
+            KAYTRADE-1.6.4-Intel-build1640.dmg
+            installer/RELEASE-1.6.4.md
+            installer/RELEASE-1.6.4.txt
+          if-no-files-found: error
