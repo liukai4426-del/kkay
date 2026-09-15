@@ -31,7 +31,7 @@ jobs:
       - name: Run fast hourly path reconstruction
         run: python run_v164_hourly_path_fast_720d.py
 
-      - name: Verify
+      - name: Verify hourly snapshots
         run: |
           python - <<'PY'
           import csv,json
