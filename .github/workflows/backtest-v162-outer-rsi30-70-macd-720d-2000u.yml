@@ -1,0 +1,109 @@
+name: Backtest V1.6.2 Outer RSI30-70 MACD Volume+0.5 720D 2000U
+
+on:
+  push:
+    branches: [research/v162-outer-rsi-macd-720d-2000u]
+    paths:
+      - run_v162_outer_rsi30_70_macd_720d_2000u.py
+      - .github/workflows/backtest-v162-outer-rsi30-70-macd-720d-2000u.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    name: outer-rsi30-70-macd-volume-720d-2000u
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Materialize audited historical simulator
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+          git fetch --depth=1 origin research/v155-outer-bands-180d
+          git show FETCH_HEAD:research_v1544_cache_patch.py > research_v1544_cache_patch.py
+          git show FETCH_HEAD:research_v1544_180d_backtest.py > research_v1544_180d_backtest.py
+          git show FETCH_HEAD:run_v1544_180d_fixed.py > run_v1544_180d_fixed.py
+          git fetch --depth=1 origin research/v161-4h-only-no-be-360d-2000u
+          git show FETCH_HEAD:run_v161_360d_2000u.py > run_v161_360d_2000u.py
+          git show FETCH_HEAD:run_v161_4h_only_no_be_360d_2000u.py > run_v161_4h_only_no_be_360d_2000u.py
+
+      - name: Compile and verify 720D research lock
+        run: |
+          python -m py_compile \
+            research_v146_backtest.py \
+            research_v1544_cache_patch.py \
+            research_v1544_180d_backtest.py \
+            run_v1544_180d_fixed.py \
+            v152_model.py v153_model.py v154_model.py v160_model.py v161_model.py v162_model.py \
+            v154_build1544_patch.py \
+            run_v161_360d_2000u.py \
+            run_v161_4h_only_no_be_360d_2000u.py \
+            run_v162_360d_2000u.py \
+            research_v162_outer_rsi_macd_model.py \
+            run_v162_outer_rsi30_70_macd_360d_2000u.py \
+            run_v162_outer_rsi30_70_macd_720d_2000u.py
+          python - <<'PY'
+          import run_v162_outer_rsi30_70_macd_720d_2000u as bt
+          start, end = bt._configure()
+          bt._verify_lock()
+          assert start.isoformat() == '2024-09-24T20:20:00+00:00'
+          assert end.isoformat() == '2026-09-14T20:20:00+00:00'
+          assert bt.DAYS == 720
+          assert bt.CAPITAL == 2000.0
+          assert bt.BASE_POSITION_NOTIONAL == 2000.0
+          assert bt.LEVERAGE == 5
+          assert bt.RISK_USDT == 20.0
+          assert bt.DAILY_LOSS == 60.0
+          assert bt.production.RSI_MIN == 30.0
+          assert bt.production.RSI_MAX == 70.0
+          assert bt.production.THRESHOLD == 6.0
+          assert bt.BE_ENABLED is False
+          src = open('v153_model.py', encoding='utf-8').read()
+          assert '"volume5": 0.5 if opp.get("five_signal_volume_ok") else 0.0' in src
+          print('PASS: 720D window / original Volume +0.5 retained / outer-only / RSI30-70 / MACD / 4H aligned / 1x / 1H ATR / 2R / BE off')
+          print('WINDOW', start.isoformat(), end.isoformat())
+          PY
+
+      - name: Run 720-day research backtest
+        run: time python run_v162_outer_rsi30_70_macd_720d_2000u.py
+
+      - name: Verify result files and volume diagnostics
+        run: |
+          python - <<'PY'
+          import csv, json
+          from pathlib import Path
+          out = Path('backtest_output_v162_outer_rsi30_70_macd_720d_2000u')
+          m = json.loads((out/'metrics_720d.json').read_text())
+          v = json.loads((out/'volume_analysis_720d.json').read_text())
+          rows = list(csv.DictReader((out/'trades_720d.csv').open())) if (out/'trades_720d.csv').stat().st_size else []
+          assert m['release_base'] == '1.6.2'
+          assert m['research_variant'] == 'outer_only_rsi30_70_macd_volume_score_720d'
+          assert m['days'] == 720
+          assert m['start_utc'] == '2024-09-24T20:20:00+00:00'
+          assert m['end_utc'] == '2026-09-14T20:20:00+00:00'
+          assert m['volume_score_enabled'] is True and m['volume_score_points'] == 0.5
+          assert m['middle_enabled'] is False and m['outer_only'] is True
+          assert m['outer_macd_improving_required'] is True
+          assert m['outer_4h_aligned_required'] is True
+          assert m['stop_atr_timeframe'] == '1H' and m['reward_r'] == 2.0
+          assert len(rows) == m['trades']
+          assert all(str(r.get('boll_path') or '') in ('lower_band','upper_band') for r in rows)
+          assert v['groups']['volume_on']['trades'] + v['groups']['volume_off']['trades'] == m['trades']
+          print('RESULT_METRICS_JSON')
+          print(json.dumps(m, ensure_ascii=False, indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.6.2-OUTER-RSI30-70-MACD-VOLUME-720D-2000U
+          path: backtest_output_v162_outer_rsi30_70_macd_720d_2000u/
+          if-no-files-found: error
+          retention-days: 30
