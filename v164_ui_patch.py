@@ -1,8 +1,9 @@
-"""KAYTRADE V1.6.4 presentation overlay.
+"""KAYTRADE V1.6.4 presentation overlay — Build 1641.
 
-- synchronize visible version with V1.6.4;
+- synchronize visible version with V1.6.4 Build1641;
 - remove Available Funds from the compact opening-status surface;
 - show Volume only as an opening hard-gate state;
+- expose the 4-minute outer-signal window as an opening-state item;
 - render allowed states green, prohibited/failed states red, unknown states gray;
 - keep score-detail wording aligned with the outer-only execution model.
 """
@@ -21,7 +22,7 @@ import v163_ui_patch as ui163
 import v164_model as model
 
 VERSION = "1.6.4"
-BUILD = "1640"
+BUILD = "1641"
 VERSION_SUBTITLE = f"BTC / USDT   ·   V{VERSION}"
 WINDOW_TITLE = f"KAYTRADE {VERSION} · BTC 策略控制台 · Build {BUILD}"
 
@@ -37,6 +38,7 @@ ui161._STATUS_ITEMS = (
     ("score", "评分≥6"),
     ("direction", "主方向"),
     ("boll", "外轨BOLL"),
+    ("signal_window", "外轨信号≤4m"),
     ("middle_macd", "外轨MACD"),
     ("outer_4h", "外轨4H"),
     ("macd_clean", "RSI 30–70"),
@@ -63,6 +65,7 @@ def _status_snapshot_v164(owner, data):
     snapshot = dict(_PREVIOUS_STATUS_SNAPSHOT(owner, data) or {})
     snapshot.pop("funds", None)
     snapshot["volume_gate"] = None
+    snapshot["signal_window"] = None
     if not isinstance(data, dict):
         return snapshot
 
@@ -79,6 +82,14 @@ def _status_snapshot_v164(owner, data):
         else:
             ratio = _finite(opportunity.get("five_signal_volume_ratio"))
             snapshot["volume_gate"] = None if ratio is None else ratio < model.VOLUME_HARD_GATE
+
+        window_explicit = confirmations.get("signal_window_ok")
+        if window_explicit is not None:
+            snapshot["signal_window"] = bool(window_explicit)
+        else:
+            required = confirmations.get("required") or {}
+            if "entry_window_4x1m" in required:
+                snapshot["signal_window"] = bool(required.get("entry_window_4x1m"))
     return snapshot
 
 
@@ -102,6 +113,13 @@ def _render_status_v164(owner):
                 text = "量能：禁止开仓"
             else:
                 text = "量能 Hard Gate"
+        elif key == "signal_window":
+            if value is True:
+                text = "外轨信号：4分钟内有效"
+            elif value is False:
+                text = "外轨信号：已失效"
+            else:
+                text = "外轨信号≤4m"
         try:
             widget.configure(fg=color, text="● " + text)
         except Exception:
@@ -150,7 +168,7 @@ def app_init(self, *args, **kwargs):
     _sync_visible_version(self)
     try:
         self.signal.set(
-            "V1.6.4 · 外轨2.5分 / Volume<1.2× Hard Gate / RSI30–70 / 5m MACD改善 / 4H同向"
+            "V1.6.4 · 外轨2.5分 / 4分钟信号窗口 / Volume<1.2× Hard Gate / RSI30–70 / 5m MACD改善 / 4H同向"
         )
     except Exception:
         pass
