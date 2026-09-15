@@ -14,8 +14,8 @@ from pathlib import Path
 
 BASE_SHA = "a3db6687fc608b0f20266d48171746fa0bddc7c5"
 BASE_SOURCE = Path(".v162_structure_macd_4h_base_a3db668.py")
-EFFECTIVE_STRUCTURE_BREAK_ATR = 0.50
-THRESHOLD_TAG = "atr050"
+EFFECTIVE_STRUCTURE_BREAK_ATR = 0.75
+THRESHOLD_TAG = "atr075"
 
 
 def _load_base():
@@ -43,8 +43,6 @@ baseline = _base.baseline
 research = _base.research
 production = _base.production
 
-# Keep the legacy workflow lock unchanged; actual experimental behavior uses the
-# explicit effective threshold below and is recorded in the output metrics.
 STRUCTURE_BREAK_ATR = 0.25
 MONITOR_MAX_MS = _base.MONITOR_MAX_MS
 LIMIT_PROTECTION_BPS = _base.LIMIT_PROTECTION_BPS
@@ -98,7 +96,6 @@ def main():
         f"V1.6.2 research — first-4H structure break >= {EFFECTIVE_STRUCTURE_BREAK_ATR:.2f} ATR15 "
         "+ adverse 5m MACD — strict 360D"
     )
-    # Preserve the legacy field solely so the already-audited workflow lock remains unchanged.
     metrics["management_structure_break_atr15"] = STRUCTURE_BREAK_ATR
     metrics_path.write_text(json.dumps(metrics, ensure_ascii=False, indent=2), encoding="utf-8")
 
