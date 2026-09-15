@@ -1,0 +1,86 @@
+name: Backtest V1.6.4 Hourly Early Exit Deep Dive 720D
+
+on:
+  push:
+    branches: [research/v164-hourly-early-exit-deepdive-720d]
+    paths:
+      - run_v164_hourly_early_exit_deepdive_720d.py
+      - .github/workflows/backtest-v164-hourly-early-exit-deepdive-720d.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyse:
+    name: hourly-early-exit-deepdive-720d
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Materialize audited simulator dependencies
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+          git fetch --depth=1 origin research/v155-outer-bands-180d
+          git show FETCH_HEAD:research_v1544_cache_patch.py > research_v1544_cache_patch.py
+          git show FETCH_HEAD:research_v1544_180d_backtest.py > research_v1544_180d_backtest.py
+          git show FETCH_HEAD:run_v1544_180d_fixed.py > run_v1544_180d_fixed.py
+          git fetch --depth=1 origin research/v161-4h-only-no-be-360d-2000u
+          git show FETCH_HEAD:run_v161_360d_2000u.py > run_v161_360d_2000u.py
+          git show FETCH_HEAD:run_v161_4h_only_no_be_360d_2000u.py > run_v161_4h_only_no_be_360d_2000u.py
+          git fetch --depth=1 origin research/v162-early-exit-score-180d
+          git show FETCH_HEAD:run_v162_early_exit_score_180d_2000u.py > run_v162_early_exit_score_180d_2000u.py
+
+      - name: Compile
+        run: |
+          python -m py_compile \
+            research_v146_backtest.py \
+            research_v1544_cache_patch.py \
+            research_v1544_180d_backtest.py \
+            run_v1544_180d_fixed.py \
+            v152_model.py v153_model.py v154_model.py v160_model.py v161_model.py v162_model.py \
+            v154_build1544_patch.py \
+            run_v161_360d_2000u.py \
+            run_v161_4h_only_no_be_360d_2000u.py \
+            run_v162_360d_2000u.py \
+            research_v162_outer_rsi_macd_model.py \
+            run_v162_outer_rsi30_70_macd_360d_2000u.py \
+            run_v162_outer_rsi30_70_macd_720d_2000u.py \
+            research_v162_outer_rsi_macd_volume_gate_model.py \
+            run_v162_volume_hard_gate_720d_2000u.py \
+            run_v162_early_exit_score_180d_2000u.py \
+            run_v164_hourly_early_exit_deepdive_720d.py
+
+      - name: Run hourly deep dive
+        run: time python run_v164_hourly_early_exit_deepdive_720d.py
+
+      - name: Verify outputs
+        run: |
+          python - <<'PY'
+          import csv, json
+          from pathlib import Path
+          out = Path('backtest_output_v164_hourly_early_exit_deepdive_720d')
+          rows = list(csv.DictReader((out/'hourly_snapshots_720d.csv').open()))
+          a = json.loads((out/'hourly_analysis_720d.json').read_text())
+          m = json.loads((out/'baseline_metrics_720d.json').read_text())
+          assert m['trades'] == 236
+          assert set(a['by_hour']) == {'1','2','3','4'}
+          assert rows
+          assert all(int(r['hour']) in (1,2,3,4) for r in rows)
+          print('PASS snapshots', len(rows))
+          for h in ('1','2','3','4'):
+              print('HOUR', h, json.dumps(a['by_hour'][h], ensure_ascii=False))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.6.4-HOURLY-EARLY-EXIT-DEEPDIVE-720D
+          path: backtest_output_v164_hourly_early_exit_deepdive_720d/
+          if-no-files-found: error
+          retention-days: 30
