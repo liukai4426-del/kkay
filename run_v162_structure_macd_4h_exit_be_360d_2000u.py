@@ -14,8 +14,8 @@ from pathlib import Path
 
 BASE_SHA = "a3db6687fc608b0f20266d48171746fa0bddc7c5"
 BASE_SOURCE = Path(".v162_structure_macd_4h_base_a3db668.py")
-EFFECTIVE_STRUCTURE_BREAK_ATR = 0.75
-THRESHOLD_TAG = "atr075"
+EFFECTIVE_STRUCTURE_BREAK_ATR = 1.00
+THRESHOLD_TAG = "atr100"
 
 
 def _load_base():
