@@ -111,3 +111,5 @@ jobs:
           path: backtest_output_v162_outer_rsi30_70_macd_360d_2000u/
           if-no-files-found: error
           retention-days: 30
+
+# trigger: RSI range is 30-70 for both long and short
