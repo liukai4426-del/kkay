@@ -1,0 +1,111 @@
+name: Backtest KAYTRADE V1.6.5 1000D 2000U
+
+on:
+  push:
+    branches: [research/v165-1000d-2000u]
+    paths:
+      - run_v165_1000d_2000u.py
+      - .github/workflows/backtest-v165-1000d-2000u.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    name: v165-1000d-2000u
+    runs-on: ubuntu-latest
+    timeout-minutes: 420
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Materialize audited historical simulator
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+          git fetch --depth=1 origin research/v155-outer-bands-180d
+          git show FETCH_HEAD:research_v1544_cache_patch.py > research_v1544_cache_patch.py
+          git show FETCH_HEAD:research_v1544_180d_backtest.py > research_v1544_180d_backtest.py
+          git show FETCH_HEAD:run_v1544_180d_fixed.py > run_v1544_180d_fixed.py
+
+      - name: Compile and verify V1.6.5 1000D lock
+        run: |
+          python -m py_compile \
+            research_v146_backtest.py \
+            research_v1544_cache_patch.py \
+            research_v1544_180d_backtest.py \
+            run_v1544_180d_fixed.py \
+            v152_model.py v153_model.py v154_model.py \
+            v160_model.py v161_model.py v162_model.py v163_model.py v164_model.py v165_model.py \
+            v154_build1544_patch.py run_v160_365d_2000u.py run_v165_1000d_2000u.py
+          python - <<'PY'
+          import run_v165_1000d_2000u as bt
+          start, end = bt._configure()
+          bt._verify_lock()
+          assert start.isoformat() == '2023-12-19T20:20:00+00:00'
+          assert end.isoformat() == '2026-09-14T20:20:00+00:00'
+          assert bt.DAYS == 1000
+          assert bt.production.VERSION == '1.6.5'
+          assert bt.production.ENTRY_WINDOW_MS == 300000
+          assert bt.production.BOLL_OUTER_SCORE == 2.5
+          assert bt.production.VOLUME_HARD_GATE == 1.2
+          assert bt.BE_ENABLED is False
+          print('PASS: V1.6.5 exact production entry model / 1000D / 2000U / fixed 1x / No-BE lock')
+          print('WINDOW', start.isoformat(), end.isoformat())
+          PY
+
+      - name: Run 1000-day backtest
+        run: time python run_v165_1000d_2000u.py
+
+      - name: Verify result files and strategy invariants
+        run: |
+          python - <<'PY'
+          import csv, json
+          from pathlib import Path
+          out = Path('backtest_output_v165_1000d_2000u')
+          m = json.loads((out/'metrics_1000d.json').read_text())
+          a = json.loads((out/'analysis_1000d.json').read_text())
+          rows = list(csv.DictReader((out/'trades_1000d.csv').open())) if (out/'trades_1000d.csv').stat().st_size else []
+          assert m['release'] == '1.6.5' and m['release_build'] == 1650
+          assert m['days'] == 1000
+          assert m['start_utc'] == '2023-12-19T20:20:00+00:00'
+          assert m['end_utc'] == '2026-09-14T20:20:00+00:00'
+          assert m['capital'] == 2000.0 and m['leverage'] == 5
+          assert m['base_risk_usdt'] == 20.0 and m['daily_loss_usdt'] == 60.0
+          assert m['score_threshold'] == 6.0
+          assert m['outer_only'] is True and m['middle_enabled'] is False
+          assert m['boll_outer_score'] == 2.5
+          assert m['signal_window_ms'] == 300000
+          assert m['volume_score_enabled'] is False
+          assert m['volume_hard_gate_enabled'] is True and m['volume_ratio_threshold'] == 1.2
+          assert m['outer_rsi_min'] == 30.0 and m['outer_rsi_max'] == 70.0
+          assert m['outer_macd_improving_required'] is True
+          assert m['outer_4h_aligned_required'] is True
+          assert m['position_multiplier'] == 1.0
+          assert m['entry_order_type'] == 'LIMIT'
+          assert m['stop_atr_timeframe'] == '1H' and m['stop_atr_multiplier'] == 1.0
+          assert m['reward_r'] == 2.0 and m['be_enabled'] is False
+          assert m['cooldown_minutes'] == 0 and m['loss_pause_enabled'] is False
+          assert len(rows) == m['trades']
+          assert sum(x['trades'] for x in a['by_250d_segment'].values()) == m['trades']
+          if rows:
+              assert all(str(r.get('boll_path') or '') in ('lower_band','upper_band') for r in rows)
+              assert all(float(r.get('score') or 0.0) >= 6.0 for r in rows)
+              if 'position_multiplier' in rows[0]:
+                  assert all(abs(float(r.get('position_multiplier') or 0.0)-1.0) < 1e-9 for r in rows)
+              if 'signal_volume_ratio' in rows[0]:
+                  assert all(float(r.get('signal_volume_ratio') or 99.0) < 1.2 for r in rows)
+          print('RESULT_METRICS_JSON')
+          print(json.dumps(m, ensure_ascii=False, indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.6.5-1000D-2000U
+          path: backtest_output_v165_1000d_2000u/
+          if-no-files-found: error
+          retention-days: 30
