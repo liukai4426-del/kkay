@@ -43,11 +43,16 @@ class V156Build1561Tests(unittest.TestCase):
             self.assertIn("runtime_hooks=[str(root / 'v160_update_patch.py')]", spec)
             self.assertNotIn("runtime_hooks=[str(root / 'v156_build1561_patch.py')]", spec)
             self.assertIn("CFBundleVersion': '1600'", spec)
-        else:
+        elif "CFBundleShortVersionString': '1.6.1'" in spec:
             self.assertIn("runtime_hooks=[str(root / 'v161_update_patch.py')]", spec)
             self.assertNotIn("runtime_hooks=[str(root / 'v156_build1561_patch.py')]", spec)
-            self.assertIn("CFBundleShortVersionString': '1.6.1'", spec)
             self.assertIn("CFBundleVersion': '1610'", spec)
+        elif "CFBundleShortVersionString': '1.6.2'" in spec:
+            self.assertIn("runtime_hooks=[str(root / 'v162_update_patch.py')]", spec)
+            self.assertNotIn("runtime_hooks=[str(root / 'v156_build1561_patch.py')]", spec)
+            self.assertIn("CFBundleVersion': '1620'", spec)
+        else:
+            self.fail('OKXLocal.spec contains an unsupported promoted release version')
 
 
 if __name__ == '__main__':
