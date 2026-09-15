@@ -1,0 +1,53 @@
+name: Backtest V1.6.4 Hourly Path Fast 720D
+
+on:
+  push:
+    branches: [research/v164-hourly-early-exit-deepdive-720d]
+    paths:
+      - run_v164_hourly_path_fast_720d.py
+      - .github/workflows/backtest-v164-hourly-path-fast-720d.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  analyse:
+    name: hourly-path-fast-720d
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download completed 720D baseline artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p prior_artifact
+          gh run download 34999103434 -n KAYTRADE-V1.6.2-VOLUME-HARD-GATE-720D-2000U -D prior_artifact
+          test -f prior_artifact/trades_720d.csv
+
+      - name: Run fast hourly path reconstruction
+        run: python run_v164_hourly_path_fast_720d.py
+
+      - name: Verify
+        run: |
+          python - <<'PY'
+          import csv,json
+          from pathlib import Path
+          out=Path('hourly_path_fast_720d')
+          rows=list(csv.DictReader((out/'hourly_path_snapshots.csv').open()))
+          a=json.loads((out/'hourly_path_analysis.json').read_text())
+          assert rows and set(a['by_hour'])=={'1','2','3','4'}
+          print('PASS',len(rows))
+          for h in ('1','2','3','4'):
+              print('HOUR',h,json.dumps(a['by_hour'][h],ensure_ascii=False))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.6.4-HOURLY-PATH-FAST-720D
+          path: hourly_path_fast_720d/
+          if-no-files-found: error
+          retention-days: 30
