@@ -21,9 +21,19 @@ jobs:
         run: python -m py_compile v160_model.py v160_update_patch.py v161_model.py v161_update_patch.py v162_model.py v162_update_patch.py test_v162_update.py desktop.py
       - name: Preserved regressions
         run: |
-          python -m unittest -v test_engine test_candles
-          python -m unittest -v test_v152_strategy test_v153_strategy test_v154_strategy
-          python -m unittest -v test_v155_update test_v156_build1561 test_v160_update test_v161_update
+          # Run versioned regression suites in isolated Python processes.
+          # Several historical runtime overlays intentionally monkey-patch shared
+          # modules at import time, so combining versions in one unittest process
+          # makes later-version imports mutate earlier-version expectations.
+          python -m unittest -v test_engine
+          python -m unittest -v test_candles
+          python -m unittest -v test_v152_strategy
+          python -m unittest -v test_v153_strategy
+          python -m unittest -v test_v154_strategy
+          python -m unittest -v test_v155_update
+          python -m unittest -v test_v156_build1561
+          python -m unittest -v test_v160_update
+          python -m unittest -v test_v161_update
           python -m unittest -v test_v162_update
       - name: Verify V1.6.2 wiring
         run: |
