@@ -1,0 +1,110 @@
+name: Backtest V1.6.2 Early Exit Score 180D 2000U
+
+on:
+  push:
+    branches: [research/v162-early-exit-score-180d]
+    paths:
+      - run_v162_early_exit_score_180d_2000u.py
+      - .github/workflows/backtest-v162-early-exit-score-180d-2000u.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    name: early-exit-score-180d-ab
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Materialize audited historical simulator
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+          git fetch --depth=1 origin research/v155-outer-bands-180d
+          git show FETCH_HEAD:research_v1544_cache_patch.py > research_v1544_cache_patch.py
+          git show FETCH_HEAD:research_v1544_180d_backtest.py > research_v1544_180d_backtest.py
+          git show FETCH_HEAD:run_v1544_180d_fixed.py > run_v1544_180d_fixed.py
+          git fetch --depth=1 origin research/v161-4h-only-no-be-360d-2000u
+          git show FETCH_HEAD:run_v161_360d_2000u.py > run_v161_360d_2000u.py
+          git show FETCH_HEAD:run_v161_4h_only_no_be_360d_2000u.py > run_v161_4h_only_no_be_360d_2000u.py
+          git fetch --depth=1 origin research/v162-360d-2000u
+          git show FETCH_HEAD:run_v162_360d_2000u.py > run_v162_360d_2000u.py
+
+      - name: Compile and verify 180D A/B lock
+        run: |
+          python -m py_compile \
+            research_v146_backtest.py \
+            research_v1544_cache_patch.py \
+            research_v1544_180d_backtest.py \
+            run_v1544_180d_fixed.py \
+            v152_model.py v153_model.py v154_model.py v160_model.py v161_model.py v162_model.py \
+            v154_build1544_patch.py \
+            run_v161_360d_2000u.py \
+            run_v161_4h_only_no_be_360d_2000u.py \
+            run_v162_360d_2000u.py \
+            research_v162_outer_rsi_macd_model.py \
+            run_v162_outer_rsi30_70_macd_360d_2000u.py \
+            run_v162_early_exit_score_180d_2000u.py
+          python - <<'PY'
+          import run_v162_early_exit_score_180d_2000u as bt
+          start, end = bt._configure_180d()
+          bt._verify_lock()
+          assert start.isoformat() == '2026-03-18T20:20:00+00:00'
+          assert end.isoformat() == '2026-09-14T20:20:00+00:00'
+          assert bt.MONITOR_MAX_MS == 4 * 60 * 60_000
+          assert bt._dynamic_threshold(-0.29) is None
+          assert bt._dynamic_threshold(-0.30) == 4.0
+          assert bt._dynamic_threshold(-0.50) == 3.0
+          assert bt._dynamic_threshold(-0.80) == 2.0
+          assert bt._dynamic_threshold(-0.95) == 2.0
+          assert bt.production.RSI_MIN == 30.0 and bt.production.RSI_MAX == 70.0
+          assert bt.production.THRESHOLD == 6.0
+          assert bt.BE_ENABLED is False
+          print('PASS: exact V1.6.2 outer baseline + only first-4H Early Exit Score in B')
+          PY
+
+      - name: Run 180-day A/B backtest
+        run: time python run_v162_early_exit_score_180d_2000u.py
+
+      - name: Verify result files
+        run: |
+          python - <<'PY'
+          import csv, json
+          from pathlib import Path
+          out = Path('backtest_output_v162_early_exit_score_180d_2000u')
+          a = json.loads((out/'metrics_baseline_180d.json').read_text())
+          b = json.loads((out/'metrics_early_exit_180d.json').read_text())
+          c = json.loads((out/'comparison_180d.json').read_text())
+          ra = list(csv.DictReader((out/'trades_baseline_180d.csv').open()))
+          rb = list(csv.DictReader((out/'trades_early_exit_180d.csv').open()))
+          assert a['days'] == b['days'] == 180
+          assert a['start_utc'] == b['start_utc'] == '2026-03-18T20:20:00+00:00'
+          assert a['end_utc'] == b['end_utc'] == '2026-09-14T20:20:00+00:00'
+          assert a['research_variant'] == 'baseline_180d'
+          assert b['research_variant'] == 'early_exit_score_4h_180d'
+          assert b['early_exit_monitor_minutes'] == 240
+          assert len(ra) == a['trades'] and len(rb) == b['trades']
+          exits = [r for r in rb if r.get('reason') == 'EARLY_EXIT_SCORE_4H']
+          assert len(exits) == c['early_exit']['early_exit_count']
+          for r in exits:
+              assert float(r['hold_min']) <= 240.0
+              assert float(r['early_exit_score']) >= float(r['early_exit_threshold'])
+              assert float(r['early_exit_current_r']) <= -0.30
+              assert r['exit_order_type'] == 'MARKETABLE_LIMIT_PROXY'
+          print('COMPARISON_JSON')
+          print(json.dumps(c, ensure_ascii=False, indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.6.2-EARLY-EXIT-SCORE-180D-2000U
+          path: backtest_output_v162_early_exit_score_180d_2000u/
+          if-no-files-found: error
+          retention-days: 30
