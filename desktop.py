@@ -1,5 +1,4 @@
 """Packaged entry point; SSL roots travel with the application."""
-import json
 import os
 import sys
 import tempfile
@@ -19,10 +18,14 @@ from v136_runtime import apply as apply_v136_runtime
 apply_v136_runtime()
 from v164_update_patch import apply as apply_v164_update_patch
 apply_v164_update_patch()
+from v165_update_patch import apply as apply_v165_update_patch
+apply_v165_update_patch()
 from v161_ui_status_patch import apply as apply_v161_ui_status_patch
 apply_v161_ui_status_patch()
 from v164_ui_patch import apply as apply_v164_ui_patch
 apply_v164_ui_patch()
+from v165_ui_patch import apply as apply_v165_ui_patch
+apply_v165_ui_patch()
 
 
 def smoke_test():
@@ -31,31 +34,34 @@ def smoke_test():
     import tkinter as tk
     from unittest.mock import patch
     import app
+    import v161_ui_status_patch as ui161
+    import v165_ui_patch as ui165
     assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
     with tempfile.TemporaryDirectory(prefix='kaytrade-ui-check-') as folder:
         root=tk.Tk()
         try:
             with patch.object(app.App,'worker',lambda self:None), patch.object(app.messagebox,'showerror',side_effect=AssertionError):
                 ui=app.App(root,Path(folder)); root.update()
-                assert 'KAYTRADE' in root.title() and '1.6.4' in root.title()
+                assert 'KAYTRADE' in root.title() and '1.6.5' in root.title()
                 assert ui.mode.get() == 'OKX模拟盘'
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
-                assert getattr(ui,'_v164_ui_ready',False)
-                assert getattr(ui,'_v164_version_label_updated',False)
-                assert getattr(ui,'_v164_log_scrollbar_max_round',False)
-                label=getattr(ui,'_v164_version_label',None)
-                assert label is not None and 'V1.6.4' in str(label.cget('text'))
-                assert 'V1.6.4' in ui.signal.get()
+                assert getattr(ui,'_v165_ui_ready',False)
+                assert getattr(ui,'_v165_version_label_updated',False)
+                label=getattr(ui,'_v165_version_label',None)
+                assert label is not None and 'V1.6.5' in str(label.cget('text'))
+                assert 'V1.6.5' in ui.signal.get()
                 labels=dict(getattr(ui,'_v161_status_labels',{}) or {})
-                assert 'funds' not in labels and 'volume_gate' in labels
+                assert 'funds' not in labels and 'volume_gate' in labels and 'signal_window' in labels
+                assert dict(ui161._STATUS_ITEMS)['signal_window']=='最新5m信号周期'
+                assert app.App.arm is ui165.app_arm_v165
                 ui.stop(); assert ui.engine is None
                 ui.finished.set(); ui.thread.join(timeout=2); ui.lock.close()
         finally:
             root.destroy()
     Path(sys.argv[2]).write_text(
-        'PASS: KAYTRADE V1.6.4 packaged UI startup; Volume Hard Gate status, red/green opening state, '
-        'version sync and rounded Run Log scrollbar active; no network or orders.\n'
+        'PASS: KAYTRADE V1.6.5 packaged UI startup; latest-closed-candle wording, 5m signal lifecycle, '
+        'Volume Hard Gate, current-only confirmation flow and version sync active; no network or orders.\n'
     )
 
 
