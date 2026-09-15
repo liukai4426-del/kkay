@@ -1,0 +1,119 @@
+name: Backtest V1.6.4 Early Exit B/C 180D 2000U
+
+on:
+  push:
+    branches: [research/v164-early-exit-bc-180d-2000u]
+    paths:
+      - run_v164_early_exit_bc_180d_2000u.py
+      - .github/workflows/backtest-v164-early-exit-bc-180d-2000u.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    name: v164-early-exit-bc-180d
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Materialize audited historical simulator
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+          git fetch --depth=1 origin research/v155-outer-bands-180d
+          git show FETCH_HEAD:research_v1544_cache_patch.py > research_v1544_cache_patch.py
+          git show FETCH_HEAD:research_v1544_180d_backtest.py > research_v1544_180d_backtest.py
+          git show FETCH_HEAD:run_v1544_180d_fixed.py > run_v1544_180d_fixed.py
+          git fetch --depth=1 origin research/v161-4h-only-no-be-360d-2000u
+          git show FETCH_HEAD:run_v161_360d_2000u.py > run_v161_360d_2000u.py
+          git show FETCH_HEAD:run_v161_4h_only_no_be_360d_2000u.py > run_v161_4h_only_no_be_360d_2000u.py
+          git fetch --depth=1 origin research/v162-360d-2000u
+          git show FETCH_HEAD:run_v162_360d_2000u.py > run_v162_360d_2000u.py
+          git fetch --depth=1 origin research/v162-early-exit-score-180d
+          git show FETCH_HEAD:research_v162_outer_rsi_macd_model.py > research_v162_outer_rsi_macd_model.py
+          git show FETCH_HEAD:run_v162_outer_rsi30_70_macd_360d_2000u.py > run_v162_outer_rsi30_70_macd_360d_2000u.py
+          git show FETCH_HEAD:run_v162_early_exit_score_180d_2000u.py > run_v162_early_exit_score_180d_2000u.py
+
+      - name: Compile and verify B/C lock
+        run: |
+          python -m py_compile \
+            research_v146_backtest.py \
+            research_v1544_cache_patch.py \
+            research_v1544_180d_backtest.py \
+            run_v1544_180d_fixed.py \
+            v152_model.py v153_model.py v154_model.py v160_model.py v161_model.py v162_model.py v163_model.py v164_model.py \
+            v154_build1544_patch.py \
+            run_v161_360d_2000u.py \
+            run_v161_4h_only_no_be_360d_2000u.py \
+            run_v162_360d_2000u.py \
+            research_v162_outer_rsi_macd_model.py \
+            run_v162_outer_rsi30_70_macd_360d_2000u.py \
+            run_v162_early_exit_score_180d_2000u.py \
+            run_v164_early_exit_bc_180d_2000u.py
+          python - <<'PY'
+          import run_v164_early_exit_bc_180d_2000u as bt
+          start, end = bt._configure()
+          bt.old._verify_lock()
+          assert start.isoformat() == '2026-03-18T20:20:00+00:00'
+          assert end.isoformat() == '2026-09-14T20:20:00+00:00'
+          assert bt.production.VERSION == '1.6.4'
+          assert bt.production.BOLL_OUTER_SCORE == 2.5
+          assert bt.production.VOLUME_HARD_GATE == 1.2
+          assert bt._threshold_b(-0.29) is None
+          assert bt._threshold_b(-0.30) == 4.0
+          assert bt._threshold_b(-0.50) == 3.0
+          assert bt._threshold_b(-0.80) == 2.0
+          assert bt._threshold_c(-0.49) is None
+          assert bt._threshold_c(-0.50) == 3.0
+          assert bt._threshold_c(-0.80) == 2.0
+          assert bt.old.MONITOR_MAX_MS == 4 * 60 * 60_000
+          print('PASS: V1.6.4 entry model locked; B current Early Exit vs C no-shallow Early Exit only')
+          PY
+
+      - name: Run 180-day B/C backtest
+        run: time python run_v164_early_exit_bc_180d_2000u.py
+
+      - name: Verify result files
+        run: |
+          python - <<'PY'
+          import csv, json
+          from pathlib import Path
+          out = Path('backtest_output_v164_early_exit_bc_180d_2000u')
+          b = json.loads((out/'metrics_B_180d.json').read_text())
+          c = json.loads((out/'metrics_C_180d.json').read_text())
+          comp = json.loads((out/'comparison_BC_180d.json').read_text())
+          rb = list(csv.DictReader((out/'trades_B_180d.csv').open()))
+          rc = list(csv.DictReader((out/'trades_C_180d.csv').open()))
+          assert b['release_base'] == c['release_base'] == '1.6.4'
+          assert b['days'] == c['days'] == 180
+          assert b['start_utc'] == c['start_utc'] == '2026-03-18T20:20:00+00:00'
+          assert b['end_utc'] == c['end_utc'] == '2026-09-14T20:20:00+00:00'
+          assert b['volume_score_enabled'] is False and c['volume_score_enabled'] is False
+          assert b['volume_hard_gate_enabled'] is True and c['volume_hard_gate_enabled'] is True
+          assert b['volume_ratio_threshold'] == c['volume_ratio_threshold'] == 1.2
+          assert b['boll_outer_score'] == c['boll_outer_score'] == 2.5
+          assert c['shallow_loss_ordinary_exit_disabled'] is True
+          assert len(rb) == b['trades'] and len(rc) == c['trades']
+          b_exits = [r for r in rb if r.get('reason') == 'EARLY_EXIT_SCORE_4H']
+          c_exits = [r for r in rc if r.get('reason') == 'EARLY_EXIT_SCORE_4H']
+          assert all(float(r['hold_min']) <= 240.0 for r in b_exits + c_exits)
+          assert all(float(r['early_exit_threshold']) in (2.0,3.0,4.0) for r in b_exits)
+          assert all(float(r['early_exit_threshold']) in (2.0,3.0) for r in c_exits)
+          assert all(float(r['early_exit_current_r']) <= -0.50 for r in c_exits)
+          print('COMPARISON_JSON')
+          print(json.dumps(comp, ensure_ascii=False, indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.6.4-EARLY-EXIT-BC-180D-2000U
+          path: backtest_output_v164_early_exit_bc_180d_2000u/
+          if-no-files-found: error
+          retention-days: 30
