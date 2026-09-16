@@ -2,10 +2,9 @@ name: Backtest KAYTRADE V1.6.8 360D 2000U R2
 
 on:
   push:
-    branches: [research/v168-360d-r2]
+    branches: [research/v168-180d-backtest]
     paths:
       - run_v168_360d_backtest_r2.py
-      - run_v168_180d_backtest_r2.py
       - .github/workflows/backtest-v168-360d-r2.yml
   workflow_dispatch:
 
