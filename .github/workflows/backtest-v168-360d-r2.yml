@@ -1,10 +1,10 @@
-name: Backtest KAYTRADE V1.6.8 720D 2000U R2
+name: Backtest KAYTRADE V1.6.8 1000D 2000U R2
 
 on:
   push:
-    branches: [research/v168-720d-r2]
+    branches: [research/v168-1000d-r2]
     paths:
-      - run_v168_720d_backtest_r2.py
+      - run_v168_1000d_backtest_r2.py
       - run_v168_180d_backtest_r2.py
       - .github/workflows/backtest-v168-360d-r2.yml
   workflow_dispatch:
@@ -15,7 +15,7 @@ permissions:
 jobs:
   backtest:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 480
     env:
       BACKTEST_MARKET_CACHE: .backtest_cache
     steps:
@@ -28,13 +28,13 @@ jobs:
       - name: Install V1.6.8 runtime dependencies
         run: python -m pip install 'certifi==2025.8.3' 'websocket-client==1.8.0'
 
-      - name: Restore 720D BTC market cache
+      - name: Restore 1000D BTC market cache
         uses: actions/cache@v4
         with:
           path: .backtest_cache
-          key: kaytrade-v168-okx-btc-720d-end-20260914-market-v1
+          key: kaytrade-v168-okx-btc-1000d-end-20260914-market-v1
           restore-keys: |
-            kaytrade-okx-btc-720d-
+            kaytrade-okx-btc-1000d-
             kaytrade-okx-btc-
 
       - name: Materialize audited historical simulator and proven R2 path
@@ -53,7 +53,7 @@ jobs:
           git show FETCH_HEAD:run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py > run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py
           git show FETCH_HEAD:research_backtest_data_cache.py > research_backtest_data_cache.py
 
-      - name: Compile and verify 720D R2 lock
+      - name: Compile and verify 1000D R2 lock
         run: |
           python -m py_compile \
             research_v146_backtest.py research_v1544_cache_patch.py research_v1544_180d_backtest.py \
@@ -61,25 +61,25 @@ jobs:
             run_v166_entry_expansion_4way_360d.py \
             run_v166_15m_boll_macd_adverse_only_360d_fast.py \
             run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py \
-            research_backtest_data_cache.py run_v168_180d_backtest_r2.py run_v168_720d_backtest_r2.py
+            research_backtest_data_cache.py run_v168_180d_backtest_r2.py run_v168_1000d_backtest_r2.py
           python - <<'PY'
-          import run_v168_720d_backtest_r2 as x
-          x.configure_720()
-          x._verify_720_lock()
-          print('PASS: V1.6.8 Build1680 720D R2 lock')
+          import run_v168_1000d_backtest_r2 as x
+          x.configure_1000()
+          x._verify_1000_lock()
+          print('PASS: V1.6.8 Build1680 1000D R2 lock')
           PY
 
-      - name: Run V1.6.8 720D R2 backtest
-        run: time python run_v168_720d_backtest_r2.py
+      - name: Run V1.6.8 1000D R2 backtest
+        run: time python run_v168_1000d_backtest_r2.py
 
-      - name: Verify 720D result payload
+      - name: Verify 1000D result payload
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
-          p=Path('backtest_output_v168_720d/result_v168_720d.json')
+          p=Path('backtest_output_v168_1000d/result_v168_1000d.json')
           d=json.loads(p.read_text())
-          assert d['window']['days'] == 720
+          assert d['window']['days'] == 1000
           s=d['strategy_lock']
           assert s['version'] == '1.6.8' and s['build'] == '1680'
           assert s['boll_signal_lifetime_ms'] == 900000
@@ -89,13 +89,13 @@ jobs:
           assert s['break_even'] is False and s['early_exit'] is False
           assert d['correction']['proven_signal_path_reused'] is True
           trades=int(d['metrics']['trades'] or 0)
-          assert trades > 0, 'ANOMALY LOCK 720D R2: zero trades'
+          assert trades > 0, 'ANOMALY LOCK 1000D R2: zero trades'
           print(json.dumps(d,ensure_ascii=False,indent=2))
           PY
 
       - uses: actions/upload-artifact@v4
         with:
-          name: KAYTRADE-V1.6.8-720D-2000U-R2
-          path: backtest_output_v168_720d/
+          name: KAYTRADE-V1.6.8-1000D-2000U-R2
+          path: backtest_output_v168_1000d/
           if-no-files-found: error
           retention-days: 30
