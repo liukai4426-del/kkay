@@ -5,6 +5,7 @@ on:
     branches: [research/v168-180d-backtest]
     paths:
       - run_v168_180d_backtest.py
+      - run_v168_180d_backtest_r2.py
       - v168_update_patch.py
       - v167_15m_boll_only_fix.py
       - v167_strategy_patch.py
@@ -41,7 +42,7 @@ jobs:
             kaytrade-v168-okx-btc-180d-
             kaytrade-okx-btc-
 
-      - name: Materialize audited historical simulator
+      - name: Materialize audited historical simulator and proven R2 path
         run: |
           git fetch --depth=1 origin research/v151-btc-30d-backtest
           git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
@@ -52,36 +53,41 @@ jobs:
           git fetch --depth=1 origin research/v166-15m-boll-macd-adverse-only-360d-fast
           git show FETCH_HEAD:run_v160_365d_2000u.py > run_v160_365d_2000u.py
           git show FETCH_HEAD:run_v165_1000d_2000u.py > run_v165_1000d_2000u.py
+          git show FETCH_HEAD:run_v166_entry_expansion_4way_360d.py > run_v166_entry_expansion_4way_360d.py
+          git show FETCH_HEAD:run_v166_15m_boll_macd_adverse_only_360d_fast.py > run_v166_15m_boll_macd_adverse_only_360d_fast.py
+          git show FETCH_HEAD:run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py > run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py
           git show FETCH_HEAD:research_backtest_data_cache.py > research_backtest_data_cache.py
 
-      - name: Compile and verify V1.6.8 strategy lock
+      - name: Compile and verify V1.6.8 R2 strategy lock
         run: |
           python -m py_compile \
             research_v146_backtest.py research_v1544_cache_patch.py research_v1544_180d_backtest.py \
             run_v1544_180d_fixed.py run_v160_365d_2000u.py run_v165_1000d_2000u.py \
-            research_backtest_data_cache.py run_v168_180d_backtest.py \
+            run_v166_entry_expansion_4way_360d.py \
+            run_v166_15m_boll_macd_adverse_only_360d_fast.py \
+            run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py \
+            research_backtest_data_cache.py run_v168_180d_backtest_r2.py \
             v168_update_patch.py v167_15m_boll_only_fix.py v167_strategy_patch.py \
             v165_model.py v164_model.py
           python -m unittest -v test_v168_update
           python - <<'PY'
-          import run_v168_180d_backtest as x
+          import run_v168_180d_backtest_r2 as x
           x.configure()
           x.verify_lock()
           assert x.DAYS == 180
-          assert x.production.VERSION == '1.6.8'
-          assert x.production.BUILD == '1680'
-          assert x.production.ENTRY_WINDOW_MS == 900000
-          assert x.production.BOLL_OUTER_SCORE == 2.0
-          assert x.production.BOLL_TRIGGER_TIMEFRAME == '15m'
-          assert x.production.FIVE_MINUTE_BOLL_ENABLED is False
-          assert x.v168.EMA_FAST == 9 and x.v168.EMA_SLOW == 26
-          print('PASS: exact V1.6.8 Build1680 strategy lock, 180D replay')
+          assert x.HistoricalV168Model.VERSION == '1.6.8'
+          assert x.HistoricalV168Model.BUILD == '1680'
+          assert x.HistoricalV168Model.ENTRY_WINDOW_MS == 900000
+          assert x.HistoricalV168Model.BOLL_OUTER_SCORE == 2.0
+          assert x.HistoricalV168Model.BOLL_TRIGGER_TIMEFRAME == '15m'
+          assert x.HistoricalV168Model.FIVE_MINUTE_BOLL_ENABLED is False
+          print('PASS: V1.6.8 Build1680 R2 strategy lock + proven historical signal path')
           PY
 
-      - name: Run V1.6.8 180D backtest
-        run: time python run_v168_180d_backtest.py
+      - name: Run V1.6.8 180D R2 backtest
+        run: time python run_v168_180d_backtest_r2.py
 
-      - name: Verify result payload
+      - name: Verify R2 result payload
         run: |
           python - <<'PY'
           import json
@@ -96,13 +102,16 @@ jobs:
           assert s['five_minute_boll_enabled'] is False
           assert s['score_threshold'] == 6.0
           assert s['break_even'] is False and s['early_exit'] is False
-          assert int(d['metrics']['trades'] or 0) > 0, 'ANOMALY: zero trades; reject output'
+          assert d['correction']['proven_signal_path_reused'] is True
+          assert d['correction']['execution_window_missing_now_ms_fix_retained'] is True
+          trades=int(d['metrics']['trades'] or 0)
+          assert trades > 0, 'ANOMALY LOCK R2: zero trades; historical signal path still broken'
           print(json.dumps(d,ensure_ascii=False,indent=2))
           PY
 
       - uses: actions/upload-artifact@v4
         with:
-          name: KAYTRADE-V1.6.8-180D-2000U
+          name: KAYTRADE-V1.6.8-180D-2000U-R2
           path: backtest_output_v168_180d/
           if-no-files-found: error
           retention-days: 30
