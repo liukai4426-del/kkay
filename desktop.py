@@ -34,6 +34,8 @@ from v164_ui_patch import apply as apply_v164_ui_patch
 apply_v164_ui_patch()
 from v165_ui_patch import apply as apply_v165_ui_patch
 apply_v165_ui_patch()
+from v165_15m_outer_patch import apply as apply_v165_15m_outer_patch
+apply_v165_15m_outer_patch()
 
 
 def smoke_test():
@@ -45,12 +47,16 @@ def smoke_test():
     import engine
     import exchange
     import v161_ui_status_patch as ui161
+    import v165_model as model
     import v165_ui_patch as ui165
     assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
     assert getattr(exchange.Exchange,'_kaytrade_v165_algo_fallback_applied',False)
     assert getattr(exchange.Exchange,'_kaytrade_v165_runtime_network_state_applied',False)
     assert getattr(engine.Engine,'_kaytrade_v165_sleep_resume_applied',False)
     assert getattr(app.App,'_kaytrade_v165_keepawake_applied',False)
+    assert getattr(model,'_kaytrade_v165_15m_outer_applied',False)
+    assert getattr(app.App,'_kaytrade_v165_15m_outer_applied',False)
+    assert model.BOLL_TRIGGER_TIMEFRAME == '15m'
     with tempfile.TemporaryDirectory(prefix='kaytrade-ui-check-') as folder:
         root=tk.Tk()
         try:
@@ -65,18 +71,21 @@ def smoke_test():
                 assert getattr(ui,'_v165_keepawake_proc',None) is None
                 label=getattr(ui,'_v165_version_label',None)
                 assert label is not None and 'V1.6.5' in str(label.cget('text'))
-                assert 'V1.6.5' in ui.signal.get()
+                assert '15m外轨2.5' in ui.signal.get()
                 labels=dict(getattr(ui,'_v161_status_labels',{}) or {})
                 assert 'funds' not in labels and 'volume_gate' in labels and 'signal_window' in labels
-                assert dict(ui161._STATUS_ITEMS)['signal_window']=='最新5m信号周期'
+                status_labels=dict(ui161._STATUS_ITEMS)
+                assert status_labels['boll']=='15m外轨BOLL'
+                assert status_labels['signal_window']=='外轨5m执行窗口'
                 assert app.App.arm is ui165.app_arm_v165
                 ui.stop(); assert ui.engine is None
                 ui.finished.set(); ui.thread.join(timeout=2); ui.lock.close()
         finally:
             root.destroy()
     Path(sys.argv[2]).write_text(
-        'PASS: KAYTRADE V1.6.5 packaged UI startup; closed-candle lifecycle, Volume Hard Gate, '
-        'bounded Algo 51054 handling, sleep soft-stop, Mac keep-awake and version sync active; no network or orders.\n'
+        'PASS: KAYTRADE V1.6.5 packaged UI startup; closed-15m BOLL outer trigger with 5m execution window, '
+        '5m confirmations, Volume Hard Gate, bounded Algo 51054 handling, sleep soft-stop, Mac keep-awake '
+        'and version sync active; no network or orders.\n'
     )
 
 
