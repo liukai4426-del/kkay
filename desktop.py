@@ -54,6 +54,7 @@ apply_v168_build1681_patch()
 
 def smoke_test():
     """Exercise the packaged UI without credentials, network, or orders."""
+    import re
     import ssl
     import tkinter as tk
     from unittest.mock import patch
@@ -102,8 +103,9 @@ def smoke_test():
     assert s167._macd_allowed({'confirmations':{'5m_macd_adverse':False}})
     assert not s167._macd_allowed({'confirmations':{'5m_macd_adverse':True}})
     sample=b1681._sanitize_runtime_text('V1.6.2要求4H同向：5m BOLL中轨/外轨在4H中性或逆向时禁止开仓；计划市价参考')
-    assert '5m BOLL' not in sample and '中轨' not in sample and '计划市价参考' not in sample
-    assert '15m BOLL外轨' in sample and '计划限价' in sample
+    assert re.search(r'(?<!1)5m BOLL', sample) is None
+    assert '中轨' not in sample and '计划市价参考' not in sample
+    assert '15m BOLL外轨' in sample and '4H Hard Gate' in sample and '计划限价' in sample
     sync=b1681._sanitize_runtime_text('只读查询暂时失败 /ws/v5/business:orders-algo：Algo实时状态暂未完成可信同步')
     assert sync.startswith('Algo状态同步中：') and '只读查询暂时失败' not in sync
     status_labels=dict(ui161._STATUS_ITEMS)
