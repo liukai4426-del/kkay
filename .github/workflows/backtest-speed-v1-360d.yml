@@ -1,0 +1,93 @@
+name: Backtest Speed V1 360D Benchmark
+
+on:
+  push:
+    branches: [research/backtest-speed-v1]
+    paths:
+      - research_backtest_data_cache.py
+      - run_v166_entry_expansion_4way_360d_fast.py
+      - .github/workflows/backtest-speed-v1-360d.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: accelerated-360d-regression-lock
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      BACKTEST_MARKET_CACHE: .backtest_cache
+      BACKTEST_WORKERS: '3'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Restore exact historical market cache
+        uses: actions/cache@v4
+        with:
+          path: .backtest_cache
+          key: kaytrade-okx-btc-360d-end-20260914-market-v1
+
+      - name: Materialize audited simulator
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+          git fetch --depth=1 origin research/v155-outer-bands-180d
+          git show FETCH_HEAD:research_v1544_cache_patch.py > research_v1544_cache_patch.py
+          git show FETCH_HEAD:research_v1544_180d_backtest.py > research_v1544_180d_backtest.py
+          git show FETCH_HEAD:run_v1544_180d_fixed.py > run_v1544_180d_fixed.py
+
+      - name: Compile and verify acceleration lock
+        run: |
+          python -m py_compile \
+            research_v146_backtest.py \
+            research_v1544_cache_patch.py \
+            research_v1544_180d_backtest.py \
+            run_v1544_180d_fixed.py \
+            v152_model.py v153_model.py v154_model.py \
+            v160_model.py v161_model.py v162_model.py v163_model.py v164_model.py v165_model.py \
+            run_v160_365d_2000u.py run_v165_1000d_2000u.py \
+            run_v166_entry_expansion_4way_360d.py \
+            research_backtest_data_cache.py \
+            run_v166_entry_expansion_4way_360d_fast.py
+          python - <<'PY'
+          import run_v166_entry_expansion_4way_360d_fast as f
+          import run_v166_entry_expansion_4way_360d as s
+          assert f.VARIANTS == s.VARIANTS
+          assert s.DAYS == 360
+          assert s.prod.ENTRY_WINDOW_MS == 300000
+          assert s.base.BE_ENABLED is False
+          print('PASS speed-v1 strategy lock: exact serial runner semantics retained')
+          PY
+
+      - name: Run accelerated 360D benchmark
+        run: time python run_v166_entry_expansion_4way_360d_fast.py
+
+      - name: Verify exact result regression and speed report
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          out=Path('backtest_output_v166_entry_expansion_4way_360d_fast')
+          c=json.loads((out/'comparison_360d_fast.json').read_text())
+          b=c['variants']['baseline']; t=c['variants']['threshold_5_5']
+          assert b['trades']==9 and b['wins']==4 and b['losses']==5
+          assert abs(b['net_pnl']-16.981453410167433)<1e-9
+          assert t['trades']==12 and t['wins']==6 and t['losses']==6
+          assert abs(t['net_pnl']-33.53256686124314)<1e-9
+          assert c['boll_signal_lifetime']=='5m exact'
+          print('SPEED_V1_RESULT')
+          print(json.dumps(c,ensure_ascii=False,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-BACKTEST-SPEED-V1-360D
+          path: backtest_output_v166_entry_expansion_4way_360d_fast/
+          if-no-files-found: error
+          retention-days: 30
