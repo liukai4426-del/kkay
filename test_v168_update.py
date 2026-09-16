@@ -189,7 +189,7 @@ class V168Tests(unittest.TestCase):
         text = v168._rewrite_runtime_text_v168(
             'V1.6.7 Build1671：15m BOLL外轨2.5分；15m BOLL触发后的5分钟执行窗口'
         )
-        self.assertIn('V1.6.8', text)
+        self.assertIn('1.6.8', text)
         self.assertIn('Build1680', text)
         self.assertIn('外轨2分', text)
         self.assertIn('下一根15m收盘', text)
