@@ -26,6 +26,7 @@ import v167_algo_sync_patch as a167
 import v168_update_patch as v168
 
 VERSION = "1.6.8"
+DISPLAY_VERSION = "V1.6.8"
 BUILD = "1681"
 
 _PREVIOUS_EVALUATE = model.evaluate
@@ -43,9 +44,18 @@ def _rewrite_runtime_text_v1681(data):
         return text
 
     # Some inherited rewriters already stripped the leading V. Normalize both
-    # "V1.x" and bare "1.x" version tokens, then enforce the current V prefix.
-    text = re.sub(r"(?<![A-Za-z0-9])V?1\.(?:[0-5]\.\d+|6\.[0-7])", VERSION, text)
-    text = re.sub(r"(?<![A-Za-z0-9V])1\.6\.8", VERSION, text)
+    # "V1.x" and bare "1.x" version tokens. Chinese characters directly after
+    # the version are valid, so numeric guards are used instead of a word boundary.
+    text = re.sub(
+        r"(?<![A-Za-z0-9])V?1\.(?:[0-5]\.\d+|6\.[0-8])(?![\d.])",
+        DISPLAY_VERSION,
+        text,
+    )
+    text = re.sub(
+        r"(?<![A-Za-z0-9V])1\.6\.8(?![\d.])",
+        DISPLAY_VERSION,
+        text,
+    )
     text = re.sub(
         r"Build\s*(?:1544|1551|1561|16[0-7]\d|1680|154(?:\.[0-9]+)?)",
         f"Build{BUILD}",
@@ -53,6 +63,8 @@ def _rewrite_runtime_text_v1681(data):
     )
 
     # Strict BOLL vocabulary: there is no active 5m BOLL or BOLL middle path.
+    # Canonicalize compounded legacy rewrites such as 115m/1115m BOLL first.
+    text = re.sub(r"(?<!\d)(?:1+)?15m\s+BOLL", "15m BOLL", text)
     text = re.sub(r"(?<!\d)5m\s+BOLL中轨\s*/\s*外轨", "15m BOLL外轨", text)
     text = re.sub(r"(?<!\d)5m\s+BOLL中轨", "15m BOLL外轨", text)
     text = re.sub(r"(?<!\d)5m\s+BOLL外轨", "15m BOLL外轨", text)
@@ -83,7 +95,7 @@ def _rewrite_runtime_text_v1681(data):
 
     text = re.sub(
         r"V1\.6\.8要求4H同向：15m BOLL外轨在4H中性或逆向时禁止开仓",
-        "V1.6.8 4H Hard Gate：4H必须与交易方向同向；中性/逆向禁止开仓",
+        "V1.6.8 4H Hard Gate：15m BOLL外轨要求4H同向；4H中性/逆向禁止开仓",
         text,
     )
 
