@@ -1,6 +1,8 @@
 import unittest
+from unittest.mock import patch
 
 from candles import expected_bar
+import exchange
 import v165_model as model
 import v165_update_patch as runtime
 
@@ -109,6 +111,98 @@ class V165ExecutionTests(unittest.TestCase):
         owner = DummyOwner(now_s)
         blockers = runtime._pre_submit_guard(owner, fresh_market(now_s, opp), valid_score(opp))
         self.assertTrue(any("1.20×" in item for item in blockers))
+
+
+class V165AlgoConnectionHotfixTests(unittest.TestCase):
+    @staticmethod
+    def bare_exchange():
+        x = exchange.Exchange.__new__(exchange.Exchange)
+        events = []
+        x.network_event = events.append
+        return x, events
+
+    def test_algo_read_gets_four_attempts_and_can_recover(self):
+        x, events = self.bare_exchange()
+        calls = []
+
+        def fake_once(method, path, params=None, private=False):
+            calls.append((method, path, dict(params or {}), private))
+            if len(calls) < 4:
+                raise exchange.NetworkError(
+                    "OKX错误码 51054；只读请求超时，不会下单",
+                    "51054", None, method, path,
+                )
+            return []
+
+        x._request_once = fake_once
+        with patch.object(runtime.time, "sleep", return_value=None):
+            rows = x.request(
+                "GET",
+                runtime._ALGO_PENDING_PATH,
+                {"instId": "BTC-USDT-SWAP", "ordType": "conditional"},
+                True,
+            )
+
+        self.assertEqual(rows, [])
+        self.assertEqual(len(calls), 4)
+        self.assertTrue(any("Algo Conditional" in item for item in events))
+        self.assertEqual(events[-1], "正常")
+
+    def test_algo_final_failure_reports_partial_interface_not_whole_connection(self):
+        x, events = self.bare_exchange()
+        calls = []
+
+        def always_fail(method, path, params=None, private=False):
+            calls.append(1)
+            raise exchange.NetworkError(
+                "OKX错误码 51054；只读请求超时，不会下单",
+                "51054", None, method, path,
+            )
+
+        x._request_once = always_fail
+        with patch.object(runtime.time, "sleep", return_value=None):
+            with self.assertRaises(exchange.NetworkError) as ctx:
+                x.request(
+                    "GET",
+                    runtime._ALGO_PENDING_PATH,
+                    {"instId": "BTC-USDT-SWAP", "ordType": "trigger"},
+                    True,
+                )
+
+        self.assertEqual(len(calls), 4)
+        self.assertIn("Algo Trigger 查询失败", str(ctx.exception))
+        self.assertEqual(events[-1], "已暂停：OKX部分只读接口异常（Algo Trigger）")
+
+    def test_algo_scan_queries_all_four_families_separately(self):
+        x, _events = self.bare_exchange()
+        seen = []
+
+        def fake_get(path, params=None, private=False):
+            self.assertEqual(path, runtime._ALGO_PENDING_PATH)
+            self.assertTrue(private)
+            seen.append(params["ordType"])
+            return [{"ordType": params["ordType"]}]
+
+        x.get = fake_get
+        rows = x.algos()
+        self.assertEqual(seen, ["oco", "conditional", "trigger", "move_order_stop"])
+        self.assertEqual([row["ordType"] for row in rows], seen)
+
+    def test_non_algo_read_keeps_original_three_attempt_policy(self):
+        x, events = self.bare_exchange()
+        calls = []
+
+        def always_fail(method, path, params=None, private=False):
+            calls.append(1)
+            raise exchange.NetworkError("连接超时；只读请求失败，不会下单", method=method, path=path)
+
+        x._request_once = always_fail
+        with patch.object(runtime.time, "sleep", return_value=None):
+            with self.assertRaises(exchange.NetworkError):
+                x.request("GET", "/api/v5/account/positions", {"instId": "BTC-USDT-SWAP"}, True)
+
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(events[-1], "已暂停：连接失败")
 
 
 if __name__ == "__main__":
