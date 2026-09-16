@@ -42,9 +42,10 @@ def _rewrite_runtime_text_v1681(data):
     if not isinstance(text, str):
         return text
 
-    # Runtime logs may originate in deep inherited layers. Old version/build
-    # labels are implementation history and must not leak into current status.
-    text = re.sub(r"V1\.(?:[0-5]\.\d+|6\.[0-7])", VERSION, text)
+    # Some inherited rewriters already stripped the leading V. Normalize both
+    # "V1.x" and bare "1.x" version tokens, then enforce the current V prefix.
+    text = re.sub(r"(?<![A-Za-z0-9])V?1\.(?:[0-5]\.\d+|6\.[0-7])", VERSION, text)
+    text = re.sub(r"(?<![A-Za-z0-9V])1\.6\.8", VERSION, text)
     text = re.sub(
         r"Build\s*(?:1544|1551|1561|16[0-7]\d|1680|154(?:\.[0-9]+)?)",
         f"Build{BUILD}",
@@ -80,15 +81,12 @@ def _rewrite_runtime_text_v1681(data):
     text = text.replace("已提交市价做多", "已提交限价做多")
     text = text.replace("已提交市价做空", "已提交限价做空")
 
-    # Normalize the exact inherited 4H sentence seen in the live run record.
     text = re.sub(
         r"V1\.6\.8要求4H同向：15m BOLL外轨在4H中性或逆向时禁止开仓",
         "V1.6.8 4H Hard Gate：4H必须与交易方向同向；中性/逆向禁止开仓",
         text,
     )
 
-    # Build1661 intentionally routes an untrusted Algo cache through the read-side
-    # fail-closed mechanism. This is a synchronization state, not a write failure.
     if (
         "Algo实时状态暂未完成可信同步" in text
         or ("只读查询暂时失败" in text and "/ws/v5/business:orders-algo" in text)
@@ -177,7 +175,6 @@ def _app_emit_v1681(self, kind, data):
 
     if isinstance(outgoing, str) and _is_algo_sync_text(outgoing):
         outgoing = _algo_sync_message(self)
-        # Expected read-side resync must not look like a terminal alarm.
         if str(outgoing_kind) == "alarm":
             outgoing_kind = "log"
     elif isinstance(outgoing, str) and status and not bool(status.get("trusted")):
@@ -219,13 +216,11 @@ def apply():
     if getattr(model, "_kaytrade_v168_build1681_applied", False):
         return
 
-    # Text-only wrappers around the already verified Build1680 strategy engine.
     model.evaluate = _evaluate_v1681
     model.execution_checks = _execution_checks_v1681
     runtime._pre_submit_guard = _pre_submit_guard_v1681
     runtime._rewrite_runtime_text = _rewrite_runtime_text_v1681
 
-    # Build identity only; strategy constants remain untouched.
     model.BUILD = BUILD
     runtime.BUILD = BUILD
     v168.BUILD = BUILD

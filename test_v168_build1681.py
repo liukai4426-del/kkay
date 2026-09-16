@@ -1,3 +1,4 @@
+import re
 import unittest
 from unittest.mock import patch
 
@@ -39,7 +40,7 @@ class V168Build1681Tests(unittest.TestCase):
         self.assertNotIn('V1.5.4', out)
         self.assertNotIn('V1.6.2', out)
         self.assertNotIn('V1.6.6', out)
-        self.assertNotIn('5m BOLL', out)
+        self.assertIsNone(re.search(r'(?<!\d)5m\s+BOLL', out))
         self.assertNotIn('中轨', out)
         self.assertNotIn('市价参考', out)
         self.assertNotIn('第5个1m', out)
@@ -106,7 +107,7 @@ class V168Build1681Tests(unittest.TestCase):
         text = str(payload)
         self.assertNotIn('V1.5.4', text)
         self.assertNotIn('V1.6.2', text)
-        self.assertNotIn('5m BOLL', text)
+        self.assertIsNone(re.search(r'(?<!\d)5m\s+BOLL', text))
         self.assertNotIn('中轨', text)
         self.assertNotIn('市价参考', text)
         self.assertIn('15m BOLL外轨', text)

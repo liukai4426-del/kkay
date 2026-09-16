@@ -54,6 +54,7 @@ apply_v168_build1681_patch()
 
 def smoke_test():
     """Exercise the packaged UI without credentials, network, or orders."""
+    import re
     import ssl
     import tkinter as tk
     from unittest.mock import patch
@@ -114,8 +115,9 @@ def smoke_test():
         'V1.6.6 Volume Hard Gate：5m信号K量能 1.89× ≥ 1.20×，禁止开仓'
     )
     normalized=b1681._rewrite_runtime_text_v1681(legacy)
-    assert '15m BOLL外轨' in normalized and '计划限价' in normalized and '第5分钟' in normalized
-    assert '5m BOLL' not in normalized and '中轨' not in normalized and '市价参考' not in normalized
+    assert 'V1.6.8' in normalized and '15m BOLL外轨' in normalized and '计划限价' in normalized and '第5分钟' in normalized
+    assert re.search(r'(?<!\d)5m\s+BOLL', normalized) is None
+    assert '中轨' not in normalized and '市价参考' not in normalized
     sync=b1681._rewrite_runtime_text_v1681(
         '只读查询暂时失败 /ws/v5/business:orders-algo：Algo实时状态暂未完成可信同步'
     )
@@ -149,7 +151,7 @@ def smoke_test():
         finally:
             root.destroy()
     Path(sys.argv[2]).write_text(
-        'PASS: KAYTRADE V1.6.8 Build1681 packaged UI/runtime; strategy is unchanged from Build1680, BOLL remains strict closed-15m outer-only with a 15m lifecycle, 4H alignment remains a +1 mandatory Hard Gate, 1H EMA9/26 remains +1 score, legacy 5m BOLL/middle-window/market-reference text is normalized, Algo cache resync is shown as synchronization rather than a generic read failure, and write ambiguity remains fail-closed.\n'
+        'PASS: KAYTRADE V1.6.8 Build1681 packaged UI/runtime; strategy is unchanged from Build1680, BOLL remains strict closed-15m outer-only with a 15m lifecycle, 4H alignment remains a +1 mandatory Hard Gate, 1H EMA9/EMA26 remains +1 score, legacy 5m BOLL/middle-window/market-reference text is normalized, Algo cache resync is shown as synchronization rather than a generic read failure, and write ambiguity remains fail-closed.\n'
     )
 
 
