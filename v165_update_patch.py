@@ -3,6 +3,7 @@
 - latest CLOSED candle only for 1m/5m/15m/1H/4H inputs;
 - 5m BOLL/RSI/Volume/KDJ signal package expires at the next 5m close;
 - dynamic timeframe freshness is checked again immediately before submit;
+- OKX pending-algo reads are isolated by algo family with precise retry/status reporting;
 - existing audited LIMIT / isolated leverage / structure / cost protections remain.
 """
 from __future__ import annotations
@@ -14,6 +15,7 @@ apply_previous()
 
 import app
 import engine
+import exchange
 from candles import expected_bar
 import v138_strategy_patch as v138
 import v152_strategy_patch as v152_runtime
@@ -50,6 +52,68 @@ v161._maybe_trigger_be = lambda owner: None
 
 _PREVIOUS_ARM = engine.Engine.arm
 _PREVIOUS_SUBMIT = v138._submit_initial
+_PREVIOUS_EXCHANGE_REQUEST = exchange.Exchange.request
+
+_ALGO_FAMILIES = (
+    ("oco", "Algo OCO"),
+    ("conditional", "Algo Conditional"),
+    ("trigger", "Algo Trigger"),
+    ("move_order_stop", "Algo Trailing Stop"),
+)
+_ALGO_FAMILY_LABELS = dict(_ALGO_FAMILIES)
+_ALGO_PENDING_PATH = "/api/v5/trade/orders-algo-pending"
+
+
+def _network_request_v165(self, method, path, params=None, private=False):
+    """Keep the audited request semantics, but isolate flaky pending-algo reads.
+
+    Trading writes are untouched and are still never retried.  Only the four
+    read-only pending-algo families receive one extra retry (4 total).  A final
+    failure remains fail-closed, but is reported as a partial read-interface
+    failure instead of incorrectly saying the whole OKX connection is down.
+    """
+    algo_type = str((params or {}).get("ordType") or "") if method == "GET" and path == _ALGO_PENDING_PATH else ""
+    algo_label = _ALGO_FAMILY_LABELS.get(algo_type, "")
+    attempts = 4 if algo_label else (3 if method == "GET" else 1)
+
+    for attempt in range(attempts):
+        try:
+            sent = time.time()
+            result = self._request_once(method, path, params, private)
+            self.last_timing = (sent, time.time())
+            self.network_event("正常")
+            return result
+        except exchange.NetworkError as exc:
+            if attempt + 1 == attempts:
+                if algo_label:
+                    self.network_event(f"已暂停：OKX部分只读接口异常（{algo_label}）")
+                    raise exchange.NetworkError(
+                        f"{algo_label} 查询失败：{exc}",
+                        getattr(exc, "code", ""),
+                        getattr(exc, "http_status", None),
+                        getattr(exc, "method", method),
+                        getattr(exc, "path", path),
+                    ) from None
+                self.network_event("已暂停：连接失败")
+                raise
+            if algo_label:
+                self.network_event(f"重连中：{algo_label} 只读查询 {attempt + 2}/{attempts}")
+            else:
+                self.network_event(f"重连中：只读请求 {attempt + 2}/{attempts}")
+            time.sleep(2 ** attempt)
+
+
+def _algos_v165(self):
+    """Read each pending-algo family separately; any unknown family state blocks unlock."""
+    rows = []
+    for ord_type, _label in _ALGO_FAMILIES:
+        part = self.get(
+            _ALGO_PENDING_PATH,
+            {"instId": engine.INSTRUMENT, "ordType": ord_type},
+            True,
+        )
+        rows.extend(part)
+    return rows
 
 
 def _owner_now_ms(owner):
@@ -255,7 +319,10 @@ def apply():
         return
     engine.Engine.arm = _arm_v165
     v138._submit_initial = _submit_v165
+    exchange.Exchange.request = _network_request_v165
+    exchange.Exchange.algos = _algos_v165
     engine.Engine._kaytrade_v165_applied = True
+    exchange.Exchange._kaytrade_v165_network_applied = True
     app.App._kaytrade_v165_runtime_applied = True
 
 
