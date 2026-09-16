@@ -1,9 +1,11 @@
 """V1.6.5 macOS keep-awake integration.
 
-When the user authorizes automatic trading, keep the Mac awake so the local
-engine can continue refreshing markets and evaluating entries. The display is
-allowed to sleep. Stopping automatic trading or quitting releases the assertion.
+Automatic trading keeps the Mac system awake while allowing the display to
+sleep. The assertion is started only after a real arm task is accepted, and it
+is released on explicit Stop/Quit. `-w <pid>` also guarantees release if the
+application process exits unexpectedly.
 """
+import os
 import subprocess
 import sys
 
@@ -27,7 +29,7 @@ def _start_keepawake(self):
         return True
     try:
         proc = subprocess.Popen(
-            ['/usr/bin/caffeinate', '-i', '-m'],
+            ['/usr/bin/caffeinate', '-i', '-m', '-w', str(os.getpid())],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -74,7 +76,7 @@ def apply():
         return
 
     original_init = app.App.__init__
-    original_arm = app.App.arm
+    original_submit = app.App.submit
     original_stop = app.App.stop
     original_quit = app.App.quit
 
@@ -82,10 +84,13 @@ def apply():
         original_init(self, *args, **kwargs)
         self._v165_keepawake_proc = None
 
-    def app_arm(self, *args, **kwargs):
-        result = original_arm(self, *args, **kwargs)
-        engine_obj = getattr(self, 'engine', None)
-        if engine_obj is not None and not getattr(self, 'network_paused', False):
+    def app_submit(self, kind, data=None):
+        was_busy = bool(getattr(self, 'busy', False))
+        result = original_submit(self, kind, data)
+        # `arm` reaches submit only after the V1.6.5 confirmation dialog was
+        # accepted. If submit rejected the action because another operation was
+        # already running, do not start the assertion.
+        if kind == 'arm' and not was_busy and bool(getattr(self, 'busy', False)):
             _start_keepawake(self)
         return result
 
@@ -104,7 +109,7 @@ def apply():
         return result
 
     app.App.__init__ = app_init
-    app.App.arm = app_arm
+    app.App.submit = app_submit
     app.App.stop = app_stop
     app.App.quit = app_quit
     app.App._kaytrade_v165_keepawake_applied = True
