@@ -5,6 +5,7 @@ Uses the repaired/proven V1.6.8 R2 historical adapter and changes only the
 historical window/output labeling to 1000 days. Strategy variables remain
 identical to the 180D/360D/720D R2 tests.
 """
+# Standalone 1000D execution entry; no coupling to shorter-window workflows.
 from __future__ import annotations
 
 import json
