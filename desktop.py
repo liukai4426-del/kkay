@@ -48,6 +48,8 @@ from v167_15m_boll_only_fix import apply as apply_v167_15m_boll_only_fix
 apply_v167_15m_boll_only_fix()
 from v168_update_patch import apply as apply_v168_update_patch
 apply_v168_update_patch()
+from v168_build1681_patch import apply as apply_v168_build1681_patch
+apply_v168_build1681_patch()
 
 
 def smoke_test():
@@ -67,6 +69,7 @@ def smoke_test():
     import v167_algo_sync_patch as a167
     import v167_15m_boll_only_fix as b1671
     import v168_update_patch as v168
+    import v168_build1681_patch as b1681
     assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
     assert getattr(exchange.Exchange,'_kaytrade_v165_algo_fallback_applied',False)
     assert getattr(exchange.Exchange,'_kaytrade_v165_runtime_network_state_applied',False)
@@ -85,8 +88,11 @@ def smoke_test():
     assert getattr(model,'_kaytrade_v167_15m_boll_only_applied',False)
     assert getattr(model,'_kaytrade_v168_applied',False)
     assert getattr(app.App,'_kaytrade_v168_applied',False)
-    assert v168.VERSION == '1.6.8' and v168.BUILD == '1680'
-    assert model.VERSION == '1.6.8' and model.BUILD == '1680'
+    assert getattr(model,'_kaytrade_v168_build1681_applied',False)
+    assert getattr(app.App,'_kaytrade_v168_build1681_applied',False)
+    assert v168.VERSION == '1.6.8' and v168.BUILD == '1681'
+    assert b1681.VERSION == '1.6.8' and b1681.BUILD == '1681'
+    assert model.VERSION == '1.6.8' and model.BUILD == '1681'
     assert model.THRESHOLD == 6.0
     assert model.ENTRY_WINDOW_MS == 900000
     assert model.BOLL_OUTER_SCORE == 2.0
@@ -95,6 +101,11 @@ def smoke_test():
     assert signal_core.boll_entry_signal is b1671._signal_adapter_15m_only
     assert s167._macd_allowed({'confirmations':{'5m_macd_adverse':False}})
     assert not s167._macd_allowed({'confirmations':{'5m_macd_adverse':True}})
+    sample=b1681._sanitize_runtime_text('V1.6.2要求4H同向：5m BOLL中轨/外轨在4H中性或逆向时禁止开仓；计划市价参考')
+    assert '5m BOLL' not in sample and '中轨' not in sample and '计划市价参考' not in sample
+    assert '15m BOLL外轨' in sample and '计划限价' in sample
+    sync=b1681._sanitize_runtime_text('只读查询暂时失败 /ws/v5/business:orders-algo：Algo实时状态暂未完成可信同步')
+    assert sync.startswith('Algo状态同步中：') and '只读查询暂时失败' not in sync
     status_labels=dict(ui161._STATUS_ITEMS)
     assert status_labels['boll']=='15m BOLL外轨触发'
     assert status_labels['signal_window']=='15m BOLL信号有效'
@@ -107,7 +118,7 @@ def smoke_test():
         try:
             with patch.object(app.App,'worker',lambda self:None), patch.object(app.messagebox,'showerror',side_effect=AssertionError):
                 ui=app.App(root,Path(folder)); root.update()
-                assert 'KAYTRADE' in root.title() and '1.6.8' in root.title() and '1680' in root.title()
+                assert 'KAYTRADE' in root.title() and '1.6.8' in root.title() and '1681' in root.title()
                 assert ui.mode.get() == 'OKX模拟盘'
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
@@ -130,7 +141,7 @@ def smoke_test():
         finally:
             root.destroy()
     Path(sys.argv[2]).write_text(
-        'PASS: KAYTRADE V1.6.8 Build1680 packaged UI/runtime; BOLL remains strict closed-15m outer-only and scores 2 points, each trigger stays valid until the next 15m close, 4H alignment is a +1 mandatory Hard Gate, 1H EMA9/26 trend adds +1 score without becoming a Hard Gate, 5m remains RSI/MACD/Volume confirmation only, MACD adverse-only and KDJ removal are preserved, Algo REST+WebSocket synchronization remains active, and write ambiguity remains fail-closed.\n'
+        'PASS: KAYTRADE V1.6.8 Build1681 packaged UI/runtime; strategy semantics remain Build1680-equivalent, BOLL remains strict closed-15m outer-only and scores 2 points, each trigger stays valid until the next 15m close, 4H alignment is a +1 mandatory Hard Gate, 1H EMA9/26 trend adds +1 score, legacy 5m-BOLL/middle-band and MARKET-entry text is sanitized, expected Algo cache resynchronization is shown as sync-in-progress rather than a false query-failure alarm, legitimate 5m RSI/MACD/Volume confirmations remain unchanged, and write ambiguity remains fail-closed.\n'
     )
 
 
