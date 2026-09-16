@@ -1,0 +1,121 @@
+name: Backtest KAYTRADE V1.6.8 1000D 2000U
+
+on:
+  push:
+    branches: [research/v168-1000d-backtest]
+    paths:
+      - run_v168_180d_backtest.py
+      - v168_update_patch.py
+      - v167_15m_boll_only_fix.py
+      - v167_strategy_patch.py
+      - v165_model.py
+      - v164_model.py
+      - .github/workflows/backtest-v168-1000d.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      BACKTEST_MARKET_CACHE: .backtest_cache
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install V1.6.8 runtime dependencies
+        run: python -m pip install 'websocket-client==1.8.0' 'certifi==2025.8.3'
+
+      - name: Restore 1000D BTC market cache
+        uses: actions/cache@v4
+        with:
+          path: .backtest_cache
+          key: kaytrade-v168-okx-btc-1000d-end-20260914-market-v1
+          restore-keys: |
+            kaytrade-v168-okx-btc-1000d-
+            kaytrade-okx-btc-1000d-
+            kaytrade-okx-btc-
+
+      - name: Materialize audited historical simulator
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+          git fetch --depth=1 origin research/v155-outer-bands-180d
+          git show FETCH_HEAD:research_v1544_cache_patch.py > research_v1544_cache_patch.py
+          git show FETCH_HEAD:research_v1544_180d_backtest.py > research_v1544_180d_backtest.py
+          git show FETCH_HEAD:run_v1544_180d_fixed.py > run_v1544_180d_fixed.py
+          git fetch --depth=1 origin research/v166-15m-boll-macd-adverse-only-360d-fast
+          git show FETCH_HEAD:run_v160_365d_2000u.py > run_v160_365d_2000u.py
+          git show FETCH_HEAD:run_v165_1000d_2000u.py > run_v165_1000d_2000u.py
+          git show FETCH_HEAD:research_backtest_data_cache.py > research_backtest_data_cache.py
+
+      - name: Materialize exact 1000D V1.6.8 runner
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          src=Path('run_v168_180d_backtest.py').read_text(encoding='utf-8')
+          src=src.replace('180D','1000D').replace('180d','1000d')
+          src=src.replace('DAYS = 180','DAYS = 1000')
+          src=src.replace('assert DAYS == 180','assert DAYS == 1000')
+          src=src.replace('(FIXED_END - FIXED_START).days == 180','(FIXED_END - FIXED_START).days == 1000')
+          Path('run_v168_1000d_backtest.py').write_text(src, encoding='utf-8')
+          PY
+
+      - name: Compile and verify V1.6.8 1000D strategy lock
+        run: |
+          python -m py_compile \
+            research_v146_backtest.py research_v1544_cache_patch.py research_v1544_180d_backtest.py \
+            run_v1544_180d_fixed.py run_v160_365d_2000u.py run_v165_1000d_2000u.py \
+            research_backtest_data_cache.py run_v168_1000d_backtest.py \
+            v168_update_patch.py v167_15m_boll_only_fix.py v167_strategy_patch.py \
+            v165_model.py v164_model.py
+          python - <<'PY'
+          import run_v168_1000d_backtest as x
+          x.configure()
+          x.verify_lock()
+          assert x.DAYS == 1000
+          assert (x.FIXED_END-x.FIXED_START).days == 1000
+          assert x.production.VERSION == '1.6.8'
+          assert x.production.BUILD == '1680'
+          assert x.production.ENTRY_WINDOW_MS == 900000
+          assert x.production.BOLL_OUTER_SCORE == 2.0
+          assert x.production.BOLL_TRIGGER_TIMEFRAME == '15m'
+          assert x.production.FIVE_MINUTE_BOLL_ENABLED is False
+          assert x.v168.EMA_FAST == 9 and x.v168.EMA_SLOW == 26
+          print('PASS: exact V1.6.8 Build1680 strategy lock, 1000D replay')
+          PY
+
+      - name: Run V1.6.8 1000D backtest
+        run: time python run_v168_1000d_backtest.py
+
+      - name: Verify result payload
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('backtest_output_v168_1000d/result_v168_1000d.json')
+          d=json.loads(p.read_text())
+          assert d['window']['days'] == 1000
+          s=d['strategy_lock']
+          assert s['version'] == '1.6.8' and s['build'] == '1680'
+          assert s['boll_signal_lifetime_ms'] == 900000
+          assert s['boll_outer_score'] == 2.0
+          assert s['five_minute_boll_enabled'] is False
+          assert s['score_threshold'] == 6.0
+          assert s['break_even'] is False and s['early_exit'] is False
+          assert int(d['metrics']['trades'] or 0) > 0, 'ANOMALY: zero trades; reject output'
+          print(json.dumps(d,ensure_ascii=False,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.6.8-1000D-2000U
+          path: backtest_output_v168_1000d/
+          if-no-files-found: error
+          retention-days: 30
