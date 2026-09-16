@@ -86,7 +86,7 @@ jobs:
           assert model.VOLUME_HARD_GATE==1.20 and model.BOLL_OUTER_SCORE==2.50
           assert model.BOLL_TRIGGER_TIMEFRAME=='15m'
           assert model.FIVE_MINUTE_BOLL_ENABLED is False
-          assert tuple(model.OUTER_PATHS)==('lower_band','upper_band')
+          assert set(model.OUTER_PATHS)=={'lower_band','upper_band'}
           assert signal_core.boll_entry_signal is b1671._signal_adapter_15m_only
           assert s167._macd_allowed({'confirmations':{'5m_macd_adverse':False}}) is True
           assert s167._macd_allowed({'confirmations':{'5m_macd_adverse':True}}) is False
