@@ -1,4 +1,4 @@
-name: Build KAYTRADE Intel Mac 1.6.8 Build1680
+name: Build KAYTRADE Intel Mac 1.6.8 Build1681
 
 on:
   push:
@@ -19,7 +19,7 @@ jobs:
           python-version: '3.13'
       - name: Install V1.6.8 runtime test dependencies
         run: python -m pip install 'websocket-client==1.8.0' 'certifi==2025.8.3'
-      - name: Compile V1.6.8 Build1680
+      - name: Compile V1.6.8 Build1681
         run: |
           python -m py_compile \
             v160_model.py v160_update_patch.py v161_model.py v161_update_patch.py v162_model.py v162_update_patch.py \
@@ -27,8 +27,10 @@ jobs:
             v165_model.py v165_update_patch.py v165_algo_fallback_patch.py v165_runtime_network_patch.py \
             v165_sleep_resume_patch.py v165_keepawake_patch.py v165_ui_patch.py v165_15m_outer_patch.py \
             v166_ui_patch.py v166_readonly_resilience_patch.py \
-            v167_strategy_patch.py v167_algo_sync_patch.py v167_15m_boll_only_fix.py v168_update_patch.py \
-            test_v167_strategy.py test_v167_algo_sync.py test_v167_15m_boll_only_fix.py test_v168_update.py desktop.py
+            v167_strategy_patch.py v167_algo_sync_patch.py v167_15m_boll_only_fix.py \
+            v168_update_patch.py v168_build1681_patch.py \
+            test_v167_strategy.py test_v167_algo_sync.py test_v167_15m_boll_only_fix.py \
+            test_v168_update.py test_v168_build1681.py desktop.py
       - name: Preserved strategy/runtime regressions
         run: |
           python -m unittest -v test_engine
@@ -60,9 +62,11 @@ jobs:
           python -m unittest -v test_v167_strategy
           python -m unittest -v test_v167_algo_sync
           python -m unittest -v test_v167_15m_boll_only_fix
-      - name: V1.6.8 regressions
+      - name: V1.6.8 Build1680 base regressions
         run: python -m unittest -v test_v168_update
-      - name: Verify V1.6.8 Build1680 semantic lock
+      - name: V1.6.8 Build1681 runtime/log regressions
+        run: python -m unittest -v test_v168_build1681
+      - name: Verify V1.6.8 Build1681 semantic lock
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -75,10 +79,12 @@ jobs:
           import v165_model as model
           import v167_15m_boll_only_fix as b1671
           import v168_update_patch as v168
+          import v168_build1681_patch as b1681
           spec=Path('OKXLocal.spec').read_text()
           desktop=Path('desktop.py').read_text()
-          assert v168.VERSION=='1.6.8' and v168.BUILD=='1680'
-          assert model.VERSION=='1.6.8' and model.BUILD=='1680'
+          assert b1681.VERSION=='1.6.8' and b1681.BUILD=='1681'
+          assert v168.VERSION=='1.6.8' and v168.BUILD=='1681'
+          assert model.VERSION=='1.6.8' and model.BUILD=='1681'
           assert model.THRESHOLD==6.0
           assert model.ENTRY_WINDOW_MS==900000 and v164.ENTRY_WINDOW_MS==900000
           assert model.BOLL_OUTER_SCORE==2.0 and v164.BOLL_OUTER_SCORE==2.0
@@ -91,12 +97,24 @@ jobs:
           assert labels['ema1h']=='1H EMA9/26趋势'
           assert getattr(exchange.Exchange,'_kaytrade_v167_algo_sync_applied',False)
           assert getattr(engine.Engine,'_kaytrade_v167_algo_sync_applied',False)
-          assert getattr(app.App,'_kaytrade_v168_applied',False)
-          assert getattr(model,'_kaytrade_v168_applied',False)
+          assert getattr(app.App,'_kaytrade_v168_build1681_applied',False)
+          assert getattr(model,'_kaytrade_v168_build1681_applied',False)
           assert "CFBundleShortVersionString': '1.6.8'" in spec
-          assert "CFBundleVersion': '1680'" in spec
-          assert 'v168_update_patch' in desktop
-          print('PASS Build1680: strict 15m BOLL source, 15m lifecycle, BOLL=2, 4H aligned +1 Hard Gate, 1H EMA9/26 +1 score')
+          assert "CFBundleVersion': '1681'" in spec
+          assert 'v168_build1681_patch' in desktop
+          legacy=(
+              'V1.5.4未开仓；BOLL信号执行窗口 · 第5个1m｜计划市价参考 100000；'
+              'V1.6.2要求4H同向：5m BOLL中轨/外轨在4H中性或逆向时禁止开仓；'
+              'V1.6.6 Volume Hard Gate：5m信号K量能 1.89× ≥ 1.20×，禁止开仓'
+          )
+          normalized=b1681._rewrite_runtime_text_v1681(legacy)
+          assert '15m BOLL外轨' in normalized and '计划限价' in normalized and '第5分钟' in normalized
+          assert '5m BOLL' not in normalized and '中轨' not in normalized and '市价参考' not in normalized
+          sync=b1681._rewrite_runtime_text_v1681(
+              '只读查询暂时失败 /ws/v5/business:orders-algo：Algo实时状态暂未完成可信同步'
+          )
+          assert 'Algo状态同步中' in sync and '只读查询暂时失败' not in sync
+          print('PASS Build1681: Build1680 strategy unchanged; legacy runtime text normalized and Algo resync copy repaired')
           PY
 
   build:
@@ -126,37 +144,37 @@ jobs:
           python -m unittest -v test_v167_algo_sync
           python -m unittest -v test_v167_15m_boll_only_fix
           python -m unittest -v test_v168_update
+          python -m unittest -v test_v168_build1681
       - run: python build_icon.py
       - run: python -m PyInstaller --noconfirm OKXLocal.spec
       - name: Verify Intel bundle and metadata
         run: |
           python verify_bundle.py
           /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1.6.8'
-          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1680'
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1681'
           codesign --verify --deep --strict dist/KAYTRADE.app
-      - name: Packaged V1.6.8 Build1680 UI/runtime smoke test
+      - name: Packaged V1.6.8 Build1681 UI/runtime smoke test
         run: |
           TMPDIR_CHECK="$(mktemp -d)"
           dist/KAYTRADE.app/Contents/MacOS/KAYTRADE --smoke-test "$TMPDIR_CHECK/smoke.txt"
           cat "$TMPDIR_CHECK/smoke.txt"
-          grep 'V1.6.8 Build1680' "$TMPDIR_CHECK/smoke.txt"
-          grep 'BOLL remains strict closed-15m outer-only and scores 2 points' "$TMPDIR_CHECK/smoke.txt"
-          grep 'valid until the next 15m close' "$TMPDIR_CHECK/smoke.txt"
-          grep '4H alignment is a +1 mandatory Hard Gate' "$TMPDIR_CHECK/smoke.txt"
-          grep '1H EMA9/26 trend adds +1 score' "$TMPDIR_CHECK/smoke.txt"
+          grep 'V1.6.8 Build1681' "$TMPDIR_CHECK/smoke.txt"
+          grep 'strategy is unchanged from Build1680' "$TMPDIR_CHECK/smoke.txt"
+          grep 'legacy 5m BOLL/middle-window/market-reference text is normalized' "$TMPDIR_CHECK/smoke.txt"
+          grep 'Algo cache resync is shown as synchronization rather than a generic read failure' "$TMPDIR_CHECK/smoke.txt"
           grep 'write ambiguity remains fail-closed' "$TMPDIR_CHECK/smoke.txt"
       - name: Create installer
         run: |
           mkdir -p installer
           ditto dist/KAYTRADE.app installer/KAYTRADE.app
-          cp RELEASE-1.6.8-B1680.md installer/RELEASE-1.6.8-B1680.md
-          printf 'KAYTRADE V1.6.8 Build1680\n15m BOLL outer-only = 2 points and remains valid until the next 15m candle closes. 4H aligned = +1 and mandatory Hard Gate; neutral/opposite blocks entry. 1H EMA9/26 trend = +1 auxiliary score. Existing MACD adverse-only, KDJ removal, RSI/Volume gates, Algo synchronization and write-safety protections remain.\n' > installer/RELEASE-1.6.8-B1680.txt
-          hdiutil create -volname 'KAYTRADE 1.6.8' -srcfolder installer -ov -format UDZO KAYTRADE-1.6.8-Intel-build1680.dmg
+          cp RELEASE-1.6.8-B1681.md installer/RELEASE-1.6.8-B1681.md
+          printf 'KAYTRADE V1.6.8 Build1681\nNo strategy changes from Build1680. Runtime/log normalization removes legacy 5m BOLL middle/outer and old minute-window wording, LIMIT reference copy is corrected, and expected Algo cache resynchronization is shown as synchronization with diagnostic detail instead of a generic read-query failure. All existing fail-closed entry/write protections remain.\n' > installer/RELEASE-1.6.8-B1681.txt
+          hdiutil create -volname 'KAYTRADE 1.6.8' -srcfolder installer -ov -format UDZO KAYTRADE-1.6.8-Intel-build1681.dmg
       - uses: actions/upload-artifact@v4
         with:
-          name: KAYTRADE-1.6.8-Intel-build1680
+          name: KAYTRADE-1.6.8-Intel-build1681
           path: |
-            KAYTRADE-1.6.8-Intel-build1680.dmg
-            installer/RELEASE-1.6.8-B1680.md
-            installer/RELEASE-1.6.8-B1680.txt
+            KAYTRADE-1.6.8-Intel-build1681.dmg
+            installer/RELEASE-1.6.8-B1681.md
+            installer/RELEASE-1.6.8-B1681.txt
           if-no-files-found: error

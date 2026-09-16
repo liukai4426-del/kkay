@@ -48,6 +48,8 @@ from v167_15m_boll_only_fix import apply as apply_v167_15m_boll_only_fix
 apply_v167_15m_boll_only_fix()
 from v168_update_patch import apply as apply_v168_update_patch
 apply_v168_update_patch()
+from v168_build1681_patch import apply as apply_v168_build1681_patch
+apply_v168_build1681_patch()
 
 
 def smoke_test():
@@ -67,6 +69,7 @@ def smoke_test():
     import v167_algo_sync_patch as a167
     import v167_15m_boll_only_fix as b1671
     import v168_update_patch as v168
+    import v168_build1681_patch as b1681
     assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
     assert getattr(exchange.Exchange,'_kaytrade_v165_algo_fallback_applied',False)
     assert getattr(exchange.Exchange,'_kaytrade_v165_runtime_network_state_applied',False)
@@ -85,8 +88,11 @@ def smoke_test():
     assert getattr(model,'_kaytrade_v167_15m_boll_only_applied',False)
     assert getattr(model,'_kaytrade_v168_applied',False)
     assert getattr(app.App,'_kaytrade_v168_applied',False)
-    assert v168.VERSION == '1.6.8' and v168.BUILD == '1680'
-    assert model.VERSION == '1.6.8' and model.BUILD == '1680'
+    assert getattr(model,'_kaytrade_v168_build1681_applied',False)
+    assert getattr(app.App,'_kaytrade_v168_build1681_applied',False)
+    assert b1681.VERSION == '1.6.8' and b1681.BUILD == '1681'
+    assert v168.VERSION == '1.6.8' and v168.BUILD == '1681'
+    assert model.VERSION == '1.6.8' and model.BUILD == '1681'
     assert model.THRESHOLD == 6.0
     assert model.ENTRY_WINDOW_MS == 900000
     assert model.BOLL_OUTER_SCORE == 2.0
@@ -102,12 +108,24 @@ def smoke_test():
     assert status_labels['ema1h']=='1H EMA9/26趋势'
     assert status_labels['macd_clean']=='MACD非逆向'
     assert status_labels['rsi_gate']=='5m RSI 30–70'
+    legacy=(
+        'V1.5.4未开仓；BOLL信号执行窗口 · 第5个1m｜计划市价参考 100000；'
+        'V1.6.2要求4H同向：5m BOLL中轨/外轨在4H中性或逆向时禁止开仓；'
+        'V1.6.6 Volume Hard Gate：5m信号K量能 1.89× ≥ 1.20×，禁止开仓'
+    )
+    normalized=b1681._rewrite_runtime_text_v1681(legacy)
+    assert '15m BOLL外轨' in normalized and '计划限价' in normalized and '第5分钟' in normalized
+    assert '5m BOLL' not in normalized and '中轨' not in normalized and '市价参考' not in normalized
+    sync=b1681._rewrite_runtime_text_v1681(
+        '只读查询暂时失败 /ws/v5/business:orders-algo：Algo实时状态暂未完成可信同步'
+    )
+    assert 'Algo状态同步中' in sync and '只读查询暂时失败' not in sync
     with tempfile.TemporaryDirectory(prefix='kaytrade-ui-check-') as folder:
         root=tk.Tk()
         try:
             with patch.object(app.App,'worker',lambda self:None), patch.object(app.messagebox,'showerror',side_effect=AssertionError):
                 ui=app.App(root,Path(folder)); root.update()
-                assert 'KAYTRADE' in root.title() and '1.6.8' in root.title() and '1680' in root.title()
+                assert 'KAYTRADE' in root.title() and '1.6.8' in root.title() and '1681' in root.title()
                 assert ui.mode.get() == 'OKX模拟盘'
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
@@ -115,6 +133,7 @@ def smoke_test():
                 assert getattr(ui,'_v166_ui_ready',False)
                 assert getattr(ui,'_v167_strategy_ui_ready',False)
                 assert getattr(ui,'_v168_strategy_ui_ready',False)
+                assert getattr(ui,'_v168_build1681_ready',False)
                 label=getattr(ui,'_v168_version_label',None)
                 if label is not None:
                     assert '1.6.8' in str(label.cget('text'))
@@ -130,7 +149,7 @@ def smoke_test():
         finally:
             root.destroy()
     Path(sys.argv[2]).write_text(
-        'PASS: KAYTRADE V1.6.8 Build1680 packaged UI/runtime; BOLL remains strict closed-15m outer-only and scores 2 points, each trigger stays valid until the next 15m close, 4H alignment is a +1 mandatory Hard Gate, 1H EMA9/26 trend adds +1 score without becoming a Hard Gate, 5m remains RSI/MACD/Volume confirmation only, MACD adverse-only and KDJ removal are preserved, Algo REST+WebSocket synchronization remains active, and write ambiguity remains fail-closed.\n'
+        'PASS: KAYTRADE V1.6.8 Build1681 packaged UI/runtime; strategy is unchanged from Build1680, BOLL remains strict closed-15m outer-only with a 15m lifecycle, 4H alignment remains a +1 mandatory Hard Gate, 1H EMA9/26 remains +1 score, legacy 5m BOLL/middle-window/market-reference text is normalized, Algo cache resync is shown as synchronization rather than a generic read failure, and write ambiguity remains fail-closed.\n'
     )
 
 
