@@ -5,6 +5,7 @@ from candles import expected_bar
 import exchange
 import v165_model as model
 import v165_update_patch as runtime
+import v165_algo_fallback_patch as algo_fallback
 
 
 class DummyStore:
@@ -203,6 +204,68 @@ class V165AlgoConnectionHotfixTests(unittest.TestCase):
 
         self.assertEqual(len(calls), 3)
         self.assertEqual(events[-1], "已暂停：连接失败")
+
+
+class V165AlgoAccountFallbackTests(unittest.TestCase):
+    @staticmethod
+    def bare_exchange():
+        x = exchange.Exchange.__new__(exchange.Exchange)
+        events = []
+        x.network_event = events.append
+        return x, events
+
+    def test_51054_precise_trigger_falls_back_to_account_scope_and_filters_btc(self):
+        x, events = self.bare_exchange()
+        calls = []
+
+        def fake_get(path, params=None, private=False):
+            params = dict(params or {})
+            calls.append(params)
+            self.assertEqual(path, runtime._ALGO_PENDING_PATH)
+            self.assertTrue(private)
+            if params.get("instId") == "BTC-USDT-SWAP":
+                raise exchange.NetworkError(
+                    "Algo Trigger 查询失败：OKX错误码 51054",
+                    "51054", None, "GET", path,
+                )
+            return [
+                {"instId": "BTC-USDT-SWAP", "algoId": "btc-1"},
+                {"instId": "ETH-USDT-SWAP", "algoId": "eth-1"},
+            ]
+
+        x.get = fake_get
+        rows = algo_fallback._family_read(x, "trigger", "Algo Trigger")
+        self.assertEqual([row["algoId"] for row in rows], ["btc-1"])
+        self.assertEqual(calls[0], {"instId": "BTC-USDT-SWAP", "ordType": "trigger"})
+        self.assertEqual(calls[1], {"ordType": "trigger"})
+        self.assertTrue(any("账户级只读回退" in item for item in events))
+
+    def test_non_51054_does_not_bypass_precise_failure(self):
+        x, _events = self.bare_exchange()
+        calls = []
+
+        def fake_get(path, params=None, private=False):
+            calls.append(dict(params or {}))
+            raise exchange.NetworkError("网络连接失败", "", None, "GET", path)
+
+        x.get = fake_get
+        with self.assertRaises(exchange.NetworkError):
+            algo_fallback._family_read(x, "trigger", "Algo Trigger")
+        self.assertEqual(len(calls), 1)
+
+    def test_account_fallback_missing_instid_fails_closed(self):
+        x, _events = self.bare_exchange()
+
+        def fake_get(path, params=None, private=False):
+            params = dict(params or {})
+            if "instId" in params:
+                raise exchange.NetworkError("OKX 51054", "51054", None, "GET", path)
+            return [{"algoId": "unknown-instrument"}]
+
+        x.get = fake_get
+        with self.assertRaises(exchange.APIError) as ctx:
+            algo_fallback._family_read(x, "trigger", "Algo Trigger")
+        self.assertIn("无法安全过滤", str(ctx.exception))
 
 
 if __name__ == "__main__":
