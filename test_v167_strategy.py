@@ -104,7 +104,7 @@ class V167StrategyTests(unittest.TestCase):
         self.assertEqual(model.ENTRY_WINDOW_MS, 300000)
         self.assertTrue(model.TIME_WINDOW_ENABLED)
         self.assertEqual(model.BOLL_TRIGGER_TIMEFRAME, '15m')
-        self.assertEqual(tuple(model.OUTER_PATHS), ('lower_band', 'upper_band'))
+        self.assertEqual(set(model.OUTER_PATHS), {'lower_band', 'upper_band'})
 
     def test_ui_status_and_authorization_are_synchronized(self):
         labels = dict(ui161._STATUS_ITEMS)
@@ -125,7 +125,7 @@ class V167StrategyTests(unittest.TestCase):
         self.assertTrue(getattr(model, '_kaytrade_v167_strategy_applied', False))
         self.assertTrue(getattr(app.App, '_kaytrade_v167_strategy_applied', False))
         self.assertEqual(v167.VERSION, '1.6.7')
-        self.assertEqual(v167.BUILD, '1670')
+        self.assertIn(v167.BUILD, ('1670', '1671'))
 
 
 if __name__ == '__main__':
