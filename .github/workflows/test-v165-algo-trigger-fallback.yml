@@ -1,0 +1,28 @@
+name: Test V1.6.5 Algo Trigger Fallback
+
+on:
+  push:
+    branches: [hotfix/v165-algo-trigger-fallback-final2]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile hotfix
+        run: python -m py_compile v165_update_patch.py v165_algo_fallback_patch.py test_v165_execution.py desktop.py
+      - name: V1.6.5 execution and fallback tests
+        run: python -m unittest -v test_v165_execution
+      - name: Preserved core regressions
+        run: |
+          python -m unittest -v test_v165_update
+          python -m unittest -v test_v165_ui
+          python -m unittest -v test_engine
