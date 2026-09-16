@@ -15,6 +15,7 @@ import v165_update_patch as runtime
 import v168_update_patch as v168
 
 VERSION = "1.6.8"
+DISPLAY_VERSION = "V1.6.8"
 BUILD = "1681"
 
 _PREVIOUS_APP_EMIT = app.App.emit
@@ -42,16 +43,17 @@ def _sanitize_runtime_text(data):
             "Final Entry Guard。"
         )
 
-    # Chinese characters are Unicode word characters, so \b cannot be used at
-    # the end of a version token such as "V1.5.4未开仓". Use numeric guards.
+    # Final canonical pass over version labels. Chinese text directly following
+    # a version token is valid, so numeric lookarounds are used instead of \b.
     text = re.sub(
         r"(?<![A-Za-z0-9])V?1\.(?:[0-5]\.\d+|6\.[0-8])(?![\d.])",
-        VERSION,
+        DISPLAY_VERSION,
         text,
     )
 
-    # Deep legacy rewrite layers can repeatedly prepend '1' to 5m BOLL text,
-    # producing 115m/1115m BOLL. Canonicalize any such artifact once at the end.
+    # Deep inherited rewrite layers can repeatedly turn 5m BOLL into 15m, then
+    # 115m/1115m. Canonicalize only BOLL tokens; current 5m RSI/MACD/Volume text
+    # must remain untouched.
     text = re.sub(r"(?<!\d)(?:1+)?15m\s+BOLL", "15m BOLL", text)
     text = re.sub(r"(?<!\d)5m\s+BOLL", "15m BOLL", text)
     text = re.sub(r"Build\s*1[3-7]\d{2}", "Build1681", text)

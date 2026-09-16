@@ -1,3 +1,4 @@
+import re
 import unittest
 
 import v153_model as signal_core
@@ -33,10 +34,13 @@ class V168Build1681Tests(unittest.TestCase):
         self.assertNotIn('V1.5.4', out)
         self.assertNotIn('V1.6.2', out)
         self.assertNotIn('V1.6.6', out)
-        self.assertNotIn('5m BOLL', out)
+        # A literal substring test is wrong here because "15m BOLL" contains
+        # the characters "5m BOLL". Reject only a standalone 5m token.
+        self.assertIsNone(re.search(r'(?<!1)5m BOLL', out))
         self.assertNotIn('中轨', out)
         self.assertNotIn('计划市价参考', out)
         self.assertNotIn('第5个1m', out)
+        self.assertIn('V1.6.8', out)
         self.assertIn('15m BOLL外轨', out)
         self.assertIn('4H Hard Gate', out)
         self.assertIn('计划限价', out)
