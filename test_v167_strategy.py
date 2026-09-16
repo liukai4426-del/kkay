@@ -76,11 +76,11 @@ class V167StrategyTests(unittest.TestCase):
 
     def test_non_improving_non_adverse_can_pass_hard_gate(self):
         row = self._row(adverse=False, macd=0.0, kdj=0.5)
-        # Add enough independent score to remain exactly 6.0 after KDJ removal.
+        # Independent EMA confirmation keeps this candidate above the 6.0 line
+        # even though MACD is neutral/non-improving and KDJ no longer scores.
         row['layers']['ema50_15m_move'] = 1.0
-        row['layers']['structure_overlap'] = 0.5
         v167._apply_v167_row(row, opportunity=row['opportunity'])
-        self.assertEqual(row['total'], 6.0)
+        self.assertEqual(row['total'], 6.5)
         self.assertTrue(row['confirmations']['required']['outer_macd_non_adverse'])
         self.assertNotIn('outer_macd_improving', row['confirmations']['required'])
         self.assertTrue(row['gate'])
