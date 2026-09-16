@@ -1,0 +1,89 @@
+name: Backtest V1.6.6 15m BOLL 4H Neutral 360D Fast
+
+on:
+  push:
+    branches: [research/v166-15m-boll-4h-neutral-360d-fast]
+    paths:
+      - run_v166_15m_boll_4h_neutral_360d_fast.py
+      - research_backtest_data_cache.py
+      - .github/workflows/backtest-v166-15m-boll-4h-neutral-360d-fast.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      BACKTEST_MARKET_CACHE: .backtest_cache
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Restore 360D BTC market cache
+        uses: actions/cache@v4
+        with:
+          path: .backtest_cache
+          key: kaytrade-okx-btc-360d-end-20260914-market-v1
+
+      - name: Materialize audited simulator
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+          git fetch --depth=1 origin research/v155-outer-bands-180d
+          git show FETCH_HEAD:research_v1544_cache_patch.py > research_v1544_cache_patch.py
+          git show FETCH_HEAD:research_v1544_180d_backtest.py > research_v1544_180d_backtest.py
+          git show FETCH_HEAD:run_v1544_180d_fixed.py > run_v1544_180d_fixed.py
+
+      - name: Compile and verify research lock
+        run: |
+          python -m py_compile \
+            research_v146_backtest.py \
+            research_v1544_cache_patch.py \
+            research_v1544_180d_backtest.py \
+            run_v1544_180d_fixed.py \
+            v152_model.py v153_model.py v154_model.py \
+            v160_model.py v161_model.py v162_model.py v163_model.py v164_model.py v165_model.py \
+            run_v160_365d_2000u.py run_v165_1000d_2000u.py \
+            run_v166_entry_expansion_4way_360d.py \
+            research_backtest_data_cache.py \
+            run_v166_15m_boll_4h_neutral_360d_fast.py
+          python - <<'PY'
+          import run_v166_15m_boll_4h_neutral_360d_fast as x
+          assert x.DAYS == 360
+          assert x.BOLL_WINDOW_MS == 900000
+          assert x.THRESHOLD == 6.0
+          assert x.prod.RSI_MIN == 30.0 and x.prod.RSI_MAX == 70.0
+          assert x.slow.base.BE_ENABLED is False
+          print('PASS: 15m BOLL, next-15m-close lifetime, 4H neutral allowed, 360D')
+          PY
+
+      - name: Run optimized 360D backtest
+        run: time python run_v166_15m_boll_4h_neutral_360d_fast.py
+
+      - name: Verify outputs
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('backtest_output_v166_15m_boll_4h_neutral_360d_fast/result_15m_boll_4h_neutral_360d.json')
+          d=json.loads(p.read_text())
+          assert d['window']['days']==360
+          assert d['changes']['boll_timeframe']=='15m'
+          assert d['changes']['4h_trend_gate']=='aligned or neutral allowed; explicit opposite blocked'
+          assert d['unchanged']['rsi']=='5m 30-70'
+          assert d['unchanged']['macd']=='formal 5m improvement required'
+          print(json.dumps(d,ensure_ascii=False,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.6.6-15M-BOLL-4H-NEUTRAL-360D-FAST
+          path: backtest_output_v166_15m_boll_4h_neutral_360d_fast/
+          if-no-files-found: error
+          retention-days: 30
