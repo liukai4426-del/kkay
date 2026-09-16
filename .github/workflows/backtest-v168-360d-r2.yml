@@ -1,0 +1,101 @@
+name: Backtest KAYTRADE V1.6.8 360D 2000U R2
+
+on:
+  push:
+    branches: [research/v168-360d-r2]
+    paths:
+      - run_v168_360d_backtest_r2.py
+      - run_v168_180d_backtest_r2.py
+      - .github/workflows/backtest-v168-360d-r2.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      BACKTEST_MARKET_CACHE: .backtest_cache
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install V1.6.8 runtime dependencies
+        run: python -m pip install 'certifi==2025.8.3' 'websocket-client==1.8.0'
+
+      - name: Restore 360D BTC market cache
+        uses: actions/cache@v4
+        with:
+          path: .backtest_cache
+          key: kaytrade-v168-okx-btc-360d-end-20260914-market-v1
+          restore-keys: |
+            kaytrade-okx-btc-360d-
+            kaytrade-okx-btc-
+
+      - name: Materialize audited historical simulator and proven R2 path
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+          git fetch --depth=1 origin research/v155-outer-bands-180d
+          git show FETCH_HEAD:research_v1544_cache_patch.py > research_v1544_cache_patch.py
+          git show FETCH_HEAD:research_v1544_180d_backtest.py > research_v1544_180d_backtest.py
+          git show FETCH_HEAD:run_v1544_180d_fixed.py > run_v1544_180d_fixed.py
+          git fetch --depth=1 origin research/v166-15m-boll-macd-adverse-only-360d-fast
+          git show FETCH_HEAD:run_v160_365d_2000u.py > run_v160_365d_2000u.py
+          git show FETCH_HEAD:run_v165_1000d_2000u.py > run_v165_1000d_2000u.py
+          git show FETCH_HEAD:run_v166_entry_expansion_4way_360d.py > run_v166_entry_expansion_4way_360d.py
+          git show FETCH_HEAD:run_v166_15m_boll_macd_adverse_only_360d_fast.py > run_v166_15m_boll_macd_adverse_only_360d_fast.py
+          git show FETCH_HEAD:run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py > run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py
+          git show FETCH_HEAD:research_backtest_data_cache.py > research_backtest_data_cache.py
+
+      - name: Compile and verify 360D R2 lock
+        run: |
+          python -m py_compile \
+            research_v146_backtest.py research_v1544_cache_patch.py research_v1544_180d_backtest.py \
+            run_v1544_180d_fixed.py run_v160_365d_2000u.py run_v165_1000d_2000u.py \
+            run_v166_entry_expansion_4way_360d.py \
+            run_v166_15m_boll_macd_adverse_only_360d_fast.py \
+            run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py \
+            research_backtest_data_cache.py run_v168_180d_backtest_r2.py run_v168_360d_backtest_r2.py
+          python - <<'PY'
+          import run_v168_360d_backtest_r2 as x
+          x.configure_360()
+          x._verify_360_lock()
+          print('PASS: V1.6.8 Build1680 360D R2 lock')
+          PY
+
+      - name: Run V1.6.8 360D R2 backtest
+        run: time python run_v168_360d_backtest_r2.py
+
+      - name: Verify 360D result payload
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('backtest_output_v168_360d/result_v168_360d.json')
+          d=json.loads(p.read_text())
+          assert d['window']['days'] == 360
+          s=d['strategy_lock']
+          assert s['version'] == '1.6.8' and s['build'] == '1680'
+          assert s['boll_signal_lifetime_ms'] == 900000
+          assert s['boll_outer_score'] == 2.0
+          assert s['five_minute_boll_enabled'] is False
+          assert s['score_threshold'] == 6.0
+          assert s['break_even'] is False and s['early_exit'] is False
+          assert d['correction']['proven_signal_path_reused'] is True
+          trades=int(d['metrics']['trades'] or 0)
+          assert trades > 0, 'ANOMALY LOCK 360D R2: zero trades'
+          print(json.dumps(d,ensure_ascii=False,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.6.8-360D-2000U-R2
+          path: backtest_output_v168_360d/
+          if-no-files-found: error
+          retention-days: 30
