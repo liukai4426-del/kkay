@@ -49,6 +49,7 @@ jobs:
       - name: Verify Build1681 semantic lock
         run: |
           python - <<'PY'
+          import re
           from pathlib import Path
           import app
           import v153_model as signal_core
@@ -70,8 +71,9 @@ jobs:
           assert getattr(app.App,'_kaytrade_v168_build1681_applied',False)
           sample=b1681._sanitize_runtime_text('V1.5.4未开仓：BOLL信号执行窗口·第5个1m；计划市价参考；V1.6.2要求4H同向：5m BOLL中轨/外轨在4H中性或逆向时禁止开仓；V1.6.6 Volume Hard Gate：5m信号K量能 1.89× ≥ 1.20×，禁止开仓')
           assert 'V1.5.4' not in sample and 'V1.6.2' not in sample and 'V1.6.6' not in sample
-          assert '5m BOLL' not in sample and '中轨' not in sample and '计划市价参考' not in sample
-          assert '15m BOLL外轨' in sample and '计划限价' in sample and '5m信号K量能 1.89×' in sample
+          assert re.search(r'(?<!1)5m BOLL', sample) is None
+          assert '中轨' not in sample and '计划市价参考' not in sample
+          assert '15m BOLL外轨' in sample and '4H Hard Gate' in sample and '计划限价' in sample and '5m信号K量能 1.89×' in sample
           sync=b1681._sanitize_runtime_text('只读查询暂时失败 /ws/v5/business:orders-algo：Algo实时状态暂未完成可信同步')
           assert sync.startswith('Algo状态同步中：') and '只读查询暂时失败' not in sync
           assert "CFBundleShortVersionString': '1.6.8'" in spec
