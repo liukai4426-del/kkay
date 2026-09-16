@@ -1,0 +1,85 @@
+name: Backtest V1.6.6 Entry Lifecycle 5-Way 180D
+
+on:
+  push:
+    branches: [research/v166-entry-lifecycle-5way-180d]
+    paths:
+      - run_v166_entry_lifecycle_5way_180d.py
+      - .github/workflows/backtest-v166-entry-lifecycle-5way-180d.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    name: v166-entry-lifecycle-5way-180d
+    runs-on: ubuntu-latest
+    timeout-minutes: 420
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Materialize audited historical simulator
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+          git fetch --depth=1 origin research/v155-outer-bands-180d
+          git show FETCH_HEAD:research_v1544_cache_patch.py > research_v1544_cache_patch.py
+          git show FETCH_HEAD:research_v1544_180d_backtest.py > research_v1544_180d_backtest.py
+          git show FETCH_HEAD:run_v1544_180d_fixed.py > run_v1544_180d_fixed.py
+
+      - name: Compile and verify research lock
+        run: |
+          python -m py_compile \
+            research_v146_backtest.py \
+            research_v1544_cache_patch.py \
+            research_v1544_180d_backtest.py \
+            run_v1544_180d_fixed.py \
+            v152_model.py v153_model.py v154_model.py \
+            v160_model.py v161_model.py v162_model.py v163_model.py v164_model.py v165_model.py \
+            v154_build1544_patch.py run_v160_365d_2000u.py run_v165_1000d_2000u.py \
+            run_v166_entry_lifecycle_5way_180d.py
+          python - <<'PY'
+          import run_v166_entry_lifecycle_5way_180d as bt
+          start,end=bt._configure()
+          bt._verify_lock(start,end)
+          assert [x[0] for x in bt.VARIANTS] == ['5m','15m','20m','30m','noexpiry']
+          assert bt.DAYS == 180
+          assert bt.production.THRESHOLD == 6.0
+          assert bt.production.BOLL_OUTER_SCORE == 2.5
+          assert bt.production.VOLUME_HARD_GATE == 1.2
+          assert bt.base.BE_ENABLED is False
+          print('PASS five-way lifecycle lock', start.isoformat(), end.isoformat())
+          PY
+
+      - name: Run 180D five-way lifecycle backtest
+        run: time python run_v166_entry_lifecycle_5way_180d.py
+
+      - name: Verify outputs
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          out=Path('backtest_output_v166_entry_lifecycle_5way_180d')
+          c=json.loads((out/'comparison_180d.json').read_text())
+          assert set(c['variants']) == {'5m','15m','20m','30m','noexpiry'}
+          assert set(c['incremental_vs_5m']) == {'5m','15m','20m','30m','noexpiry'}
+          for name in ('5m','15m','20m','30m','noexpiry'):
+              assert (out/f'metrics_{name}_180d.json').exists()
+              assert (out/f'trades_{name}_180d.csv').exists()
+          # Current exact V1.6.5 180D baseline is known from the completed precision-EE run.
+          assert c['variants']['5m']['trades'] == 7
+          print('RESULT_SUMMARY')
+          print(json.dumps(c,ensure_ascii=False,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.6.6-ENTRY-LIFECYCLE-5WAY-180D-2000U
+          path: backtest_output_v166_entry_lifecycle_5way_180d/
+          if-no-files-found: error
+          retention-days: 30
