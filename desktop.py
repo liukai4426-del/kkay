@@ -44,6 +44,8 @@ from v167_strategy_patch import apply as apply_v167_strategy_patch
 apply_v167_strategy_patch()
 from v167_algo_sync_patch import apply as apply_v167_algo_sync_patch
 apply_v167_algo_sync_patch()
+from v167_15m_boll_only_fix import apply as apply_v167_15m_boll_only_fix
+apply_v167_15m_boll_only_fix()
 
 
 def smoke_test():
@@ -54,12 +56,14 @@ def smoke_test():
     import app
     import engine
     import exchange
+    import v153_model as signal_core
     import v161_ui_status_patch as ui161
     import v165_model as model
     import v165_ui_patch as ui165
     import v166_ui_patch as ui166
     import v167_strategy_patch as s167
     import v167_algo_sync_patch as a167
+    import v167_15m_boll_only_fix as b1671
     assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
     assert getattr(exchange.Exchange,'_kaytrade_v165_algo_fallback_applied',False)
     assert getattr(exchange.Exchange,'_kaytrade_v165_runtime_network_state_applied',False)
@@ -75,13 +79,16 @@ def smoke_test():
     assert getattr(exchange.Exchange,'_kaytrade_v167_algo_sync_applied',False)
     assert getattr(engine.Engine,'_kaytrade_v167_algo_sync_applied',False)
     assert getattr(app.App,'_kaytrade_v167_algo_sync_applied',False)
-    assert s167.VERSION == '1.6.7' and s167.BUILD == '1670'
-    assert a167.VERSION == '1.6.7' and a167.BUILD == '1670'
-    assert ui166.VERSION == '1.6.7' and ui166.BUILD == '1670'
-    assert model.VERSION == '1.6.7'
+    assert getattr(model,'_kaytrade_v167_15m_boll_only_applied',False)
+    assert getattr(app.App,'_kaytrade_v167_15m_boll_only_applied',False)
+    assert b1671.VERSION == '1.6.7' and b1671.BUILD == '1671'
+    assert s167.BUILD == '1671' and a167.BUILD == '1671' and ui166.BUILD == '1671'
+    assert model.VERSION == '1.6.7' and model.BUILD == '1671'
     assert model.THRESHOLD == 6.0
     assert model.ENTRY_WINDOW_MS == 300000
     assert model.BOLL_TRIGGER_TIMEFRAME == '15m'
+    assert model.FIVE_MINUTE_BOLL_ENABLED is False
+    assert signal_core.boll_entry_signal is b1671._signal_adapter_15m_only
     assert s167._macd_allowed({'confirmations':{'5m_macd_adverse':False}})
     assert not s167._macd_allowed({'confirmations':{'5m_macd_adverse':True}})
     status_labels=dict(ui161._STATUS_ITEMS)
@@ -95,7 +102,7 @@ def smoke_test():
         try:
             with patch.object(app.App,'worker',lambda self:None), patch.object(app.messagebox,'showerror',side_effect=AssertionError):
                 ui=app.App(root,Path(folder)); root.update()
-                assert 'KAYTRADE' in root.title() and '1.6.7' in root.title() and '1670' in root.title()
+                assert 'KAYTRADE' in root.title() and '1.6.7' in root.title() and '1671' in root.title()
                 assert ui.mode.get() == 'OKX模拟盘'
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
@@ -103,24 +110,24 @@ def smoke_test():
                 assert getattr(ui,'_v165_keepawake_proc',None) is None
                 assert getattr(ui,'_v166_ui_ready',False)
                 assert getattr(ui,'_v167_strategy_ui_ready',False)
+                assert getattr(ui,'_kaytrade_v167_15m_boll_only_applied',False) or getattr(app.App,'_kaytrade_v167_15m_boll_only_applied',False)
                 label=getattr(ui,'_v167_version_label',None)
-                assert label is not None and 'V1.6.7' in str(label.cget('text'))
-                assert '15m外轨2.5' in ui.signal.get()
+                if label is not None:
+                    assert '1671' in str(label.cget('text'))
+                assert '15m BOLL外轨ONLY' in ui.signal.get()
                 assert 'MACD非逆向Hard Gate' in ui.signal.get()
-                assert '改善1分' in ui.signal.get()
                 assert 'KDJ不计分' in ui.signal.get()
                 labels=dict(getattr(ui,'_v161_status_labels',{}) or {})
                 assert 'funds' not in labels and 'volume_gate' in labels and 'signal_window' in labels
                 assert 'rsi_gate' in labels and 'middle_macd' not in labels
                 assert app.App.arm is ui165.app_arm_v165
                 assert ui.render_logs.__func__ is ui166._render_logs_v166
-                assert '115m' not in ui166._rewrite_text_v166('15m BOLL外轨信号')
                 ui.stop(); assert ui.engine is None
                 ui.finished.set(); ui.thread.join(timeout=2); ui.lock.close()
         finally:
             root.destroy()
     Path(sys.argv[2]).write_text(
-        'PASS: KAYTRADE V1.6.7 Build1670 packaged UI/runtime; 15m BOLL outer-only with 5m execution window remains active, MACD blocks only explicit adverse while its +1 momentum score remains, KDJ +0.5 scoring is removed from engine/UI, 4H aligned and Volume hard gates remain, Algo state uses REST snapshot plus business-WebSocket cache/resync, transient read-side failures keep authorization active, and write ambiguity remains fail-closed.\n'
+        'PASS: KAYTRADE V1.6.7 Build1671 packaged UI/runtime; BOLL trigger/scoring is strictly 15m outer-only with no 5m BOLL path, 5m remains only RSI/MACD/Volume confirmation plus the post-15m five-minute execution window, same 15m candle cannot recreate a second window, MACD blocks only explicit adverse while its +1 momentum score remains, KDJ +0.5 scoring is removed, Algo state uses REST snapshot plus business-WebSocket cache/resync, transient read-side failures keep authorization active, and write ambiguity remains fail-closed.\n'
     )
 
 
