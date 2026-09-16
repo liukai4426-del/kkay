@@ -65,6 +65,7 @@ jobs:
       - name: Verify V1.6.7 Build1671 semantic lock
         run: |
           python - <<'PY'
+          import re
           from pathlib import Path
           import app
           import engine
@@ -97,7 +98,7 @@ jobs:
           assert labels['rsi_gate']=='5m RSI 30–70'
           assert 'middle_macd' not in labels
           text=b1671._rewrite_runtime_text_15m_only('上一5m BOLL信号周期已经结束；允许等待新的5m BOLL信号')
-          assert '5m BOLL' not in text and '15m BOLL' in text and '5m执行窗口' in text
+          assert re.search(r'(?<!1)5m BOLL', text) is None and '15m BOLL' in text and '5m执行窗口' in text
           assert getattr(exchange.Exchange,'_kaytrade_v167_algo_sync_applied',False)
           assert getattr(engine.Engine,'_kaytrade_v167_algo_sync_applied',False)
           assert getattr(app.App,'_kaytrade_v167_algo_sync_applied',False)
