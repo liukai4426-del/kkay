@@ -20,6 +20,8 @@ from v164_update_patch import apply as apply_v164_update_patch
 apply_v164_update_patch()
 from v165_update_patch import apply as apply_v165_update_patch
 apply_v165_update_patch()
+from v165_algo_fallback_patch import apply as apply_v165_algo_fallback_patch
+apply_v165_algo_fallback_patch()
 from v161_ui_status_patch import apply as apply_v161_ui_status_patch
 apply_v161_ui_status_patch()
 from v164_ui_patch import apply as apply_v164_ui_patch
@@ -34,9 +36,11 @@ def smoke_test():
     import tkinter as tk
     from unittest.mock import patch
     import app
+    import exchange
     import v161_ui_status_patch as ui161
     import v165_ui_patch as ui165
     assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
+    assert getattr(exchange.Exchange,'_kaytrade_v165_algo_fallback_applied',False)
     with tempfile.TemporaryDirectory(prefix='kaytrade-ui-check-') as folder:
         root=tk.Tk()
         try:
@@ -61,7 +65,7 @@ def smoke_test():
             root.destroy()
     Path(sys.argv[2]).write_text(
         'PASS: KAYTRADE V1.6.5 packaged UI startup; latest-closed-candle wording, 5m signal lifecycle, '
-        'Volume Hard Gate, current-only confirmation flow and version sync active; no network or orders.\n'
+        'Volume Hard Gate, current-only confirmation flow, Algo 51054 fallback and version sync active; no network or orders.\n'
     )
 
 
