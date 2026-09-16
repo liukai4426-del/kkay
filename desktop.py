@@ -24,6 +24,8 @@ from v165_algo_fallback_patch import apply as apply_v165_algo_fallback_patch
 apply_v165_algo_fallback_patch()
 from v165_sleep_resume_patch import apply as apply_v165_sleep_resume_patch
 apply_v165_sleep_resume_patch()
+from v165_keepawake_patch import apply as apply_v165_keepawake_patch
+apply_v165_keepawake_patch()
 from v161_ui_status_patch import apply as apply_v161_ui_status_patch
 apply_v161_ui_status_patch()
 from v164_ui_patch import apply as apply_v164_ui_patch
@@ -45,6 +47,7 @@ def smoke_test():
     assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
     assert getattr(exchange.Exchange,'_kaytrade_v165_algo_fallback_applied',False)
     assert getattr(engine.Engine,'_kaytrade_v165_sleep_resume_applied',False)
+    assert getattr(app.App,'_kaytrade_v165_keepawake_applied',False)
     with tempfile.TemporaryDirectory(prefix='kaytrade-ui-check-') as folder:
         root=tk.Tk()
         try:
@@ -56,6 +59,7 @@ def smoke_test():
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
                 assert getattr(ui,'_v165_ui_ready',False)
                 assert getattr(ui,'_v165_version_label_updated',False)
+                assert getattr(ui,'_v165_keepawake_proc',None) is None
                 label=getattr(ui,'_v165_version_label',None)
                 assert label is not None and 'V1.6.5' in str(label.cget('text'))
                 assert 'V1.6.5' in ui.signal.get()
@@ -69,7 +73,7 @@ def smoke_test():
             root.destroy()
     Path(sys.argv[2]).write_text(
         'PASS: KAYTRADE V1.6.5 packaged UI startup; latest-closed-candle wording, 5m signal lifecycle, '
-        'Volume Hard Gate, Algo 51054 fallback, sleep auto-resume and version sync active; no network or orders.\n'
+        'Volume Hard Gate, Algo 51054 fallback, sleep auto-resume, Mac keep-awake and version sync active; no network or orders.\n'
     )
 
 
