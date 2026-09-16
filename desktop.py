@@ -38,6 +38,8 @@ from v165_15m_outer_patch import apply as apply_v165_15m_outer_patch
 apply_v165_15m_outer_patch()
 from v166_ui_patch import apply as apply_v166_ui_patch
 apply_v166_ui_patch()
+from v166_readonly_resilience_patch import apply as apply_v166_readonly_resilience_patch
+apply_v166_readonly_resilience_patch()
 
 
 def smoke_test():
@@ -58,15 +60,18 @@ def smoke_test():
     assert getattr(engine.Engine,'_kaytrade_v165_sleep_resume_applied',False)
     assert getattr(app.App,'_kaytrade_v165_keepawake_applied',False)
     assert getattr(model,'_kaytrade_v165_15m_outer_applied',False)
-    assert getattr(app.App,'_kaytrade_v165_15m_outer_applied',False)
     assert getattr(app.App,'_kaytrade_v166_ui_applied',False)
+    assert getattr(app.App,'_kaytrade_v166_readonly_resilience_applied',False)
+    assert getattr(exchange.Exchange,'_kaytrade_v166_readonly_resilience_applied',False)
+    assert getattr(engine.Engine,'_kaytrade_v166_readonly_resilience_applied',False)
+    assert ui166.BUILD == '1661'
     assert model.BOLL_TRIGGER_TIMEFRAME == '15m'
     with tempfile.TemporaryDirectory(prefix='kaytrade-ui-check-') as folder:
         root=tk.Tk()
         try:
             with patch.object(app.App,'worker',lambda self:None), patch.object(app.messagebox,'showerror',side_effect=AssertionError):
                 ui=app.App(root,Path(folder)); root.update()
-                assert 'KAYTRADE' in root.title() and '1.6.6' in root.title()
+                assert 'KAYTRADE' in root.title() and '1.6.6' in root.title() and '1661' in root.title()
                 assert ui.mode.get() == 'OKX模拟盘'
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
@@ -89,8 +94,7 @@ def smoke_test():
         finally:
             root.destroy()
     Path(sys.argv[2]).write_text(
-        'PASS: KAYTRADE V1.6.6 Build1660 packaged UI; 15m BOLL trigger remains active, opening-status labels are disambiguated, '
-        'run-log detail is inline with title-column wrapping, 115m display bug is blocked, and V1.6.5 trading/risk semantics remain unchanged.\n'
+        'PASS: KAYTRADE V1.6.6 Build1661 packaged UI/runtime; 15m BOLL trigger remains active, transient read-only GET failures no longer globally stop auto trading, write ambiguity stays fail-closed, opening-status labels are disambiguated, run-log detail is inline with title-column wrapping, and the 115m display bug is blocked.\n'
     )
 
 
