@@ -22,6 +22,8 @@ from v165_update_patch import apply as apply_v165_update_patch
 apply_v165_update_patch()
 from v165_algo_fallback_patch import apply as apply_v165_algo_fallback_patch
 apply_v165_algo_fallback_patch()
+from v165_runtime_network_patch import apply as apply_v165_runtime_network_patch
+apply_v165_runtime_network_patch()
 from v165_sleep_resume_patch import apply as apply_v165_sleep_resume_patch
 apply_v165_sleep_resume_patch()
 from v165_keepawake_patch import apply as apply_v165_keepawake_patch
@@ -46,6 +48,7 @@ def smoke_test():
     import v165_ui_patch as ui165
     assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
     assert getattr(exchange.Exchange,'_kaytrade_v165_algo_fallback_applied',False)
+    assert getattr(exchange.Exchange,'_kaytrade_v165_runtime_network_state_applied',False)
     assert getattr(engine.Engine,'_kaytrade_v165_sleep_resume_applied',False)
     assert getattr(app.App,'_kaytrade_v165_keepawake_applied',False)
     with tempfile.TemporaryDirectory(prefix='kaytrade-ui-check-') as folder:
@@ -72,8 +75,8 @@ def smoke_test():
         finally:
             root.destroy()
     Path(sys.argv[2]).write_text(
-        'PASS: KAYTRADE V1.6.5 packaged UI startup; latest-closed-candle wording, 5m signal lifecycle, '
-        'Volume Hard Gate, Algo 51054 fallback, sleep auto-resume, Mac keep-awake and version sync active; no network or orders.\n'
+        'PASS: KAYTRADE V1.6.5 packaged UI startup; closed-candle lifecycle, Volume Hard Gate, '
+        'bounded Algo 51054 handling, sleep soft-stop, Mac keep-awake and version sync active; no network or orders.\n'
     )
 
 
