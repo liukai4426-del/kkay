@@ -81,7 +81,7 @@ def _sanitize_runtime_text(data):
 
     text = re.sub(
         r"V1\.6\.8要求4H同向[：:]\s*15m BOLL(?:上下)?外轨在4H中性或逆向时禁止开仓[；;]?",
-        "V1.6.8 4H Hard Gate：4H中性/逆向禁止开仓；",
+        "V1.6.8 4H Hard Gate：15m BOLL外轨要求4H同向；4H中性/逆向禁止开仓；",
         text,
     )
 
