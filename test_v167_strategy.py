@@ -10,7 +10,7 @@ import v167_strategy_patch as v167
 class V167StrategyTests(unittest.TestCase):
     def _row(self, *, adverse=False, raw=6.5, kdj=0.5, macd=1.0):
         # Keep all non-MACD/KDJ gates green.  raw is recomputed by the patch;
-        # these layers intentionally model a real outer-band candidate.
+        # these layers intentionally model a representative outer-band candidate.
         layers = {
             'direction_pullback': 1.0,
             'entry_near_zone': 1.0,
@@ -64,6 +64,9 @@ class V167StrategyTests(unittest.TestCase):
 
     def test_kdj_score_removed_but_macd_momentum_score_retained(self):
         row = self._row(adverse=False)
+        # This candidate previously reached exactly 6.0 only because of KDJ +0.5.
+        row['layers']['direction_pullback'] = 0.0
+        row['raw'] = row['total'] = 6.0
         v167._apply_v167_row(row, opportunity=row['opportunity'])
         self.assertNotIn('kdj5_signal', row['layers'])
         self.assertFalse(any('KDJ' in str(item[0]) for item in row['items']))
