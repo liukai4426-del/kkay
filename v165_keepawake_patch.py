@@ -2,8 +2,10 @@
 
 Automatic trading keeps the Mac system awake while allowing the display to
 sleep. The assertion is started only after a real arm task is accepted, and it
-is released on explicit Stop/Quit. `-w <pid>` also guarantees release if the
-application process exits unexpectedly.
+is released on explicit Stop/Quit or when runtime safety soft-stops automatic
+trading (for example a real sleep/long pause).
+
+`-w <pid>` also guarantees release if the application process exits unexpectedly.
 """
 import os
 import subprocess
@@ -79,6 +81,7 @@ def apply():
     original_submit = app.App.submit
     original_stop = app.App.stop
     original_quit = app.App.quit
+    original_drain = app.App.drain
 
     def app_init(self, *args, **kwargs):
         original_init(self, *args, **kwargs)
@@ -87,9 +90,6 @@ def apply():
     def app_submit(self, kind, data=None):
         was_busy = bool(getattr(self, 'busy', False))
         result = original_submit(self, kind, data)
-        # `arm` reaches submit only after the V1.6.5 confirmation dialog was
-        # accepted. If submit rejected the action because another operation was
-        # already running, do not start the assertion.
         if kind == 'arm' and not was_busy and bool(getattr(self, 'busy', False)):
             _start_keepawake(self)
         return result
@@ -108,10 +108,20 @@ def apply():
             _stop_keepawake(self, '程序退出')
         return result
 
+    def app_drain(self, *args, **kwargs):
+        result = original_drain(self, *args, **kwargs)
+        e = getattr(self, 'engine', None)
+        # Startup buffering can temporarily set enabled=False while stopped=False;
+        # only release the assertion when the engine has entered a real stopped state.
+        if e is not None and bool(getattr(e, 'stopped', False)) and not bool(getattr(e, 'enabled', False)):
+            _stop_keepawake(self, '自动交易已安全停止')
+        return result
+
     app.App.__init__ = app_init
     app.App.submit = app_submit
     app.App.stop = app_stop
     app.App.quit = app_quit
+    app.App.drain = app_drain
     app.App._kaytrade_v165_keepawake_applied = True
 
 
