@@ -36,6 +36,8 @@ from v165_ui_patch import apply as apply_v165_ui_patch
 apply_v165_ui_patch()
 from v165_15m_outer_patch import apply as apply_v165_15m_outer_patch
 apply_v165_15m_outer_patch()
+from v166_ui_patch import apply as apply_v166_ui_patch
+apply_v166_ui_patch()
 
 
 def smoke_test():
@@ -49,6 +51,7 @@ def smoke_test():
     import v161_ui_status_patch as ui161
     import v165_model as model
     import v165_ui_patch as ui165
+    import v166_ui_patch as ui166
     assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
     assert getattr(exchange.Exchange,'_kaytrade_v165_algo_fallback_applied',False)
     assert getattr(exchange.Exchange,'_kaytrade_v165_runtime_network_state_applied',False)
@@ -56,36 +59,38 @@ def smoke_test():
     assert getattr(app.App,'_kaytrade_v165_keepawake_applied',False)
     assert getattr(model,'_kaytrade_v165_15m_outer_applied',False)
     assert getattr(app.App,'_kaytrade_v165_15m_outer_applied',False)
+    assert getattr(app.App,'_kaytrade_v166_ui_applied',False)
     assert model.BOLL_TRIGGER_TIMEFRAME == '15m'
     with tempfile.TemporaryDirectory(prefix='kaytrade-ui-check-') as folder:
         root=tk.Tk()
         try:
             with patch.object(app.App,'worker',lambda self:None), patch.object(app.messagebox,'showerror',side_effect=AssertionError):
                 ui=app.App(root,Path(folder)); root.update()
-                assert 'KAYTRADE' in root.title() and '1.6.5' in root.title()
+                assert 'KAYTRADE' in root.title() and '1.6.6' in root.title()
                 assert ui.mode.get() == 'OKX模拟盘'
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
                 assert getattr(ui,'_v165_ui_ready',False)
-                assert getattr(ui,'_v165_version_label_updated',False)
                 assert getattr(ui,'_v165_keepawake_proc',None) is None
-                label=getattr(ui,'_v165_version_label',None)
-                assert label is not None and 'V1.6.5' in str(label.cget('text'))
+                assert getattr(ui,'_v166_ui_ready',False)
+                label=getattr(ui,'_v166_version_label',None)
+                assert label is not None and 'V1.6.6' in str(label.cget('text'))
                 assert '15m外轨2.5' in ui.signal.get()
                 labels=dict(getattr(ui,'_v161_status_labels',{}) or {})
                 assert 'funds' not in labels and 'volume_gate' in labels and 'signal_window' in labels
                 status_labels=dict(ui161._STATUS_ITEMS)
-                assert status_labels['boll']=='15m外轨BOLL'
-                assert status_labels['signal_window']=='外轨5m执行窗口'
+                assert status_labels['boll']=='15m BOLL外轨触发'
+                assert status_labels['signal_window']=='5m执行窗口'
                 assert app.App.arm is ui165.app_arm_v165
+                assert ui.render_logs.__func__ is ui166._render_logs_v166
+                assert '115m' not in ui166._rewrite_text_v166('15m BOLL外轨信号')
                 ui.stop(); assert ui.engine is None
                 ui.finished.set(); ui.thread.join(timeout=2); ui.lock.close()
         finally:
             root.destroy()
     Path(sys.argv[2]).write_text(
-        'PASS: KAYTRADE V1.6.5 packaged UI startup; closed-15m BOLL outer trigger with 5m execution window, '
-        '5m confirmations, Volume Hard Gate, bounded Algo 51054 handling, sleep soft-stop, Mac keep-awake '
-        'and version sync active; no network or orders.\n'
+        'PASS: KAYTRADE V1.6.6 Build1660 packaged UI; 15m BOLL trigger remains active, opening-status labels are disambiguated, '
+        'run-log detail is inline with title-column wrapping, 115m display bug is blocked, and V1.6.5 trading/risk semantics remain unchanged.\n'
     )
 
 
