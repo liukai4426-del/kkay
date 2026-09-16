@@ -5,10 +5,11 @@ on a precise BTC-USDT-SWAP algo query, progressively retry using SWAP scope and
 then account scope, filtering every successful response locally back to the
 strategy instrument.
 
-Demo trading gets one additional safety-limited behavior: if *only* the Trigger
-family keeps returning 51054 across all supported read scopes, the unlock check
+Demo trading gets one additional safety-limited behavior: if Trigger or Trailing
+Stop keeps returning 51054 across all supported read scopes, the unlock check
 may continue with an explicit degraded warning. This never applies to live
-trading and never applies to OCO/conditional/trailing families.
+trading. OCO and Conditional remain strict even in demo because they are closer
+to protective TP/SL state.
 
 Trading writes are untouched.
 """
@@ -26,6 +27,7 @@ _PATH = v165._ALGO_PENDING_PATH
 _FAMILIES = v165._ALGO_FAMILIES
 _PAGE_LIMIT = "100"
 _MAX_PAGES = 20
+_DEMO_DEGRADABLE = {"trigger", "move_order_stop"}
 
 
 def _filter_target(rows, label):
@@ -92,10 +94,12 @@ def _family_read(self, ord_type, label):
                 continue
             break
 
-    # Demo-only escape hatch. Persistent Trigger-list 51054 must not make the
-    # simulated environment unusable while the live path stays strictly safe.
-    if ord_type == "trigger" and bool(getattr(self, "demo", False)):
-        self.network_event("模拟盘降级：Algo Trigger三层只读查询均51054；仅跳过Trigger预检，实盘不会放行")
+    # Demo-only escape hatch for the two OKX algo families observed returning
+    # persistent 51054 in demo. Live trading remains strictly fail-closed.
+    if ord_type in _DEMO_DEGRADABLE and bool(getattr(self, "demo", False)):
+        self.network_event(
+            f"模拟盘降级：{label}三层只读查询均51054；仅跳过{label}预检，实盘不会放行"
+        )
         return []
 
     raise exchange.NetworkError(
@@ -115,10 +119,9 @@ def _algos_v165_fallback(self):
 
 
 def apply():
-    # Rebind every import so this revision supersedes the previous fallback.
     exchange.Exchange.algos = _algos_v165_fallback
     exchange.Exchange._kaytrade_v165_algo_fallback_applied = True
-    exchange.Exchange._kaytrade_v165_algo_fallback_revision = 2
+    exchange.Exchange._kaytrade_v165_algo_fallback_revision = 3
 
 
 apply()
