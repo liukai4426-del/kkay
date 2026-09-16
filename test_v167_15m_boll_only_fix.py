@@ -1,3 +1,4 @@
+import re
 import unittest
 
 import v153_model as signal_core
@@ -82,9 +83,9 @@ class V16715mBollOnlyTests(unittest.TestCase):
         self.assertEqual(model.BOLL_TRIGGER_TIMEFRAME, '15m')
         self.assertFalse(model.FIVE_MINUTE_BOLL_ENABLED)
 
-    def test_runtime_copy_has_no_5m_boll_signal_semantic(self):
+    def test_runtime_copy_has_no_standalone_5m_boll_signal_semantic(self):
         text = fix._rewrite_runtime_text_15m_only('上一5m BOLL信号周期已经结束；允许等待新的5m BOLL信号')
-        self.assertNotIn('5m BOLL', text)
+        self.assertIsNone(re.search(r'(?<!1)5m BOLL', text))
         self.assertIn('15m BOLL', text)
         self.assertIn('5m执行窗口', text)
 
