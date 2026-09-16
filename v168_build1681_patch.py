@@ -29,7 +29,6 @@ def _sanitize_runtime_text(data):
     if not isinstance(data, str):
         return data
 
-    # Keep inherited useful wording rewrites, then run one final canonical pass.
     text = _PREVIOUS_RUNTIME_TEXT(data)
     if not isinstance(text, str):
         return text
@@ -43,12 +42,18 @@ def _sanitize_runtime_text(data):
             "Final Entry Guard。"
         )
 
-    # Deep legacy layers may already have rewritten V1.x labels into bare 1.6.7
-    # and may have repeatedly prepended '1' to '5m BOLL' (e.g. 1115m BOLL).
-    # Canonicalize those artifacts before applying current wording.
-    text = re.sub(r"(?<![A-Za-z])V?1\.(?:[0-5]\.\d+|6\.[0-8])\b", VERSION, text)
-    text = re.sub(r"\b(?:1+)?15m\s+BOLL", "15m BOLL", text)
-    text = re.sub(r"\b5m\s+BOLL", "15m BOLL", text)
+    # Chinese characters are Unicode word characters, so \b cannot be used at
+    # the end of a version token such as "V1.5.4未开仓". Use numeric guards.
+    text = re.sub(
+        r"(?<![A-Za-z0-9])V?1\.(?:[0-5]\.\d+|6\.[0-8])(?![\d.])",
+        VERSION,
+        text,
+    )
+
+    # Deep legacy rewrite layers can repeatedly prepend '1' to 5m BOLL text,
+    # producing 115m/1115m BOLL. Canonicalize any such artifact once at the end.
+    text = re.sub(r"(?<!\d)(?:1+)?15m\s+BOLL", "15m BOLL", text)
+    text = re.sub(r"(?<!\d)5m\s+BOLL", "15m BOLL", text)
     text = re.sub(r"Build\s*1[3-7]\d{2}", "Build1681", text)
 
     replacements = (
@@ -72,7 +77,6 @@ def _sanitize_runtime_text(data):
     )
     text = text.replace("BOLL信号执行窗口", "15m BOLL信号有效期")
 
-    # Normalize the inherited V1.6.2-era 4H sentence to the current rule.
     text = re.sub(
         r"V1\.6\.8要求4H同向[：:]\s*15m BOLL(?:上下)?外轨在4H中性或逆向时禁止开仓[；;]?",
         "V1.6.8 4H Hard Gate：4H中性/逆向禁止开仓；",
