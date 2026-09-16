@@ -1,0 +1,171 @@
+name: Build KAYTRADE Intel Mac 1.6.7 Build1670
+
+on:
+  push:
+    branches: [feature/v167-strategy-network]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install V1.6.7 runtime test dependencies
+        run: python -m pip install 'websocket-client==1.8.0' 'certifi==2025.8.3'
+      - name: Compile V1.6.7 Build1670
+        run: |
+          python -m py_compile \
+            v160_model.py v160_update_patch.py v161_model.py v161_update_patch.py v162_model.py v162_update_patch.py \
+            v163_model.py v163_update_patch.py v163_ui_patch.py v164_model.py v164_update_patch.py v164_ui_patch.py \
+            v165_model.py v165_update_patch.py v165_algo_fallback_patch.py v165_runtime_network_patch.py \
+            v165_sleep_resume_patch.py v165_keepawake_patch.py v165_ui_patch.py v165_15m_outer_patch.py \
+            v166_ui_patch.py v166_readonly_resilience_patch.py \
+            v167_strategy_patch.py v167_algo_sync_patch.py test_v167_strategy.py test_v167_algo_sync.py desktop.py
+      - name: Preserved strategy/runtime regressions
+        run: |
+          python -m unittest -v test_engine
+          python -m unittest -v test_candles
+          python -m unittest -v test_v152_strategy
+          python -m unittest -v test_v153_strategy
+          python -m unittest -v test_v154_strategy
+          python -m unittest -v test_v155_update
+          python -m unittest -v \
+            test_v156_build1561.V156Build1561Tests.test_fixed_loss_control_markers_cover_value_row_and_note \
+            test_v156_build1561.V156Build1561Tests.test_identity_and_preserved_flags \
+            test_v156_build1561.V156Build1561Tests.test_log_order_helper_is_newest_first_and_capped
+          python -m unittest -v test_v160_update
+          python -m unittest -v test_v161_update
+          python -m unittest -v test_v162_update
+          python -m unittest -v test_v163_update
+          python -m unittest -v test_v163_ui
+          python -m unittest -v test_v164_update
+          python -m unittest -v test_v164_execution
+          python -m unittest -v test_v164_ui
+          python -m unittest -v test_v165_update
+          python -m unittest -v test_v165_execution
+          python -m unittest -v test_v165_runtime_network_state
+          python -m unittest -v test_v165_sleep_resume
+          python -m unittest -v test_v165_keepawake
+          python -m unittest -v test_v165_ui
+          python -m unittest -v test_v166_ui
+          python -m unittest -v test_v166_readonly_resilience
+      - name: V1.6.7 strategy and Algo synchronization regressions
+        run: |
+          python -m unittest -v test_v167_strategy
+          python -m unittest -v test_v167_algo_sync
+      - name: Verify V1.6.7 semantic lock
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import app
+          import engine
+          import exchange
+          import v161_ui_status_patch as ui161
+          import v165_model as model
+          import v166_ui_patch as ui166
+          import v167_strategy_patch as s167
+          import v167_algo_sync_patch as a167
+          spec=Path('OKXLocal.spec').read_text()
+          desktop=Path('desktop.py').read_text()
+          assert s167.VERSION=='1.6.7' and s167.BUILD=='1670'
+          assert a167.VERSION=='1.6.7' and a167.BUILD=='1670'
+          assert ui166.VERSION=='1.6.7' and ui166.BUILD=='1670'
+          assert model.VERSION=='1.6.7'
+          assert model.THRESHOLD==6.0
+          assert model.ENTRY_WINDOW_MS==300000 and model.TIME_WINDOW_ENABLED is True
+          assert model.VOLUME_HARD_GATE==1.20 and model.BOLL_OUTER_SCORE==2.50
+          assert model.BOLL_TRIGGER_TIMEFRAME=='15m'
+          assert tuple(model.OUTER_PATHS)==('lower_band','upper_band')
+          assert s167._macd_allowed({'confirmations':{'5m_macd_adverse':False}}) is True
+          assert s167._macd_allowed({'confirmations':{'5m_macd_adverse':True}}) is False
+          row={
+              'raw':6.0,'total':6.0,'gate':True,'eligible':True,'required':6.0,'position_multiplier':1.0,
+              'layers':{'boll_entry':2.5,'macd_improving':1.0,'trend4h':1.0,'entry_near_zone':1.0,'kdj5_signal':0.5},
+              'items':[('5m MACD柱连续两根改善',1.0,1.0),('5m信号KDJ对应交叉',0.5,0.5)],
+              'confirmations':{'required':{'boll_entry_signal':True,'outer_4h_aligned':True,'outer_macd_improving':False},'blockers':['V1.6.3：外轨开仓要求5m MACD柱连续向交易方向改善'],'5m_macd_adverse':False},
+              'opportunity':{'signal_path':'lower_band'},
+          }
+          s167._apply_v167_row(row,opportunity=row['opportunity'])
+          assert 'kdj5_signal' not in row['layers']
+          assert not any('KDJ' in str(item[0]) for item in row['items'])
+          assert any('MACD动能' in str(item[0]) and float(item[1])==1.0 for item in row['items'])
+          labels=dict(ui161._STATUS_ITEMS)
+          assert labels['boll']=='15m BOLL外轨触发'
+          assert labels['signal_window']=='5m执行窗口'
+          assert labels['macd_clean']=='MACD非逆向'
+          assert labels['rsi_gate']=='5m RSI 30–70'
+          assert 'middle_macd' not in labels
+          assert getattr(exchange.Exchange,'_kaytrade_v167_algo_sync_applied',False)
+          assert getattr(engine.Engine,'_kaytrade_v167_algo_sync_applied',False)
+          assert getattr(app.App,'_kaytrade_v167_algo_sync_applied',False)
+          assert "CFBundleShortVersionString': '1.6.7'" in spec
+          assert "CFBundleVersion': '1670'" in spec
+          assert 'v167_strategy_patch' in desktop and 'v167_algo_sync_patch' in desktop
+          print('PASS Build1670: 15m outer-only/5m execution, MACD adverse-only hard gate with +1 momentum score retained, KDJ score removed, trusted Algo REST+WS cache, writes unchanged')
+          PY
+
+  build:
+    needs: unit
+    runs-on: macos-15-intel
+    timeout-minutes: 70
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0' 'websocket-client==1.8.0'
+      - name: Preserved runtime/UI tests in isolated interpreters
+        run: |
+          python -m unittest -v test_v165_update
+          python -m unittest -v test_v165_execution
+          python -m unittest -v test_v165_runtime_network_state
+          python -m unittest -v test_v165_sleep_resume
+          python -m unittest -v test_v165_keepawake
+          python -m unittest -v test_v165_ui
+          python -m unittest -v test_v166_ui
+          python -m unittest -v test_v166_readonly_resilience
+          python -m unittest -v test_v167_strategy
+          python -m unittest -v test_v167_algo_sync
+      - run: python build_icon.py
+      - run: python -m PyInstaller --noconfirm OKXLocal.spec
+      - name: Verify Intel bundle and metadata
+        run: |
+          python verify_bundle.py
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1.6.7'
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1670'
+          codesign --verify --deep --strict dist/KAYTRADE.app
+      - name: Packaged V1.6.7 UI/runtime smoke test
+        run: |
+          TMPDIR_CHECK="$(mktemp -d)"
+          dist/KAYTRADE.app/Contents/MacOS/KAYTRADE --smoke-test "$TMPDIR_CHECK/smoke.txt"
+          cat "$TMPDIR_CHECK/smoke.txt"
+          grep 'V1.6.7 Build1670' "$TMPDIR_CHECK/smoke.txt"
+          grep 'MACD blocks only explicit adverse' "$TMPDIR_CHECK/smoke.txt"
+          grep 'KDJ +0.5 scoring is removed' "$TMPDIR_CHECK/smoke.txt"
+          grep 'REST snapshot plus business-WebSocket cache' "$TMPDIR_CHECK/smoke.txt"
+          grep 'write ambiguity remains fail-closed' "$TMPDIR_CHECK/smoke.txt"
+      - name: Create installer
+        run: |
+          mkdir -p installer
+          ditto dist/KAYTRADE.app installer/KAYTRADE.app
+          cp RELEASE-1.6.7-B1670.md installer/RELEASE-1.6.7-B1670.md
+          printf 'KAYTRADE V1.6.7 Build1670\n15m BOLL outer-only + 5m execution window; MACD explicit-adverse-only hard gate while momentum improvement keeps +1 score; KDJ +0.5 removed; 4H/RSI/Volume safeguards preserved. Pending Algo state now uses parallel REST snapshot + OKX business-WebSocket cache with automatic reconnect/resync. Read-side gaps do not disable auto-trading authorization; write ambiguity remains fail-closed.\n' > installer/RELEASE-1.6.7-B1670.txt
+          hdiutil create -volname 'KAYTRADE 1.6.7' -srcfolder installer -ov -format UDZO KAYTRADE-1.6.7-Intel-build1670.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-1.6.7-Intel-build1670
+          path: |
+            KAYTRADE-1.6.7-Intel-build1670.dmg
+            installer/RELEASE-1.6.7-B1670.md
+            installer/RELEASE-1.6.7-B1670.txt
+          if-no-files-found: error
