@@ -1,0 +1,29 @@
+name: Test V1.6.5 Sleep Auto Resume
+
+on:
+  push:
+    branches: [hotfix/v165-sleep-auto-resume]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile sleep resume hotfix
+        run: python -m py_compile v165_sleep_resume_patch.py test_v165_sleep_resume.py desktop.py
+      - name: Sleep resume boundary tests
+        run: python -m unittest -v test_v165_sleep_resume
+      - name: Preserved V1.6.5 regressions
+        run: |
+          python -m unittest -v test_v165_execution
+          python -m unittest -v test_v165_update
+          python -m unittest -v test_v165_ui
+          python -m unittest -v test_engine
