@@ -5,6 +5,7 @@ Reuses the proven V1.6.8 R2 historical adapter from the 180D run and changes
 only the historical window/output labeling to 360 days. Strategy parameters are
 identical to the 180D R2 test.
 """
+# Standalone 360D execution entry; no 180D workflow coupling.
 from __future__ import annotations
 
 import json
