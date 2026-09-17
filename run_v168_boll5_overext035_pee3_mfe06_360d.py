@@ -15,6 +15,19 @@ import run_v168_boll5_overext035_pee3_mfe06_180d as src
 
 DAYS = 360
 OUT = Path("backtest_output_v168_boll5_overext035_pee3_mfe06_360d")
+_CUSTOM_VARIANT = "boll5_overext035_pee3_mfe06"
+_ORIGINAL_VARIANT_ACCEPT = src.research.variant_accept
+
+
+def _variant_accept_compat(name, score, opp):
+    """Use baseline admission semantics for this research-only variant label."""
+    if str(name) == _CUSTOM_VARIANT:
+        return _ORIGINAL_VARIANT_ACCEPT("baseline", score, opp)
+    return _ORIGINAL_VARIANT_ACCEPT(name, score, opp)
+
+
+def _install_variant_compat():
+    src.research.variant_accept = _variant_accept_compat
 
 
 def _patch_360_window():
@@ -27,6 +40,7 @@ def _patch_360_window():
 
 def configure_360():
     _patch_360_window()
+    _install_variant_compat()
     return src.configure()
 
 
@@ -39,6 +53,7 @@ def verify_360(start, end):
     assert src.base.BOLL_WINDOW_MS == 900_000 and src.base.THRESHOLD == 6.0
     assert src.research.Simulator.process_exit is src._process_exit_pee3
     assert src._ORIGINAL_PROCESS_EXIT is src.base.proven._ORIG_EXIT
+    assert src.research.variant_accept is _variant_accept_compat
     assert src._decision(60_000, -0.8, 0.60, 2, {}, 2.0, {}) is None
     assert src._decision(241 * 60_000, -0.8, 0.0, 2, {}, 2.0, {}) is None
     code = inspect.getsource(src._process_exit_pee3)
@@ -47,6 +62,7 @@ def verify_360(start, end):
 
 def main():
     _patch_360_window()
+    _install_variant_compat()
     src.verify_lock = verify_360
     src.main()
 
@@ -57,6 +73,7 @@ def main():
     payload["window"]["days"] = DAYS
     payload.setdefault("correction", {})["window_extension_only"] = True
     payload["correction"]["source_runner"] = "audited 180D BOLL5 overext035 + PEE3 MFE0.60 runner"
+    payload["correction"]["variant_acceptance_fix"] = "research label mapped to baseline admission semantics; strategy unchanged"
     new_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     old_json.unlink()
 
