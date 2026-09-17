@@ -1,0 +1,120 @@
+name: Backtest V1.6.8 BOLL5 010 No15mDirection 1000D 2000U
+
+on:
+  push:
+    branches: [research/v168-boll5-010-no15m-direction-1000d]
+    paths:
+      - run_v168_boll5_overext010_no15mdir_1000d.py
+      - .github/workflows/backtest-v168-boll5-010-no15m-direction-1000d.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  BACKTEST_MARKET_CACHE: .backtest_cache
+
+jobs:
+  backtest:
+    name: BOLL5 0.10 ATR + 1H-only direction 1000D
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install runtime dependencies
+        run: python -m pip install 'certifi==2025.8.3' 'websocket-client==1.8.0'
+
+      - name: Restore audited 1000D BTC market cache
+        uses: actions/cache@v4
+        with:
+          path: .backtest_cache
+          key: kaytrade-v168-okx-btc-1000d-end-20260914-market-v1
+          restore-keys: |
+            kaytrade-okx-btc-1000d-
+            kaytrade-okx-btc-
+
+      - name: Materialize audited historical simulator and proven R2 path
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+          git fetch --depth=1 origin research/v155-outer-bands-180d
+          git show FETCH_HEAD:research_v1544_cache_patch.py > research_v1544_cache_patch.py
+          git show FETCH_HEAD:research_v1544_180d_backtest.py > research_v1544_180d_backtest.py
+          git show FETCH_HEAD:run_v1544_180d_fixed.py > run_v1544_180d_fixed.py
+          git fetch --depth=1 origin research/v166-15m-boll-macd-adverse-only-360d-fast
+          git show FETCH_HEAD:run_v160_365d_2000u.py > run_v160_365d_2000u.py
+          git show FETCH_HEAD:run_v165_1000d_2000u.py > run_v165_1000d_2000u.py
+          git show FETCH_HEAD:run_v166_entry_expansion_4way_360d.py > run_v166_entry_expansion_4way_360d.py
+          git show FETCH_HEAD:run_v166_15m_boll_macd_adverse_only_360d_fast.py > run_v166_15m_boll_macd_adverse_only_360d_fast.py
+          git show FETCH_HEAD:run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py > run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py
+          git show FETCH_HEAD:research_backtest_data_cache.py > research_backtest_data_cache.py
+
+      - name: Preflight audit
+        run: |
+          python -m py_compile \
+            research_v146_backtest.py research_v1544_cache_patch.py research_v1544_180d_backtest.py \
+            run_v1544_180d_fixed.py run_v160_365d_2000u.py run_v165_1000d_2000u.py \
+            run_v166_entry_expansion_4way_360d.py \
+            run_v166_15m_boll_macd_adverse_only_360d_fast.py \
+            run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py \
+            research_backtest_data_cache.py run_v168_180d_backtest_r2.py \
+            run_v168_boll5_overext035_180d.py run_v168_boll5_overext035_noema1h_180d.py \
+            run_v168_boll5_overext_grid_180d.py run_v168_boll5_overext010_no15mdir_180d.py \
+            run_v168_boll5_overext010_no15mdir_1000d.py
+          python -m unittest -v test_v168_update
+          python - <<'PY'
+          import run_v168_boll5_overext010_no15mdir_1000d as x
+          x.install_1000d()
+          x.verify_1000d_lock()
+          assert x.DAYS == 1000
+          assert abs(x.r.x.prev.OVEREXT_ATR_MULT - 0.10) < 1e-12
+          assert x.r.x.prev.base.THRESHOLD == 6.0
+          assert x.r.x.prev.base.BOLL_WINDOW_MS == 900000
+          assert x.r.x.prev.base.proven.prod.trend_direction is x.r._direction_1h_only
+          print('AUDIT PASS: V1.6.8 NoEMA1H + BOLL5 0.10 ATR + 1H-only direction, 1000D; 15m direction gate removed only')
+          PY
+
+      - name: Run audited 1000D A/B backtest
+        run: time python run_v168_boll5_overext010_no15mdir_1000d.py
+
+      - name: Verify 1000D result payload
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('backtest_output_v168_boll5_overext010_no15mdir_1000d/result_v168_boll5_overext010_noema1h_no15mdir_1000d.json')
+          d=json.loads(p.read_text())
+          assert d['window']['days'] == 1000
+          assert d['metrics']['days'] == 1000
+          s=d['strategy_lock']
+          assert s['1h_ema9_26_score_enabled'] is False
+          assert s['15m_direction_hard_gate_enabled'] is False
+          assert abs(float(s['5m_boll_overextension_threshold_atr14'])-0.10) < 1e-12
+          assert s['boll_signal_lifetime_ms'] == 900000
+          assert s['break_even'] is False and s['pee'] is False and s['adx'] is False
+          assert int(d['metrics']['trades'] or 0) > 0, 'ANOMALY: zero trades; do not trust result'
+          print(json.dumps({
+            'days': d['window']['days'],
+            'trades': d['metrics']['trades'],
+            'wins': d['metrics']['wins'],
+            'win_rate_pct': d['metrics']['win_rate_pct'],
+            'net_pnl': d['metrics']['net_pnl'],
+            'profit_factor': d['metrics']['profit_factor'],
+            'max_drawdown_pct': d['metrics']['max_drawdown_pct'],
+            'boll5_plus1_filled': (d.get('boll5_overextension') or {}).get('filled_trade_count_with_plus1'),
+            'direction_gate_ab': (d.get('analysis') or {}).get('direction_gate_ab'),
+          }, ensure_ascii=False, indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.6.8-BOLL5-OVEREXT010-NOEMA1H-NO15MDIR-1000D-2000U
+          path: backtest_output_v168_boll5_overext010_no15mdir_1000d/
+          if-no-files-found: error
+          retention-days: 30
