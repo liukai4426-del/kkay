@@ -57,6 +57,19 @@ jobs:
           git show FETCH_HEAD:run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py > run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py
           git show FETCH_HEAD:research_backtest_data_cache.py > research_backtest_data_cache.py
 
+      - name: Patch ABC variant compatibility only
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('research_v1544_180d_backtest.py')
+          s = p.read_text(encoding='utf-8')
+          old = '    if name == "baseline":\n        return True\n'
+          new = '    if name in {"baseline", "A_adx30m", "B_pee3", "C_profit_pee3_dynamic", "adx30m_baseline", "adx30m_pee3"}:\n        return True\n'
+          assert old in s, 'legacy variant gate signature changed'
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          print('PASS: legacy variant gate accepts ABC labels; strategy logic unchanged')
+          PY
+
       - name: Compile and verify ABC strategy lock
         run: |
           python -m py_compile \
