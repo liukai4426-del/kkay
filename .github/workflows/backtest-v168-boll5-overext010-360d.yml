@@ -103,3 +103,5 @@ jobs:
           path: backtest_output_v168_boll5_overext010_360d/
           if-no-files-found: error
           retention-days: 30
+
+# trigger: baseline control run
