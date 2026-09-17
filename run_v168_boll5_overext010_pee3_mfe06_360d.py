@@ -114,3 +114,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# CI trigger: rebuilt 360D research dataset for BOLL5 0.10 ATR + PEE3 MFE0.60.
