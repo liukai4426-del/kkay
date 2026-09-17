@@ -1,0 +1,114 @@
+name: Backtest KAYTRADE V1.6.8 EMA26 + PEE3 MFE0.7 360D 2000U
+
+on:
+  push:
+    branches: [research/v168-ema26-pee3-mfe07-360d]
+    paths:
+      - run_v168_ema26_pee3_mfe07_360d.py
+      - .github/workflows/backtest-v168-ema26-pee3-mfe07-360d.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      BACKTEST_MARKET_CACHE: .backtest_cache
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install runtime dependencies
+        run: python -m pip install 'certifi==2025.8.3' 'websocket-client==1.8.0'
+
+      - name: Restore BTC market cache
+        uses: actions/cache@v4
+        with:
+          path: .backtest_cache
+          key: kaytrade-v168-okx-btc-360d-end-20260914-market-v1
+          restore-keys: |
+            kaytrade-v168-okx-btc-360d-
+            kaytrade-v168-okx-btc-365d-
+            kaytrade-v168-okx-btc-180d-
+            kaytrade-okx-btc-
+
+      - name: Materialize audited simulator, proven R2 path and PEE3 engine
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+          git fetch --depth=1 origin research/v155-outer-bands-180d
+          git show FETCH_HEAD:research_v1544_cache_patch.py > research_v1544_cache_patch.py
+          git show FETCH_HEAD:research_v1544_180d_backtest.py > research_v1544_180d_backtest.py
+          git show FETCH_HEAD:run_v1544_180d_fixed.py > run_v1544_180d_fixed.py
+          git fetch --depth=1 origin research/v166-15m-boll-macd-adverse-only-360d-fast
+          git show FETCH_HEAD:run_v160_365d_2000u.py > run_v160_365d_2000u.py
+          git show FETCH_HEAD:run_v165_1000d_2000u.py > run_v165_1000d_2000u.py
+          git show FETCH_HEAD:run_v166_entry_expansion_4way_360d.py > run_v166_entry_expansion_4way_360d.py
+          git show FETCH_HEAD:run_v166_15m_boll_macd_adverse_only_360d_fast.py > run_v166_15m_boll_macd_adverse_only_360d_fast.py
+          git show FETCH_HEAD:run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py > run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py
+          git show FETCH_HEAD:research_backtest_data_cache.py > research_backtest_data_cache.py
+          git fetch --depth=1 origin research/v168-adx30m-pee3-profit1r-360-720
+          git show FETCH_HEAD:run_v168_adx_30m_backtest.py > run_v168_adx_30m_backtest.py
+          git show FETCH_HEAD:run_v168_adx30m_pee3_compare.py > run_v168_adx30m_pee3_compare.py
+
+      - name: Compile and verify exact strategy lock
+        run: |
+          python -m py_compile \
+            research_v146_backtest.py research_v1544_cache_patch.py research_v1544_180d_backtest.py \
+            run_v1544_180d_fixed.py run_v160_365d_2000u.py run_v165_1000d_2000u.py \
+            run_v166_entry_expansion_4way_360d.py \
+            run_v166_15m_boll_macd_adverse_only_360d_fast.py \
+            run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py \
+            research_backtest_data_cache.py run_v168_180d_backtest_r2.py \
+            run_v168_ema26_pullback_360d.py run_v168_adx_30m_backtest.py \
+            run_v168_adx30m_pee3_compare.py run_v168_ema26_pee3_mfe07_360d.py
+          python - <<'PY'
+          import run_v168_ema26_pee3_mfe07_360d as x
+          start,end=x.configure()
+          x.verify_lock(start,end)
+          assert x.DAYS == 360
+          assert x.MFE_CUTOFF_R == 0.70
+          assert x.ema.TOL_ATR15 == 0.25
+          assert x.ema.HistoricalV168EMA26PullbackModel.ENTRY_WINDOW_MS == 900000
+          assert x.base.THRESHOLD == 6.0
+          assert x.pee.PEE_VERSION == '3.0'
+          assert x.pee.MONITOR_MAX_MS == 14400000
+          print('PASS: V1.6.8 EMA26 pullback + PEE3 first 4H, MFE>=0.70R disables PEE3')
+          PY
+
+      - name: Run 360D backtest
+        run: time python run_v168_ema26_pee3_mfe07_360d.py
+
+      - name: Verify result payload
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('backtest_output_v168_ema26_pee3_mfe07_360d/result_v168_ema26_pee3_mfe07_360d.json')
+          d=json.loads(p.read_text())
+          assert d['window']['days'] == 360
+          s=d['strategy_lock']
+          assert s['boll_signal_lifetime_ms'] == 900000
+          assert s['1h_ema9_26_trend_score'] == 0.0
+          assert s['1h_ema26_pullback_score'] == 1.0
+          assert s['ema26_pullback_tolerance_atr15'] == 0.25
+          assert s['pee_version'] == '3.0'
+          assert s['pee_monitor_minutes'] == 240
+          assert s['pee_mfe_cutoff_r'] == 0.70
+          assert s['break_even'] is False and s['adx'] is False
+          assert int(d['metrics']['trades'] or 0) > 0, 'ANOMALY: zero trades; inspect before trusting result'
+          print(json.dumps(d,ensure_ascii=False,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.6.8-EMA26-PEE3-MFE07-360D-2000U
+          path: backtest_output_v168_ema26_pee3_mfe07_360d/
+          if-no-files-found: error
+          retention-days: 30
