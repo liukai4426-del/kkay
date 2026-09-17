@@ -1,0 +1,99 @@
+name: Backtest KAYTRADE V1.6.8 ADX30m Fixed 180D
+
+on:
+  push:
+    branches: [research/v168-adx30m-pee3-profit1r-360-720]
+    paths:
+      - run_v168_adx_30m_backtest.py
+      - .github/workflows/backtest-v168-adx30m-fixed-180d.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backtest-180d:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      BACKTEST_MARKET_CACHE: .backtest_cache
+      BACKTEST_DAYS: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install runtime dependencies
+        run: python -m pip install 'certifi==2025.8.3' 'websocket-client==1.8.0'
+
+      - name: Restore BTC market cache
+        uses: actions/cache@v4
+        with:
+          path: .backtest_cache
+          key: kaytrade-v168-adx30m-fixed-180d-end-20260914-market-v1
+          restore-keys: |
+            kaytrade-v168-180d-
+            kaytrade-okx-btc-180d-
+            kaytrade-okx-btc-
+
+      - name: Materialize audited historical simulator and proven R2 path
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+          git fetch --depth=1 origin research/v155-outer-bands-180d
+          git show FETCH_HEAD:research_v1544_cache_patch.py > research_v1544_cache_patch.py
+          git show FETCH_HEAD:research_v1544_180d_backtest.py > research_v1544_180d_backtest.py
+          git show FETCH_HEAD:run_v1544_180d_fixed.py > run_v1544_180d_fixed.py
+          git fetch --depth=1 origin research/v166-15m-boll-macd-adverse-only-360d-fast
+          git show FETCH_HEAD:run_v160_365d_2000u.py > run_v160_365d_2000u.py
+          git show FETCH_HEAD:run_v165_1000d_2000u.py > run_v165_1000d_2000u.py
+          git show FETCH_HEAD:run_v166_entry_expansion_4way_360d.py > run_v166_entry_expansion_4way_360d.py
+          git show FETCH_HEAD:run_v166_15m_boll_macd_adverse_only_360d_fast.py > run_v166_15m_boll_macd_adverse_only_360d_fast.py
+          git show FETCH_HEAD:run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py > run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py
+          git show FETCH_HEAD:research_backtest_data_cache.py > research_backtest_data_cache.py
+
+      - name: Compile and verify fixed strategy lock
+        run: |
+          python -m py_compile \
+            research_v146_backtest.py research_v1544_cache_patch.py research_v1544_180d_backtest.py \
+            run_v1544_180d_fixed.py run_v160_365d_2000u.py run_v165_1000d_2000u.py \
+            run_v166_entry_expansion_4way_360d.py \
+            run_v166_15m_boll_macd_adverse_only_360d_fast.py \
+            run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py \
+            research_backtest_data_cache.py run_v168_180d_backtest_r2.py run_v168_adx_30m_backtest.py
+          python - <<'PY'
+          import run_v168_adx_30m_backtest as x
+          x.configure(180)
+          x.verify_lock(180)
+          assert x.ADX_THRESHOLD == 25.0
+          assert x.BOLL_WINDOW_MS == 1800000
+          print('PASS: V1.6.8 ADX30m fixed 180D strategy lock')
+          PY
+
+      - name: Run fixed 180D backtest
+        run: time python run_v168_adx_30m_backtest.py
+
+      - name: Verify result payload
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('backtest_output_v168_adx30m_180d/result_v168_adx30m_180d.json')
+          d=json.loads(p.read_text())
+          assert d['window']['days'] == 180
+          assert d['correction']['execution_window_missing_now_ms_fix'] is True
+          assert d['correction']['legacy_variant_gate_fix'] is True
+          assert d['strategy_lock']['boll_signal_lifetime_ms'] == 1800000
+          assert d['strategy_lock']['5m_adx_threshold'] == 25.0
+          assert int(d['metrics']['trades'] or 0) > 0
+          print(json.dumps(d,ensure_ascii=False,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.6.8-ADX30m-Fixed-180D-2000U
+          path: backtest_output_v168_adx30m_180d/
+          if-no-files-found: error
+          retention-days: 30
