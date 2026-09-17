@@ -1,0 +1,133 @@
+name: Backtest V1.6.8 BOLL5 Overextension Grid 180D 2000U
+
+on:
+  push:
+    branches: [research/v168-boll5-overext-grid-180d]
+    paths:
+      - run_v168_boll5_overext_grid_180d.py
+      - .github/workflows/backtest-v168-boll5-overext-grid-180d.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    name: BOLL5 ${{ matrix.threshold }} ATR 180D
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - threshold: '0.10'
+            tag: '010'
+          - threshold: '0.15'
+            tag: '015'
+          - threshold: '0.20'
+            tag: '020'
+          - threshold: '0.25'
+            tag: '025'
+    env:
+      BACKTEST_MARKET_CACHE: .backtest_cache
+      BOLL5_OVEREXT_ATR_MULT: ${{ matrix.threshold }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install runtime dependencies
+        run: python -m pip install 'certifi==2025.8.3' 'websocket-client==1.8.0'
+
+      - name: Restore audited 180D BTC market cache
+        uses: actions/cache@v4
+        with:
+          path: .backtest_cache
+          key: kaytrade-v168-okx-btc-180d-end-20260914-market-v1
+          restore-keys: |
+            kaytrade-v168-okx-btc-180d-
+            kaytrade-okx-btc-
+
+      - name: Materialize audited historical simulator and proven R2 path
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+          git fetch --depth=1 origin research/v155-outer-bands-180d
+          git show FETCH_HEAD:research_v1544_cache_patch.py > research_v1544_cache_patch.py
+          git show FETCH_HEAD:research_v1544_180d_backtest.py > research_v1544_180d_backtest.py
+          git show FETCH_HEAD:run_v1544_180d_fixed.py > run_v1544_180d_fixed.py
+          git fetch --depth=1 origin research/v166-15m-boll-macd-adverse-only-360d-fast
+          git show FETCH_HEAD:run_v160_365d_2000u.py > run_v160_365d_2000u.py
+          git show FETCH_HEAD:run_v165_1000d_2000u.py > run_v165_1000d_2000u.py
+          git show FETCH_HEAD:run_v166_entry_expansion_4way_360d.py > run_v166_entry_expansion_4way_360d.py
+          git show FETCH_HEAD:run_v166_15m_boll_macd_adverse_only_360d_fast.py > run_v166_15m_boll_macd_adverse_only_360d_fast.py
+          git show FETCH_HEAD:run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py > run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py
+          git show FETCH_HEAD:research_backtest_data_cache.py > research_backtest_data_cache.py
+
+      - name: Preflight audit
+        run: |
+          python -m py_compile \
+            research_v146_backtest.py research_v1544_cache_patch.py research_v1544_180d_backtest.py \
+            run_v1544_180d_fixed.py run_v160_365d_2000u.py run_v165_1000d_2000u.py \
+            run_v166_entry_expansion_4way_360d.py \
+            run_v166_15m_boll_macd_adverse_only_360d_fast.py \
+            run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py \
+            research_backtest_data_cache.py run_v168_180d_backtest_r2.py \
+            run_v168_boll5_overext035_180d.py run_v168_boll5_overext035_noema1h_180d.py \
+            run_v168_boll5_overext_grid_180d.py
+          python -m unittest -v test_v168_update
+          python - <<'PY'
+          import os
+          import run_v168_boll5_overext035_noema1h_180d as x
+          t=float(os.environ['BOLL5_OVEREXT_ATR_MULT'])
+          assert t in (0.10,0.15,0.20,0.25)
+          assert x.prev.OVEREXT_SCORE == 1.0
+          assert x.prev.base.THRESHOLD == 6.0
+          assert x.prev.base.BOLL_WINDOW_MS == 900000
+          assert x.prev.base.research.Simulator.process_exit is x.prev.base.proven._ORIG_EXIT
+          print(f'AUDIT PASS: exact V1.6.8 R2 NoEMA1H, BOLL5 threshold={t:.2f}, no PEE/ADX/BE')
+          PY
+
+      - name: Run audited 180D threshold backtest
+        run: time python run_v168_boll5_overext_grid_180d.py
+
+      - name: Verify result payload
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          t=float(os.environ['BOLL5_OVEREXT_ATR_MULT'])
+          tag=f'{int(round(t*100)):03d}'
+          p=Path(f'backtest_output_v168_boll5_overext{tag}_noema1h_180d/result_v168_boll5_overext{tag}_noema1h_180d.json')
+          d=json.loads(p.read_text())
+          assert d['window']['days'] == 180
+          assert abs(float(d['grid_threshold_atr14'])-t) < 1e-12
+          s=d['strategy_lock']
+          assert s['1h_ema9_26_score_enabled'] is False
+          assert s['1h_ema9_26_score'] == 0.0
+          assert s['5m_boll_overextension_score'] == 1.0
+          assert abs(float(s['5m_boll_overextension_threshold_atr14'])-t) < 1e-12
+          assert s['boll_signal_lifetime_ms'] == 900000
+          assert s['break_even'] is False and s['pee'] is False and s['adx'] is False
+          assert int(d['metrics']['trades'] or 0) > 0, 'ANOMALY: zero trades; do not trust result'
+          print(json.dumps({
+            'threshold': t,
+            'trades': d['metrics']['trades'],
+            'wins': d['metrics']['wins'],
+            'win_rate_pct': d['metrics']['win_rate_pct'],
+            'net_pnl': d['metrics']['net_pnl'],
+            'profit_factor': d['metrics']['profit_factor'],
+            'max_drawdown_pct': d['metrics']['max_drawdown_pct'],
+            'boll5_plus1_filled': (d.get('boll5_overextension') or {}).get('filled_trade_count_with_plus1'),
+          }, ensure_ascii=False, indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.6.8-BOLL5-OVEREXT${{ matrix.tag }}-NOEMA1H-180D-2000U
+          path: backtest_output_v168_boll5_overext${{ matrix.tag }}_noema1h_180d/
+          if-no-files-found: error
+          retention-days: 30
