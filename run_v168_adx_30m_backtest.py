@@ -264,9 +264,21 @@ class HistoricalV168Adx30mModel:
             blockers.append("V1.6.8 ADX30m：4H非同向 Hard Gate")
         if bool(conf.get("5m_adx_hard_gate_block")):
             blockers.append("V1.6.8 ADX30m：5m ADX强逆向 Hard Gate")
-        opened, age_ms, remaining_ms, end_ms = _signal_window_30m(opportunity, int(diag.get("now_ms") or 0))
-        if not opened:
-            blockers.append("V1.6.8 ADX30m：15m BOLL触发已超过30分钟有效期")
+
+        # R2-compatible lifecycle handling: do not coerce a missing execution
+        # timestamp to zero. The proven R2 check above already enforces the
+        # production lifecycle. Re-check the research 30m window only when a
+        # real diagnostic timestamp is available.
+        now_ms = int(diag.get("now_ms") or 0)
+        opened = diag.get("signal_window_ok")
+        age_ms = diag.get("signal_age_ms")
+        remaining_ms = diag.get("signal_remaining_ms")
+        end_ms = diag.get("signal_expires_ms")
+        if now_ms > 0:
+            opened, age_ms, remaining_ms, end_ms = _signal_window_30m(opportunity, now_ms)
+            if not opened:
+                blockers.append("V1.6.8 ADX30m：15m BOLL触发已超过30分钟有效期")
+
         blockers = _dedupe(blockers)
         diag.update({
             "strategy_version": VERSION,
@@ -276,6 +288,7 @@ class HistoricalV168Adx30mModel:
             "signal_age_ms": age_ms,
             "signal_remaining_ms": remaining_ms,
             "signal_expires_ms": end_ms,
+            "adx30m_execution_window_missing_now_ms_fix": True,
             "1h_ema9_26_score_enabled": False,
             "5m_adx_score_enabled": True,
             "5m_adx_hard_gate": True,
@@ -328,7 +341,7 @@ def configure(days):
 
 
 def verify_lock(days):
-    assert int(days) in (360, 720)
+    assert int(days) in (180, 360, 720)
     assert HistoricalV168Adx30mModel.ENTRY_WINDOW_MS == 1_800_000
     assert HistoricalV168Adx30mModel.THRESHOLD == 6.0
     assert HistoricalV168Adx30mModel.BOLL_OUTER_SCORE == 2.0
@@ -359,7 +372,10 @@ def main():
     base.research.cache_patch.prime_one_minute(data["1m"], base.research.MODEL_WINDOW)
 
     sim_started = time.perf_counter()
-    sim, raw_metrics = base.research.run(data, ts, meta, funding, variant="adx30m")
+    # The legacy research simulator only recognizes its built-in variant labels.
+    # This runner already installs the ADX30m model above, so use baseline here
+    # to avoid the legacy variant_accept("adx30m") ValueError.
+    sim, raw_metrics = base.research.run(data, ts, meta, funding, variant="baseline")
     sim_elapsed = time.perf_counter() - sim_started
     rows = list(sim.trades)
     metrics = dict(raw_metrics)
@@ -406,6 +422,12 @@ def main():
         "top_blockers": sim.blockers.most_common(30),
         "transitions": dict(sim.transitions),
         "cache": cache_manifest,
+        "correction": {
+            "revision": "ADX30m-R2",
+            "execution_window_missing_now_ms_fix": True,
+            "legacy_variant_gate_fix": True,
+            "strategy_variables_changed": False,
+        },
         "timing_sec": {"market_load": market_elapsed, "simulation": sim_elapsed, "total": elapsed},
         "limitations": [
             "Historical LIMIT fills use the audited closed-1m proxy; order-book queue position is unavailable.",
@@ -418,7 +440,8 @@ def main():
     base._write_csv(rows, csv_path)
     (out / "README.txt").write_text(
         f"KAYTRADE V1.6.8 ADX30m {days}D research backtest.\n"
-        "Changes: remove 1H EMA9/26 +1; 5m ADX14 aligned DI +1; strong opposite ADX Hard Gate; 15m BOLL signal valid 30m.\n",
+        "Changes: remove 1H EMA9/26 +1; 5m ADX14 aligned DI +1; strong opposite ADX Hard Gate; 15m BOLL signal valid 30m.\n"
+        "R2 plumbing fix: missing execution now_ms is not coerced to zero; legacy simulator uses baseline label while ADX30m model stays installed.\n",
         encoding="utf-8",
     )
     print("V168_ADX30M_RESULT", json.dumps(payload, ensure_ascii=False, indent=2), flush=True)
