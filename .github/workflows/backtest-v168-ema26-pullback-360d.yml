@@ -1,0 +1,114 @@
+name: Backtest KAYTRADE V1.6.8 EMA26 Pullback 360D 2000U
+
+on:
+  push:
+    branches: [research/v168-ema26-pullback-360d]
+    paths:
+      - run_v168_ema26_pullback_360d.py
+      - .github/workflows/backtest-v168-ema26-pullback-360d.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      BACKTEST_MARKET_CACHE: .backtest_cache
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install runtime dependencies
+        run: python -m pip install 'certifi==2025.8.3' 'websocket-client==1.8.0'
+
+      - name: Restore BTC market cache
+        uses: actions/cache@v4
+        with:
+          path: .backtest_cache
+          key: kaytrade-v168-okx-btc-360d-end-20260914-market-v1
+          restore-keys: |
+            kaytrade-v168-okx-btc-360d-
+            kaytrade-v168-okx-btc-365d-
+            kaytrade-v168-okx-btc-180d-
+            kaytrade-okx-btc-
+
+      - name: Materialize audited historical simulator and proven R2 path
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+          git fetch --depth=1 origin research/v155-outer-bands-180d
+          git show FETCH_HEAD:research_v1544_cache_patch.py > research_v1544_cache_patch.py
+          git show FETCH_HEAD:research_v1544_180d_backtest.py > research_v1544_180d_backtest.py
+          git show FETCH_HEAD:run_v1544_180d_fixed.py > run_v1544_180d_fixed.py
+          git fetch --depth=1 origin research/v166-15m-boll-macd-adverse-only-360d-fast
+          git show FETCH_HEAD:run_v160_365d_2000u.py > run_v160_365d_2000u.py
+          git show FETCH_HEAD:run_v165_1000d_2000u.py > run_v165_1000d_2000u.py
+          git show FETCH_HEAD:run_v166_entry_expansion_4way_360d.py > run_v166_entry_expansion_4way_360d.py
+          git show FETCH_HEAD:run_v166_15m_boll_macd_adverse_only_360d_fast.py > run_v166_15m_boll_macd_adverse_only_360d_fast.py
+          git show FETCH_HEAD:run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py > run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py
+          git show FETCH_HEAD:research_backtest_data_cache.py > research_backtest_data_cache.py
+
+      - name: Compile and verify exact strategy lock
+        run: |
+          python -m py_compile \
+            research_v146_backtest.py research_v1544_cache_patch.py research_v1544_180d_backtest.py \
+            run_v1544_180d_fixed.py run_v160_365d_2000u.py run_v165_1000d_2000u.py \
+            run_v166_entry_expansion_4way_360d.py \
+            run_v166_15m_boll_macd_adverse_only_360d_fast.py \
+            run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py \
+            research_backtest_data_cache.py run_v168_180d_backtest_r2.py \
+            run_v168_ema26_pullback_360d.py
+          python - <<'PY'
+          import run_v168_ema26_pullback_360d as x
+          start,end=x.configure()
+          x.verify_lock(start,end)
+          assert x.DAYS == 360
+          assert x.TOL_ATR15 == 0.25
+          assert x.HistoricalV168EMA26PullbackModel.ENTRY_WINDOW_MS == 900000
+          assert x.HistoricalV168EMA26PullbackModel.BOLL_TRIGGER_TIMEFRAME == '15m'
+          assert x.base.THRESHOLD == 6.0
+          # Deterministic unit checks for EMA26 support/resistance touch logic.
+          qlong=[{'c':102.0,'h':103.0,'l':101.5},{'c':100.5,'h':102.0,'l':99.5}]
+          qshort=[{'c':98.0,'h':98.5,'l':97.0},{'c':99.5,'h':100.5,'l':98.0}]
+          ok,_,_=x._pullback_state('做多', qlong, 100.0, 4.0)
+          assert ok is True
+          ok,_,_=x._pullback_state('做空', qshort, 100.0, 4.0)
+          assert ok is True
+          print('PASS: V1.6.8 R2 exact + EMA26 pullback score replacement, 360D')
+          PY
+
+      - name: Run 360D backtest
+        run: time python run_v168_ema26_pullback_360d.py
+
+      - name: Verify result payload
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('backtest_output_v168_ema26_pullback_360d/result_v168_ema26_pullback_360d.json')
+          d=json.loads(p.read_text())
+          assert d['window']['days'] == 360
+          s=d['strategy_lock']
+          assert s['baseline'] == 'V1.6.8 Build1680 R2'
+          assert s['boll_signal_lifetime_ms'] == 900000
+          assert s['1h_ema9_26_trend_score'] == 0.0
+          assert s['1h_ema26_pullback_score'] == 1.0
+          assert s['ema26_pullback_tolerance_atr15'] == 0.25
+          assert s['break_even'] is False and s['pee'] is False and s['adx'] is False
+          assert d['correction']['only_strategy_delta'].startswith('replace 1H EMA9/26')
+          assert int(d['metrics']['trades'] or 0) > 0, 'ANOMALY: zero trades; inspect before trusting result'
+          print(json.dumps(d,ensure_ascii=False,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.6.8-EMA26-PULLBACK-360D-2000U
+          path: backtest_output_v168_ema26_pullback_360d/
+          if-no-files-found: error
+          retention-days: 30
