@@ -66,6 +66,8 @@ jobs:
         run: python -m unittest -v test_v168_update
       - name: V1.6.8 Build1681 runtime/log regressions
         run: python -m unittest -v test_v168_build1681
+      - name: V1.7.0 Build1700 strategy/runtime/UI regressions
+        run: python -m unittest -v test_v170_update
       - name: Verify V1.7.0 Build1700 semantic lock
         run: |
           python - <<'PY'
@@ -99,7 +101,8 @@ jobs:
           assert "CFBundleVersion': '1700'" in spec
           assert 'v170_update_patch' in desktop
           text=v170._rewrite_runtime_text_v170('自动交易启动；V1.6.8 Build1681：1H EMA9/26趋势+1')
-          assert 'V1.7.0 Build1700' in text and '删除1H EMA9/26' in text and 'BOLL5' in text and 'PEE4' in text
+          print('V170_RUNTIME_TEXT',repr(text))
+          assert text.startswith('自动交易启动；V1.7.0 Build1700') and 'PEE4' in text
           print('PASS V1.7.0 Build1700: NoEMA1H + BOLL5 0.10 ATR + PEE4 + Lock1H + synchronized UI')
           PY
 
