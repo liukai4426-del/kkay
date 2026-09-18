@@ -86,7 +86,7 @@ jobs:
           from pathlib import Path
           p=Path('backtest_output_v170_1h_only_direction_360d/result_v170_1h_only_direction_360d.json')
           d=json.loads(p.read_text(encoding='utf-8'))
-          assert d['window']['days'] == 720
+          assert d['window']['days'] == 360
           s=d['strategy_lock']
           assert s['version'] == '1.7.0'
           assert s['build'] == '1700'
