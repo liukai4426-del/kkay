@@ -62,12 +62,12 @@ jobs:
         run: |
           python -m py_compile             research_v146_backtest.py research_v1544_cache_patch.py research_v1544_180d_backtest.py             run_v1544_180d_fixed.py run_v160_365d_2000u.py run_v165_1000d_2000u.py             run_v166_entry_expansion_4way_360d.py run_v166_15m_boll_macd_adverse_only_360d_fast.py             run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py research_backtest_data_cache.py             run_v168_180d_backtest_r2.py run_v168_boll5_overext035_180d.py             run_v168_boll5_overext035_pee3_mfe06_180d.py run_v168_boll5_overext010_pee4_365d.py             run_v170_1h_only_direction_360d.py
           python - <<'PY'
-          import run_v170_360d_backtest as x
+          import run_v170_1h_only_direction_360d as x
           x._patch()
           start,end=x.src.configure()
           x.verify(start,end)
-          assert x.DAYS == 720
-          assert (end-start).days == 720
+          assert x.DAYS == 360
+          assert (end-start).days == 360
           assert x.VERSION == '1.7.0' and x.BUILD == '1700'
           assert x.src.base.THRESHOLD == 6.0
           assert x.src.base.BOLL_WINDOW_MS == 900000
@@ -76,7 +76,7 @@ jobs:
           print('AUDIT PASS: V1.7.0 Build1700 1H-only primary-direction Hard Gate, 360D')
           PY
 
-      - name: Run V1.7.0 360D backtest
+      - name: Run V1.7.0 1H-only direction 360D backtest
         run: time python run_v170_1h_only_direction_360d.py
 
       - name: Verify result payload
