@@ -175,7 +175,7 @@ class V170Tests(unittest.TestCase):
         )
         self.assertIn("V1.7.0 Build1700", text)
         self.assertIn("删除1H EMA9/26", text)
-        self.assertIn("BOLL5", text)
+        self.assertIn("0.10×ATR14", text)
         self.assertNotIn("EMA9/26趋势+1", text)
 
 
