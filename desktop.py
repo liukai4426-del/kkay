@@ -51,6 +51,11 @@ apply_v168_update_patch()
 from v168_build1681_patch import apply as apply_v168_build1681_patch
 apply_v168_build1681_patch()
 
+from v170_update_patch import apply as apply_v170_update_patch
+apply_v170_update_patch()
+from v170_build1701_patch import apply as apply_v170_build1701_patch
+apply_v170_build1701_patch()
+
 
 def smoke_test():
     """Exercise the packaged UI without credentials, network, or orders."""
@@ -71,6 +76,8 @@ def smoke_test():
     import v167_15m_boll_only_fix as b1671
     import v168_update_patch as v168
     import v168_build1681_patch as b1681
+    import v170_update_patch as v170
+    import v170_build1701_patch as v1701
     assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
     assert getattr(exchange.Exchange,'_kaytrade_v165_algo_fallback_applied',False)
     assert getattr(exchange.Exchange,'_kaytrade_v165_runtime_network_state_applied',False)
@@ -91,9 +98,17 @@ def smoke_test():
     assert getattr(app.App,'_kaytrade_v168_applied',False)
     assert getattr(model,'_kaytrade_v168_build1681_applied',False)
     assert getattr(app.App,'_kaytrade_v168_build1681_applied',False)
-    assert b1681.VERSION == '1.6.8' and b1681.BUILD == '1681'
-    assert v168.VERSION == '1.6.8' and v168.BUILD == '1681'
-    assert model.VERSION == '1.6.8' and model.BUILD == '1681'
+    assert getattr(model,'_kaytrade_v170_applied',False)
+    assert getattr(engine.Engine,'_kaytrade_v170_applied',False)
+    assert getattr(exchange.Exchange,'_kaytrade_v170_applied',False)
+    assert getattr(app.App,'_kaytrade_v170_applied',False)
+    assert getattr(model,'_kaytrade_v170_build1701_applied',False)
+    assert getattr(app.App,'_kaytrade_v170_build1701_applied',False)
+    assert v1701.VERSION == '1.7.0' and v1701.BUILD == '1701'
+    assert v170.VERSION == '1.7.0' and v170.BUILD == '1701'
+    assert b1681.VERSION == '1.7.0' and b1681.BUILD == '1701'
+    assert v168.VERSION == '1.7.0' and v168.BUILD == '1701'
+    assert model.VERSION == '1.7.0' and model.BUILD == '1701'
     assert model.THRESHOLD == 6.0
     assert model.ENTRY_WINDOW_MS == 900000
     assert model.BOLL_OUTER_SCORE == 2.0
@@ -106,7 +121,8 @@ def smoke_test():
     assert status_labels['boll']=='15m BOLL外轨触发'
     assert status_labels['signal_window']=='15m BOLL信号有效'
     assert status_labels['outer_4h']=='4H同向 Hard Gate'
-    assert status_labels['ema1h']=='1H EMA9/26趋势'
+    assert 'ema1h' not in status_labels
+    assert status_labels['boll5_overext']=='5m BOLL超伸 +1'
     assert status_labels['macd_clean']=='MACD非逆向'
     assert status_labels['rsi_gate']=='5m RSI 30–70'
     legacy=(
@@ -114,8 +130,8 @@ def smoke_test():
         'V1.6.2要求4H同向：5m BOLL中轨/外轨在4H中性或逆向时禁止开仓；'
         'V1.6.6 Volume Hard Gate：5m信号K量能 1.89× ≥ 1.20×，禁止开仓'
     )
-    normalized=b1681._rewrite_runtime_text_v1681(legacy)
-    assert 'V1.6.8' in normalized and '15m BOLL外轨' in normalized and '计划限价' in normalized and '第5分钟' in normalized
+    normalized=v170._rewrite_runtime_text_v170(legacy)
+    assert 'V1.7.0' in normalized and '15m BOLL外轨' in normalized and '计划限价' in normalized and '第5分钟' in normalized
     assert re.search(r'(?<!\d)5m\s+BOLL', normalized) is None
     assert '中轨' not in normalized and '市价参考' not in normalized
     sync=b1681._rewrite_runtime_text_v1681(
@@ -127,7 +143,7 @@ def smoke_test():
         try:
             with patch.object(app.App,'worker',lambda self:None), patch.object(app.messagebox,'showerror',side_effect=AssertionError):
                 ui=app.App(root,Path(folder)); root.update()
-                assert 'KAYTRADE' in root.title() and '1.6.8' in root.title() and '1681' in root.title()
+                assert 'KAYTRADE' in root.title() and '1.7.0' in root.title() and '1701' in root.title()
                 assert ui.mode.get() == 'OKX模拟盘'
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
@@ -136,14 +152,21 @@ def smoke_test():
                 assert getattr(ui,'_v167_strategy_ui_ready',False)
                 assert getattr(ui,'_v168_strategy_ui_ready',False)
                 assert getattr(ui,'_v168_build1681_ready',False)
-                label=getattr(ui,'_v168_version_label',None)
+                assert getattr(ui,'_v170_strategy_ui_ready',False)
+                assert getattr(ui,'_v170_build1701_ready',False)
+                label=getattr(ui,'_v170_version_label',None)
                 if label is not None:
-                    assert '1.6.8' in str(label.cget('text'))
+                    assert '1.7.0' in str(label.cget('text'))
                 assert '15m BOLL外轨2分' in ui.signal.get()
                 assert '4H同向Hard Gate+1' in ui.signal.get()
-                assert '1H EMA9/26趋势+1' in ui.signal.get()
+                assert 'BOLL5超伸0.10ATR +1' in ui.signal.get()
+                assert 'NoEMA1H' in ui.signal.get()
+                assert 'PEE4 + Lock1H' in ui.signal.get()
                 labels=dict(getattr(ui,'_v161_status_labels',{}) or {})
-                assert 'signal_window' in labels and 'outer_4h' in labels and 'ema1h' in labels
+                assert 'signal_window' in labels and 'outer_4h' in labels and 'boll5_overext' in labels
+                assert 'ema1h' not in labels
+                assert getattr(ui,'_v170_pee4_card',None) is not None
+                assert not ui.matrix.exists('k') and not ui.matrix.exists('d') and not ui.matrix.exists('j')
                 assert app.App.arm is ui165.app_arm_v165
                 assert ui.render_logs.__func__ is ui166._render_logs_v166
                 ui.stop(); assert ui.engine is None
@@ -151,7 +174,7 @@ def smoke_test():
         finally:
             root.destroy()
     Path(sys.argv[2]).write_text(
-        'PASS: KAYTRADE V1.6.8 Build1681 packaged UI/runtime; strategy is unchanged from Build1680, BOLL remains strict closed-15m outer-only with a 15m lifecycle, 4H alignment remains a +1 mandatory Hard Gate, 1H EMA9/EMA26 remains +1 score, legacy 5m BOLL/middle-window/market-reference text is normalized, Algo cache resync is shown as synchronization rather than a generic read failure, and write ambiguity remains fail-closed.\n'
+        'PASS: KAYTRADE V1.7.0 Build1701 packaged UI/runtime; strict closed-15m BOLL opportunity-source lock installed, run logs include long/short direction, 1H EMA9/26 score removed, BOLL5 overextension 0.10 ATR14 +1 latched, PEE4 tiered Boolean risk exit and global Lock1H installed, and inherited write ambiguity remains fail-closed.\n'
     )
 
 
