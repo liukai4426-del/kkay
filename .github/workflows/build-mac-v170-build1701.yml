@@ -85,8 +85,9 @@ jobs:
           import v170_build1701_patch as v1701
           spec=Path('OKXLocal.spec').read_text()
           desktop=Path('desktop.py').read_text()
-          assert v170.VERSION=='1.7.0' and v170.BUILD=='1700'
-          assert model.VERSION=='1.7.0' and model.BUILD=='1700'
+          assert v1701.VERSION=='1.7.0' and v1701.BUILD=='1701'
+          assert v170.VERSION=='1.7.0' and v170.BUILD=='1701'
+          assert model.VERSION=='1.7.0' and model.BUILD=='1701'
           assert model.THRESHOLD==6.0
           assert model.ENTRY_WINDOW_MS==900000
           assert model.BOLL_OUTER_SCORE==2.0
@@ -101,7 +102,7 @@ jobs:
           assert getattr(exchange.Exchange,'_kaytrade_v170_applied',False)
           assert getattr(app.App,'_kaytrade_v170_applied',False)
           assert "CFBundleShortVersionString': '1.7.0'" in spec
-          assert "CFBundleVersion': '1700'" in spec
+          assert "CFBundleVersion': '1701'" in spec
           assert 'v170_update_patch' in desktop and 'v170_build1701_patch' in desktop
           text=v1701._rewrite_runtime_text_v1701('自动交易启动；V1.6.8 Build1681：1H EMA9/26趋势+1')
           print('V170_RUNTIME_TEXT',repr(text))
@@ -148,7 +149,7 @@ jobs:
         run: |
           python verify_bundle.py
           /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1.7.0'
-          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1700'
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1701'
           codesign --verify --deep --strict dist/KAYTRADE.app
       - name: Packaged V1.7.0 Build1701 UI/runtime smoke test
         run: |
