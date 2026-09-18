@@ -289,7 +289,7 @@ let selectedOriginalIndex=0;
 let candles=[];
 let viewStart=0, viewEnd=100;
 let drag=false, dragX=0, dragStart=0, dragEnd=0;
-let mouse={x:-1,y:-1,inside:false};
+let mouse={{x:-1,y:-1,inside:false}};
 
 const COLORS={{
   bg:'#090b0e', grid:'#1b222b', text:'#8391a0', up:'#28c78f', down:'#f35b67',
@@ -362,7 +362,7 @@ function focusTrade(){{
 
 function applyFilters(){{
   const side=sideFilter.value,pnl=pnlFilter.value,q=searchInput.value.trim().toLowerCase();
-  filtered=allTrades.map((t,i)=>({{t,i}})).filter(({t,i})=>{{
+  filtered=allTrades.map((t,i)=>({{t,i}})).filter(({{t,i}})=>{{
     if(side!=='all'&&t.side!==side)return false;
     const p=Number(t.net_pnl);
     if(pnl==='win'&&!(p>0))return false;
