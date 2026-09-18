@@ -40,6 +40,7 @@ jobs:
             kaytrade-v168-okx-btc-360d-
             kaytrade-okx-btc-360d-
             kaytrade-okx-btc-
+          save-always: true
 
       - name: Materialize audited historical simulator and proven R2 path
         run: |
@@ -81,9 +82,14 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           p=Path('backtest_trade_viewer_v170_360d/KAYTRADE-V1.7.0-360D-Trade-Viewer.html')
+          text=p.read_text(encoding='utf-8')
           print('VIEWER_BYTES',p.stat().st_size)
           assert p.stat().st_size > 1_000_000
+          a=text.rfind('<script>'); b=text.rfind('</script>')
+          assert a >= 0 and b > a
+          Path('/tmp/kaytrade-viewer.js').write_text(text[a+8:b],encoding='utf-8')
           PY
+          node --check /tmp/kaytrade-viewer.js
 
       - uses: actions/upload-artifact@v4
         with:
