@@ -113,7 +113,7 @@ def _load_candles():
     runner.verify(start, end)
 
     _, market, _, manifest = load_market(
-        runner.src.base,
+        runner.src.base.research.base,
         timeframes=("5m",),
         root=os.environ.get("BACKTEST_MARKET_CACHE", ".backtest_cache"),
     )
@@ -383,8 +383,8 @@ function renderTradeList(){{
     const div=document.createElement('div');
     div.className='trade-item'+(i===selectedOriginalIndex?' active':'');
     const pnl=Number(t.net_pnl)||0;
-    div.innerHTML=`<div class="trade-top"><span><span class="badge \${{sideClass(t)}}">\${{t.side}}</span> #\${{i+1}}</span><span class="pnl \${{pnl>=0?'pos':'neg'}}">\${{signed(pnl,2)}}U</span></div>
-      <div class="trade-meta"><span>\${{fmtTime(t.entry_time)}} → \${{fmtTime(t.exit_time)}}</span><span>\${{t.reason||'—'}}</span></div>`;
+    div.innerHTML=`<div class="trade-top"><span><span class="badge ${{sideClass(t)}}">${{t.side}}</span> #${{i+1}}</span><span class="pnl ${{pnl>=0?'pos':'neg'}}">${{signed(pnl,2)}}U</span></div>
+      <div class="trade-meta"><span>${{fmtTime(t.entry_time)}} → ${{fmtTime(t.exit_time)}}</span><span>${{t.reason||'—'}}</span></div>`;
     div.onclick=()=>{{selectedOriginalIndex=i;focusTrade();}};
     tradeList.appendChild(div);
   }}
@@ -398,7 +398,7 @@ function highlightList(){{
 
 function updateOrderLabel(){{
   const t=currentTrade();
-  orderLabel.textContent=`#\${{selectedOriginalIndex+1}} · \${{t.side}} · \${{signed(t.net_pnl,2)}}U · \${{t.reason||'—'}}`;
+  orderLabel.textContent=`#${{selectedOriginalIndex+1}} · ${{t.side}} · ${{signed(t.net_pnl,2)}}U · ${{t.reason||'—'}}`;
 }}
 
 function updateDetails(){{
@@ -409,7 +409,7 @@ function updateDetails(){{
     ['开仓价',num(t.entry,2)],['平仓价',num(t.exit,2)],['止损',num(t.stop,2)],['止盈',num(t.target,2)],
     ['MFE',signed(t.mfe_r,2)+'R'],['MAE',signed(t.mae_r,2)+'R'],['Entry Drift',t.entry_drift_atr5==null?'—':signed(t.entry_drift_atr5,3)+' ATR5'],['4H状态',t['4h_trend_state_actual']||'—'],
   ];
-  detailGrid.innerHTML=items.map(([k,v])=>`<div class="kv"><div class="k">\${{k}}</div><div class="v" title="\${{String(v)}}">\${{v}}</div></div>`).join('');
+  detailGrid.innerHTML=items.map(([k,v])=>`<div class="kv"><div class="k">${{k}}</div><div class="v" title="${{String(v)}}">${{v}}</div></div>`).join('');
 }}
 
 function updateStats(){{
@@ -418,7 +418,7 @@ function updateStats(){{
     ['交易数',m.trades??allTrades.length],['胜率',m.win_rate_pct!=null?num(m.win_rate_pct,2)+'%':'—'],['净收益',signed(m.net_pnl,2)+'U'],
     ['PF',num(m.profit_factor,3)],['最大回撤',m.max_drawdown_pct!=null?num(m.max_drawdown_pct,2)+'%':'—'],['初始资金','2000U']
   ];
-  document.getElementById('statsRows').innerHTML=stats.map(([l,n])=>`<div class="stat"><div class="n">\${{n}}</div><div class="l">\${{l}}</div></div>`).join('');
+  document.getElementById('statsRows').innerHTML=stats.map(([l,n])=>`<div class="stat"><div class="n">${{n}}</div><div class="l">${{l}}</div></div>`).join('');
 }}
 
 function resize(){{
@@ -502,7 +502,7 @@ function showTooltip(ev){{
   const W=canvas.clientWidth,left=14,right=76,cw=W-left-right;let[a,b]=visible();const i=Math.round(a+(mouse.x-left)/cw*(b-a+1));
   if(i<a||i>b){{tooltip.style.display='none';draw();return;}}
   const r=candles[i];
-  tooltip.innerHTML=`<b>\${{fmtFull(r[0])}}</b><br>O \${{num(r[1],2)}}<br>H \${{num(r[2],2)}}<br>L \${{num(r[3],2)}}<br>C \${{num(r[4],2)}}`;
+  tooltip.innerHTML=`<b>${{fmtFull(r[0])}}</b><br>O ${{num(r[1],2)}}<br>H ${{num(r[2],2)}}<br>L ${{num(r[3],2)}}<br>C ${{num(r[4],2)}}`;
   tooltip.style.display='block';
   tooltip.style.left=Math.min(canvas.clientWidth-190,mouse.x+14)+'px';tooltip.style.top=Math.max(8,Math.min(canvas.clientHeight-120,mouse.y+12))+'px';draw();
 }}
