@@ -178,6 +178,92 @@ class V170Tests(unittest.TestCase):
         self.assertIn("0.10×ATR14", text)
         self.assertNotIn("EMA9/26趋势+1", text)
 
+    def test_pee4_close_success_sets_lock_and_uses_single_market_close(self):
+        class Store:
+            def __init__(self):
+                self.data = {}
+                self.saved = 0
+                self.records = []
+            def save(self):
+                self.saved += 1
+            def record(self, kind, payload):
+                self.records.append((kind, payload))
+        class X:
+            def __init__(self):
+                self.posts = []
+            def post(self, path, body):
+                self.posts.append((path, dict(body)))
+                return [{"ordId": "close-123"}]
+        owner = type("Owner", (), {})()
+        owner.store = Store()
+        owner.x = X()
+        owner.logs = []
+        owner.emit = lambda kind, data: owner.logs.append((kind, data))
+        active = {"posSide": "short", "side": "做空", "sz": 0.01, "client_id": "entry-1"}
+        positions = [{"mgnMode": "isolated", "posSide": "short", "pos": "0.01"}]
+        snapshot = {"current_r": -0.75, "mfe_r": 0.1, "tier": "强", "path": "strong_070_080"}
+
+        self.assertTrue(v170._pee4_submit_close(owner, active, positions, snapshot))
+        self.assertEqual(len(owner.x.posts), 1)
+        path, body = owner.x.posts[0]
+        self.assertEqual(path, "/api/v5/trade/order")
+        self.assertEqual(body["ordType"], "market")
+        self.assertEqual(body["side"], "buy")
+        self.assertEqual(body["posSide"], "short")
+        self.assertTrue(active.get("pee4_close_id"))
+        self.assertEqual(active.get("pee4_close_order_id"), "close-123")
+        self.assertGreater(owner.store.data.get("pee4_lock_until", 0), time.time() + 3500)
+        self.assertEqual(owner.store.records[0][0], "PEE4提前退出")
+
+    def test_pee4_explicit_rejection_clears_close_id_for_safe_retry(self):
+        class Rejected(Exception):
+            write_rejected = True
+        class Store:
+            def __init__(self):
+                self.data = {}
+            def save(self):
+                pass
+            def record(self, *args):
+                pass
+        class X:
+            def post(self, path, body):
+                raise Rejected("rejected")
+        owner = type("Owner", (), {})()
+        owner.store = Store()
+        owner.x = X()
+        owner.emit = lambda *args: None
+        active = {"posSide": "long", "side": "做多", "sz": 0.01}
+        positions = [{"mgnMode": "isolated", "posSide": "long", "pos": "0.01"}]
+
+        self.assertFalse(v170._pee4_submit_close(owner, active, positions, {"current_r": -0.7, "mfe_r": 0.0, "tier": "强"}))
+        self.assertNotIn("pee4_close_id", active)
+        self.assertNotIn("pee4_lock_until", owner.store.data)
+
+    def test_pee4_ambiguous_write_preserves_unique_id_and_never_retries_blindly(self):
+        class Ambiguous(Exception):
+            write_rejected = False
+        class Store:
+            def __init__(self):
+                self.data = {}
+            def save(self):
+                pass
+            def record(self, *args):
+                pass
+        class X:
+            def post(self, path, body):
+                raise Ambiguous("timeout after send")
+        owner = type("Owner", (), {})()
+        owner.store = Store()
+        owner.x = X()
+        owner.emit = lambda *args: None
+        active = {"posSide": "long", "side": "做多", "sz": 0.01}
+        positions = [{"mgnMode": "isolated", "posSide": "long", "pos": "0.01"}]
+
+        with self.assertRaises(Ambiguous):
+            v170._pee4_submit_close(owner, active, positions, {"current_r": -0.7, "mfe_r": 0.0, "tier": "强"})
+        self.assertTrue(active.get("pee4_close_id"))
+        self.assertNotIn("pee4_lock_until", owner.store.data)
+
 
 if __name__ == "__main__":
     unittest.main()
