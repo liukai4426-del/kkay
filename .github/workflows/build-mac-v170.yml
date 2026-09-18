@@ -28,7 +28,7 @@ jobs:
             v165_sleep_resume_patch.py v165_keepawake_patch.py v165_ui_patch.py v165_15m_outer_patch.py \
             v166_ui_patch.py v166_readonly_resilience_patch.py \
             v167_strategy_patch.py v167_algo_sync_patch.py v167_15m_boll_only_fix.py \
-            v168_update_patch.py v168_build1681_patch.py \
+            v168_update_patch.py v168_build1681_patch.py v170_update_patch.py \
             test_v167_strategy.py test_v167_algo_sync.py test_v167_15m_boll_only_fix.py \
             test_v168_update.py test_v168_build1681.py test_v170_update.py desktop.py
       - name: Preserved strategy/runtime regressions
@@ -66,58 +66,43 @@ jobs:
         run: python -m unittest -v test_v168_update
       - name: V1.6.8 Build1681 runtime/log regressions
         run: python -m unittest -v test_v168_build1681
-      - name: Verify V1.6.8 Build1681 semantic lock
+      - name: Verify V1.7.0 Build1700 semantic lock
         run: |
           python - <<'PY'
-          import re
           from pathlib import Path
           import app
           import engine
           import exchange
           import v153_model as signal_core
           import v161_ui_status_patch as ui161
-          import v164_model as v164
           import v165_model as model
           import v167_15m_boll_only_fix as b1671
-          import v168_update_patch as v168
-          import v168_build1681_patch as b1681
+          import v170_update_patch as v170
           spec=Path('OKXLocal.spec').read_text()
           desktop=Path('desktop.py').read_text()
-          assert b1681.VERSION=='1.6.8' and b1681.BUILD=='1681'
-          assert v168.VERSION=='1.6.8' and v168.BUILD=='1681'
-          assert model.VERSION=='1.6.8' and model.BUILD=='1681'
+          assert v170.VERSION=='1.7.0' and v170.BUILD=='1700'
+          assert model.VERSION=='1.7.0' and model.BUILD=='1700'
           assert model.THRESHOLD==6.0
-          assert model.ENTRY_WINDOW_MS==900000 and v164.ENTRY_WINDOW_MS==900000
-          assert model.BOLL_OUTER_SCORE==2.0 and v164.BOLL_OUTER_SCORE==2.0
+          assert model.ENTRY_WINDOW_MS==900000
+          assert model.BOLL_OUTER_SCORE==2.0
           assert model.BOLL_TRIGGER_TIMEFRAME=='15m'
           assert model.FIVE_MINUTE_BOLL_ENABLED is False
           assert signal_core.boll_entry_signal is b1671._signal_adapter_15m_only
           labels=dict(ui161._STATUS_ITEMS)
-          assert labels['signal_window']=='15m BOLL信号有效'
-          assert labels['outer_4h']=='4H同向 Hard Gate'
-          assert labels['ema1h']=='1H EMA9/26趋势'
-          assert getattr(exchange.Exchange,'_kaytrade_v167_algo_sync_applied',False)
-          assert getattr(engine.Engine,'_kaytrade_v167_algo_sync_applied',False)
-          assert getattr(app.App,'_kaytrade_v168_build1681_applied',False)
-          assert getattr(model,'_kaytrade_v168_build1681_applied',False)
-          assert "CFBundleShortVersionString': '1.6.8'" in spec
-          assert "CFBundleVersion': '1681'" in spec
-          assert 'v168_build1681_patch' in desktop
-          legacy=(
-              'V1.5.4未开仓；BOLL信号执行窗口 · 第5个1m｜计划市价参考 100000；'
-              'V1.6.2要求4H同向：5m BOLL中轨/外轨在4H中性或逆向时禁止开仓；'
-              'V1.6.6 Volume Hard Gate：5m信号K量能 1.89× ≥ 1.20×，禁止开仓'
-          )
-          normalized=b1681._rewrite_runtime_text_v1681(legacy)
-          assert 'V1.6.8' in normalized and '15m BOLL外轨' in normalized and '计划限价' in normalized and '第5分钟' in normalized
-          assert re.search(r'(?<!\d)5m\s+BOLL', normalized) is None
-          assert '中轨' not in normalized and '市价参考' not in normalized
-          sync=b1681._rewrite_runtime_text_v1681(
-              '只读查询暂时失败 /ws/v5/business:orders-algo：Algo实时状态暂未完成可信同步'
-          )
-          assert 'Algo状态同步中' in sync and '只读查询暂时失败' not in sync
-          print('PASS Build1681: Build1680 strategy unchanged; legacy runtime text normalized and Algo resync copy repaired')
+          assert 'ema1h' not in labels
+          assert labels['boll5_overext']=='5m BOLL超伸 +1'
+          assert getattr(model,'_kaytrade_v170_applied',False)
+          assert getattr(engine.Engine,'_kaytrade_v170_applied',False)
+          assert getattr(exchange.Exchange,'_kaytrade_v170_applied',False)
+          assert getattr(app.App,'_kaytrade_v170_applied',False)
+          assert "CFBundleShortVersionString': '1.7.0'" in spec
+          assert "CFBundleVersion': '1700'" in spec
+          assert 'v170_update_patch' in desktop
+          text=v170._rewrite_runtime_text_v170('自动交易启动；V1.6.8 Build1681：1H EMA9/26趋势+1')
+          assert 'V1.7.0 Build1700' in text and '删除1H EMA9/26' in text and 'BOLL5' in text and 'PEE4' in text
+          print('PASS V1.7.0 Build1700: NoEMA1H + BOLL5 0.10 ATR + PEE4 + Lock1H + synchronized UI')
           PY
+
 
   build:
     needs: unit
@@ -147,6 +132,7 @@ jobs:
           python -m unittest -v test_v167_15m_boll_only_fix
           python -m unittest -v test_v168_update
           python -m unittest -v test_v168_build1681
+          python -m unittest -v test_v170_update
       - run: python build_icon.py
       - run: python -m PyInstaller --noconfirm OKXLocal.spec
       - name: Verify V1.7.0 Intel bundle and metadata
@@ -169,9 +155,9 @@ jobs:
         run: |
           mkdir -p installer
           ditto dist/KAYTRADE.app installer/KAYTRADE.app
-          cp RELEASE-1.6.8-B1681.md installer/RELEASE-1.7.0-B1700.md
-          printf 'KAYTRADE V1.6.8 Build1681\nNo strategy changes from Build1680. Runtime/log normalization removes legacy 5m BOLL middle/outer and old minute-window wording, LIMIT reference copy is corrected, and expected Algo cache resynchronization is shown as synchronization with diagnostic detail instead of a generic read-query failure. All existing fail-closed entry/write protections remain.\n' > installer/RELEASE-1.7.0-B1700.txt
-          hdiutil create -volname 'KAYTRADE 1.6.8' -srcfolder installer -ov -format UDZO KAYTRADE-1.7.0-Intel-build1700.dmg
+          cp RELEASE-1.7.0-B1700.md installer/RELEASE-1.7.0-B1700.md
+          printf 'KAYTRADE V1.7.0 Build1700\nNoEMA1H + BOLL5 overextension 0.10 ATR14 +1 + PEE4 tiered Boolean exit + global Lock1H, with synchronized UI and inherited Build1681 fail-closed safety.\n' > installer/RELEASE-1.7.0-B1700.txt
+          hdiutil create -volname 'KAYTRADE 1.7.0' -srcfolder installer -ov -format UDZO KAYTRADE-1.7.0-Intel-build1700.dmg
       - uses: actions/upload-artifact@v4
         with:
           name: KAYTRADE-1.7.0-Intel-build1700
