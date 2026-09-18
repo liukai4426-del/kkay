@@ -30,7 +30,8 @@ DAYS = 360
 OUT = Path("backtest_output_v170_4h_neutralplus1_short_drift020_360d")
 LOCK_MS = 60 * 60_000
 VERSION = "1.7.0"
-BUILD = "1700"\nSHORT_ENTRY_DRIFT_MAX_ATR5 = 0.20
+BUILD = "1700"
+SHORT_ENTRY_DRIFT_MAX_ATR5 = 0.20
 
 _ORIG_RESCORE = src.entry._rescore
 _ORIG_CLOSE = src._close_pee3
@@ -161,33 +162,35 @@ def _submit_lock(self, result, now_ms, mark):
     if int(now_ms) < int(_LOCK_UNTIL_MS):
         self.stats["pee4_lock1h_blocked_submit"] += 1
         return
+
+    opp = result.get("opportunity") or {}
+    side = str(opp.get("side") or "")
+    drift = math.nan
+    if side == "做空":
+        try:
+            entry = float(mark)
+            ref = float(opp["trigger_reference"])
+            atr5 = max(float(opp["atr5"]), 1e-12)
+            # Positive drift = short entry chased downward away from the frozen BOLL reference.
+            drift = (ref - entry) / atr5
+        except (KeyError, TypeError, ValueError):
+            drift = math.nan
+        if math.isfinite(drift) and drift > SHORT_ENTRY_DRIFT_MAX_ATR5:
+            self.stats["short_entry_drift_gt020_block"] += 1
+            self.stats["execution_gate_blocks"] += 1
+            self.blockers["V1.7 A/B：做空 Entry Drift > 0.20 ATR5 Hard Gate"] += 1
+            return
+
     before = self.pending
     out = _ORIG_SUBMIT(self, result, now_ms, mark)
     if self.pending is not None and self.pending is not before:
-        pending = self.pending
-        side = str(getattr(pending, "side", "") or (result.get("opportunity") or {}).get("side") or "")
-        drift_raw = (getattr(pending, "factors", {}) or {}).get("entry_drift_atr5")
-        try:
-            drift = float(drift_raw)
-        except (TypeError, ValueError):
-            drift = math.nan
-        if side == "做空" and math.isfinite(drift) and drift > SHORT_ENTRY_DRIFT_MAX_ATR5:
-            self.pending = None
-            self.stats["short_entry_drift_gt020_block"] += 1
-            self.stats["execution_gate_blocks"] += 1
-            if self.stats.get("limit_submitted", 0) > 0:
-                self.stats["limit_submitted"] -= 1
-            if self.stats.get("v165_1x_submitted", 0) > 0:
-                self.stats["v165_1x_submitted"] -= 1
-            self.blockers["V1.7 A/B：做空 Entry Drift > 0.20 ATR5 Hard Gate"] += 1
-            return out
         row = (result.get("scores") or {}).get(side) or {}
         conf = row.get("confirmations") or {}
         self.pending.factors["4h_trend_state_actual"] = str(conf.get("4H_trend_state_actual") or "neutral")
         self.pending.factors["4h_gate_mode"] = "opposite_only_block_aligned_neutral_plus1"
         self.pending.factors["short_entry_drift_hard_gate_max_atr5"] = SHORT_ENTRY_DRIFT_MAX_ATR5
+        self.pending.factors["entry_drift_atr5"] = drift if math.isfinite(drift) else None
     return out
-
 
 def _patch():
     global _LOCK_UNTIL_MS, _LOCK_EVENTS
@@ -238,7 +241,8 @@ def verify(start, end):
     _LAST_4H_ACTUAL = {"做多": "neutral", "做空": "opposite"}
     chk = _apply_4h_actual(sample4)
     assert chk["scores"]["做多"]["layers"]["trend4h"] == 1.0
-    assert chk["scores"]["做多"]["gate"] is True\n    assert abs(SHORT_ENTRY_DRIFT_MAX_ATR5 - 0.20) < 1e-12
+    assert chk["scores"]["做多"]["gate"] is True
+    assert abs(SHORT_ENTRY_DRIFT_MAX_ATR5 - 0.20) < 1e-12
     assert chk["scores"]["做空"]["layers"]["trend4h"] == 0.0
     assert chk["scores"]["做空"]["gate"] is False
     _LAST_4H_ACTUAL = {}
@@ -311,7 +315,9 @@ def main():
         "4h_aligned_allowed": True,
         "4h_aligned_score": 1.0,
         "4h_neutral_allowed": True,
-        "4h_neutral_score": 1.0,\n        "short_entry_drift_hard_gate": True,\n        "short_entry_drift_max_atr5": SHORT_ENTRY_DRIFT_MAX_ATR5,
+        "4h_neutral_score": 1.0,
+        "short_entry_drift_hard_gate": True,
+        "short_entry_drift_max_atr5": SHORT_ENTRY_DRIFT_MAX_ATR5,
         "4h_opposite_allowed": False,
         "5m_rsi_hard_gate": "30<=RSI<=70",
         "5m_volume_hard_gate": "ratio<1.20x prior20",
@@ -336,7 +342,8 @@ def main():
     payload.setdefault("correction", {})["only_deltas"] = [
         "V1.7.0 Build1700 label",
         "360D exact historical window",
-        "A/B DELTA: 4H aligned +1 allowed; 4H neutral +1 allowed; explicit 4H opposite Hard Gate blocked",\n        "A/B DELTA: SHORT Entry Drift >0.20 ATR5 Hard Gate blocked",
+        "A/B DELTA: 4H aligned +1 allowed; 4H neutral +1 allowed; explicit 4H opposite Hard Gate blocked",
+        "A/B DELTA: SHORT Entry Drift >0.20 ATR5 Hard Gate blocked",
         "remove 1H EMA9/26 +1",
         "BOLL5 overextension 0.10 ATR14 +1 latched",
         "PEE4 tiered Boolean",
