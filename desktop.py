@@ -167,7 +167,7 @@ def smoke_test():
         finally:
             root.destroy()
     Path(sys.argv[2]).write_text(
-        'PASS: KAYTRADE V1.6.8 Build1681 packaged UI/runtime; strategy is unchanged from Build1680, BOLL remains strict closed-15m outer-only with a 15m lifecycle, 4H alignment remains a +1 mandatory Hard Gate, 1H EMA9/EMA26 remains +1 score, legacy 5m BOLL/middle-window/market-reference text is normalized, Algo cache resync is shown as synchronization rather than a generic read failure, and write ambiguity remains fail-closed.\n'
+        'PASS: KAYTRADE V1.7.0 Build1700 packaged UI/runtime; 1H EMA9/26 score removed, BOLL5 overextension 0.10 ATR14 +1 latched, PEE4 tiered Boolean risk exit and global Lock1H installed, retired KDJ UI rows removed, PEE4 panel placed below Trade Plan, and inherited write ambiguity remains fail-closed.\n'
     )
 
 
