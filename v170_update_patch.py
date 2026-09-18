@@ -878,7 +878,7 @@ def _authorization_text_v170(owner, settings):
         "• 评分≥6；首次开仓固定1× LIMIT；止损=1×1H ATR；整仓2R止盈；No-BE。\n"
         "• PEE4仅监控持仓前4小时；历史MFE达到+0.60R后永久关闭本单PEE4。\n"
         "• PEE4从≤-0.60R启动：严格(-0.60~-0.70)、强(-0.70~-0.80)、普通(-0.80R以下)，仅按1H/15m/结构/BOLL5/MACD/量能Boolean反逻辑退出。\n"
-        "• PEE4实际提交退出后，全局禁止新开仓60分钟；平仓请求先持久化唯一ID，网络结果不明确时禁止重复提交。\n\n"
+        "• PEE4实际提交退出后，启动全局Lock1H（60分钟禁止新开仓）；平仓请求先持久化唯一ID，网络结果不明确时禁止重复提交。\n\n"
         f"资金预算 {settings.capital:g} USDT  ·  最大名义仓位 {settings.max_notional:g} USDT  ·  "
         f"基础单笔风险≤{base_risk:g} USDT\n\n"
         "确认后将启动自动交易；取消则保持停止新开仓。"
