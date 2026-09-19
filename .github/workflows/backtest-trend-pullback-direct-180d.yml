@@ -1,0 +1,130 @@
+name: Backtest Trend Pullback Direct 180D + K-line Viewer
+
+on:
+  push:
+    branches: [research/trend-pullback-direct-180d]
+    paths:
+      - run_trend_pullback_direct_180d.py
+      - generate_trend_pullback_180d_trade_viewer.py
+      - .github/workflows/backtest-trend-pullback-direct-180d.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      BACKTEST_MARKET_CACHE: .backtest_cache
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install runtime dependencies
+        run: python -m pip install 'certifi==2025.8.3' 'websocket-client==1.8.0'
+
+      - name: Restore audited 180D BTC market cache
+        uses: actions/cache@v4
+        with:
+          path: .backtest_cache
+          key: kaytrade-v168-okx-btc-180d-end-20260914-market-v1
+          restore-keys: |
+            kaytrade-v168-okx-btc-180d-
+            kaytrade-okx-btc-
+
+      - name: Materialize audited historical simulator and proven path
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+          git fetch --depth=1 origin research/v155-outer-bands-180d
+          git show FETCH_HEAD:research_v1544_cache_patch.py > research_v1544_cache_patch.py
+          git show FETCH_HEAD:research_v1544_180d_backtest.py > research_v1544_180d_backtest.py
+          git show FETCH_HEAD:run_v1544_180d_fixed.py > run_v1544_180d_fixed.py
+          git fetch --depth=1 origin research/v166-15m-boll-macd-adverse-only-360d-fast
+          git show FETCH_HEAD:run_v160_365d_2000u.py > run_v160_365d_2000u.py
+          git show FETCH_HEAD:run_v165_1000d_2000u.py > run_v165_1000d_2000u.py
+          git show FETCH_HEAD:run_v166_entry_expansion_4way_360d.py > run_v166_entry_expansion_4way_360d.py
+          git show FETCH_HEAD:run_v166_15m_boll_macd_adverse_only_360d_fast.py > run_v166_15m_boll_macd_adverse_only_360d_fast.py
+          git show FETCH_HEAD:run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py > run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py
+          git show FETCH_HEAD:research_backtest_data_cache.py > research_backtest_data_cache.py
+
+      - name: Compile and preflight exact research lock
+        run: |
+          python -m py_compile \
+            research_v146_backtest.py research_v1544_cache_patch.py research_v1544_180d_backtest.py \
+            run_v1544_180d_fixed.py run_v160_365d_2000u.py run_v165_1000d_2000u.py \
+            run_v166_entry_expansion_4way_360d.py run_v166_15m_boll_macd_adverse_only_360d_fast.py \
+            run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py research_backtest_data_cache.py \
+            run_v168_180d_backtest_r2.py run_v168_boll5_overext035_180d.py \
+            run_v168_boll5_overext035_pee3_mfe06_180d.py run_v168_boll5_overext010_pee4_365d.py \
+            run_trend_pullback_direct_180d.py generate_trend_pullback_180d_trade_viewer.py
+          python - <<'PY'
+          import run_trend_pullback_direct_180d as x
+          start,end=x.configure()
+          x.verify(start,end)
+          assert (end-start).days == 180
+          assert x.TrendPullbackDirectModel.BOLL_TRIGGER_TIMEFRAME == '15m'
+          assert x.FRONT_MIN_R_STRICT == 1.50
+          assert x.COST_MAX_R_STRICT == 0.30
+          assert x.research.COOLDOWN_MS == 0
+          assert x.research.Simulator.process_exit is x.pee_src._process_exit_pee3
+          print('AUDIT PASS: 4H+1H trend -> closed15m outer -> Front>1.50R -> Cost<0.30R -> 1x / 1H ATR / 2R / PEE4 / Lock1H')
+          PY
+
+      - name: Run 180D trend-pullback backtest
+        run: time python run_trend_pullback_direct_180d.py
+
+      - name: Verify result payload
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('backtest_output_trend_pullback_direct_180d/result_trend_pullback_direct_180d.json')
+          d=json.loads(p.read_text(encoding='utf-8'))
+          assert d['window']['days'] == 180
+          s=d['strategy_lock']
+          assert s['4h_1h_must_match'] is True
+          assert s['score_enabled'] is False
+          assert s['rsi_entry_gate'] is False
+          assert s['macd_entry_gate'] is False
+          assert s['volume_entry_gate'] is False
+          assert s['entry_drift_gate'] is False
+          assert s['boll_width_gate'] is False
+          assert s['front_r_rule'] == '> 1.50R STRICT'
+          assert s['cost_r_rule'] == '< 0.30R STRICT'
+          assert float(s['position_multiplier']) == 1.0
+          assert s['stop'] == '1.0 x 1H ATR'
+          assert s['target'] == '2R full position'
+          assert s['break_even'] is False
+          assert s['pee_version'] == '4.0-tiered-boolean'
+          assert int(s['pee4_post_exit_entry_lock_minutes']) == 60
+          assert int(d['metrics']['trades'] or 0) > 0, 'ANOMALY: zero trades; reject output'
+          print(json.dumps(d,ensure_ascii=False,indent=2))
+          PY
+
+      - name: Build self-contained K-line trade viewer
+        run: |
+          python generate_trend_pullback_180d_trade_viewer.py
+          test -s backtest_output_trend_pullback_direct_180d/KAYTRADE-Trend-Pullback-180D-Trade-Viewer.html
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('backtest_output_trend_pullback_direct_180d/KAYTRADE-Trend-Pullback-180D-Trade-Viewer.html')
+          text=p.read_text(encoding='utf-8')
+          assert 'const DATA=' in text
+          assert 'Trend Pullback' in text
+          assert p.stat().st_size > 100000
+          print('VIEWER_BYTES',p.stat().st_size)
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-TREND-PULLBACK-DIRECT-180D-2000U-WITH-VIEWER
+          path: backtest_output_trend_pullback_direct_180d/
+          if-no-files-found: error
+          retention-days: 30
