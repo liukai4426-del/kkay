@@ -302,6 +302,7 @@ def _submit_trend(self, result, now_ms, mark):
         self.stats["sizing_skips"] += 1
         return
 
+    dt = research.local_dt(now_ms)
     factors = {
         "boll_path": str(opp.get("signal_path") or ""),
         "boll_timeframe": "15m",
@@ -315,6 +316,9 @@ def _submit_trend(self, result, now_ms, mark):
         "cost_r": float(cost_r),
         "signal_age_min": max(0.0, (int(now_ms) - int(opp.get("signal_close_ms") or now_ms)) / 60_000.0),
         "atr1h_pct": 100.0 * stop_distance / max(entry, 1e-12),
+        "local_hour_cn": int(dt.hour),
+        "weekday_cn": dt.strftime("%a"),
+        "month_cn": dt.strftime("%Y-%m"),
         "trigger_reference": float(opp.get("trigger_reference") or entry),
         "boll_lower_15m": (opp.get("trigger_detail") or {}).get("boll_lower"),
         "boll_middle_15m": (opp.get("trigger_detail") or {}).get("boll_middle"),
