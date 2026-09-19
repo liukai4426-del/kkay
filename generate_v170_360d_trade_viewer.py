@@ -194,7 +194,14 @@ button,select,input{{font:inherit}}
 .toolbar .spacer{{flex:1}}
 .toolbar label{{font-size:12px;display:flex;align-items:center;gap:6px}}
 .chart-wrap{{position:relative;flex:1;min-height:360px;background:#090b0e;overflow:hidden}}
-#chart{{width:100%;height:100%;display:block}}
+#chart{{height:100%;display:block}}
+.price-scroll{{position:absolute;right:0;top:0;bottom:0;width:18px;overflow-y:scroll;overflow-x:hidden;z-index:6;background:#0d1116;border-left:1px solid var(--line);scrollbar-color:#647180 #151b22;scrollbar-width:auto}}
+.price-scroll::-webkit-scrollbar{{width:16px}}
+.price-scroll::-webkit-scrollbar-track{{background:#151b22}}
+.price-scroll::-webkit-scrollbar-thumb{{background:#647180;border-radius:8px;border:3px solid #151b22}}
+.price-scroll::-webkit-scrollbar-thumb:hover{{background:#8290a0}}
+.price-scroll-space{{width:1px;height:300%}}
+.price-scroll-label{{position:absolute;right:22px;top:10px;z-index:5;font-size:10px;color:var(--muted);background:rgba(9,11,14,.76);border:1px solid rgba(70,80,92,.5);border-radius:6px;padding:4px 6px;pointer-events:none}}
 #tooltip{{position:absolute;pointer-events:none;display:none;background:rgba(10,13,17,.94);border:1px solid #38424d;border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.5;z-index:5;min-width:170px}}
 .legend{{position:absolute;left:12px;top:10px;z-index:3;background:rgba(9,11,14,.76);border:1px solid rgba(70,80,92,.5);border-radius:8px;padding:7px 9px;font-size:11px;color:var(--muted)}}
 .bottom{{height:218px;border-top:1px solid var(--line);display:grid;grid-template-columns:1.2fr 1fr;background:var(--panel);min-height:160px}}
@@ -247,7 +254,9 @@ button,select,input{{font:inherit}}
     </div>
     <div class="chart-wrap" id="chartWrap">
       <canvas id="chart"></canvas>
-      <div class="legend" id="legend">滚轮缩放 · 拖拽平移 · 悬浮查看OHLC</div>
+      <div class="legend" id="legend">滚轮缩放 · 左右拖拽 · 右侧滚动栏上下平移 · 悬浮查看OHLC</div>
+      <div class="price-scroll-label">价格上下</div>
+      <div id="priceScroll" class="price-scroll" title="拖动右侧滚动栏上下平移价格轴"><div class="price-scroll-space"></div></div>
       <div id="tooltip"></div>
     </div>
     <div class="bottom">
@@ -283,6 +292,7 @@ const bollToggle=document.getElementById('bollToggle');
 const emaToggle=document.getElementById('emaToggle');
 const detailGrid=document.getElementById('detailGrid');
 const orderLabel=document.getElementById('orderLabel');
+const priceScroll=document.getElementById('priceScroll');
 
 let filtered=[];
 let selectedOriginalIndex=0;
@@ -290,6 +300,8 @@ let candles=[];
 let viewStart=0, viewEnd=100;
 let drag=false, dragX=0, dragStart=0, dragEnd=0;
 let mouse={{x:-1,y:-1,inside:false}};
+let pricePan=0;
+let priceScrollReady=false;
 
 const COLORS={{
   bg:'#090b0e', grid:'#1b222b', text:'#8391a0', up:'#28c78f', down:'#f35b67',
@@ -357,6 +369,7 @@ function focusTrade(){{
   const a=nearestIndex(Number(t.entry_time)-ctxH*3600000);
   const b=nearestIndex(Number(t.exit_time)+ctxH*3600000);
   viewStart=Math.max(0,a); viewEnd=Math.min(candles.length-1,Math.max(b,a+30));
+  resetPricePan(false);
   draw(); updateDetails(); highlightList(); updateOrderLabel();
 }}
 
@@ -423,9 +436,33 @@ function updateStats(){{
 
 function resize(){{
   const r=wrap.getBoundingClientRect(),dpr=window.devicePixelRatio||1;
-  canvas.width=Math.max(1,Math.floor(r.width*dpr)); canvas.height=Math.max(1,Math.floor(r.height*dpr));
-  canvas.style.width=r.width+'px'; canvas.style.height=r.height+'px';
-  ctx.setTransform(dpr,0,0,dpr,0,0); draw();
+  const scrollW=priceScroll ? Math.max(18,priceScroll.offsetWidth||18) : 18;
+  const chartW=Math.max(1,r.width-scrollW);
+  canvas.width=Math.max(1,Math.floor(chartW*dpr)); canvas.height=Math.max(1,Math.floor(r.height*dpr));
+  canvas.style.width=chartW+'px'; canvas.style.height=r.height+'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  if(priceScroll && !priceScrollReady){{
+    requestAnimationFrame(()=>{{resetPricePan(false);draw();}});
+    priceScrollReady=true;
+  }}
+  draw();
+}}
+
+function resetPricePan(redraw=true){{
+  pricePan=0;
+  if(priceScroll){{
+    const max=Math.max(0,priceScroll.scrollHeight-priceScroll.clientHeight);
+    priceScroll.scrollTop=max/2;
+  }}
+  if(redraw) draw();
+}}
+
+function syncPricePanFromScroll(){{
+  if(!priceScroll)return;
+  const max=Math.max(1,priceScroll.scrollHeight-priceScroll.clientHeight);
+  const ratio=priceScroll.scrollTop/max;
+  pricePan=(ratio-0.5)*1.8;
+  draw();
 }}
 
 function visible(){{
@@ -449,6 +486,9 @@ function draw(){{
   for(const v of [t.entry,t.exit,t.stop,t.target]){{const n=Number(v);if(Number.isFinite(n)){{lo=Math.min(lo,n);hi=Math.max(hi,n);}}}}
   if(!Number.isFinite(lo)||!Number.isFinite(hi)||hi<=lo)return;
   const pad=(hi-lo)*.07||1;lo-=pad;hi+=pad;
+  const baseSpan=hi-lo;
+  const priceShift=pricePan*baseSpan;
+  lo+=priceShift; hi+=priceShift;
   const x=i=>left+(i-a)/(b-a+1)*cw;
   const y=p=>top+(hi-p)/(hi-lo)*ch;
 
@@ -521,14 +561,15 @@ function step(dir){{
 }}
 document.getElementById('prevBtn').onclick=()=>step(-1);
 document.getElementById('nextBtn').onclick=()=>step(1);
-document.getElementById('resetBtn').onclick=focusTrade;
+document.getElementById('resetBtn').onclick=()=>{{focusTrade();resetPricePan(true);}};
 tfSelect.onchange=()=>rebuildCandles(true);contextSelect.onchange=focusTrade;
 bollToggle.onchange=draw;emaToggle.onchange=draw;
 sideFilter.onchange=applyFilters;pnlFilter.onchange=applyFilters;searchInput.oninput=applyFilters;
+if(priceScroll) priceScroll.addEventListener('scroll',syncPricePanFromScroll,{{passive:true}});
 window.addEventListener('resize',resize);
 window.addEventListener('keydown',e=>{{if(e.key==='ArrowLeft')step(-1);if(e.key==='ArrowRight')step(1);}});
 
-updateStats();filtered=allTrades.map((t,i)=>({{t,i}}));renderTradeList();rebuildCandles(true);resize();
+updateStats();filtered=allTrades.map((t,i)=>({{t,i}}));renderTradeList();rebuildCandles(true);resize();requestAnimationFrame(()=>resetPricePan(true));
 </script>
 </body>
 </html>"""
