@@ -182,7 +182,7 @@ jobs:
         with:
           name: KAYTRADE-1.7.0-Intel-build1702
           path: |
-            KAYTRADE-1.7.0-Intel-build1701.dmg
+            KAYTRADE-1.7.0-Intel-build1702.dmg
             installer/RELEASE-1.7.0-B1702.md
             installer/RELEASE-1.7.0-B1702.txt
           if-no-files-found: error
