@@ -62,10 +62,12 @@ jobs:
             detailGrid.innerHTML=items.map(([k,v])=>`<div class="kv"><div class="k">${k}</div><div class="v" title="${String(v)}">${v}</div></div>`).join('');
           }
 
-          function updateStats(){'''
-          text,n=re.subn(r'function updateDetails\(\)\{.*?\n\}\}\n\nfunction updateStats\(\)\{', new_details, text, count=1, flags=re.S)
-          if n != 1:
-              raise SystemExit(f'updateDetails patch failed: {n}')
+          '''
+          start=text.find('function updateDetails(){')
+          end=text.find('function updateStats(){', start)
+          if start < 0 or end < 0:
+              raise SystemExit(f'function boundary not found: start={start} end={end}')
+          text=text[:start] + new_details + text[end:]
 
           outdir=Path('viewer_v2')
           outdir.mkdir(exist_ok=True)
