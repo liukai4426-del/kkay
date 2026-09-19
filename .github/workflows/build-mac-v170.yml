@@ -1,8 +1,8 @@
-name: Build KAYTRADE Intel Mac 1.7.0 Build1701
+name: Build KAYTRADE Intel Mac 1.7.0 Build1702
 
 on:
   push:
-    branches: [feature/v170-strategy-ui]
+    branches: [fix/v1702-protection-reconcile]
   workflow_dispatch:
 
 permissions:
@@ -19,7 +19,7 @@ jobs:
           python-version: '3.13'
       - name: Install V1.7.0 runtime test dependencies
         run: python -m pip install 'websocket-client==1.8.0' 'certifi==2025.8.3'
-      - name: Compile V1.7.0 Build1701
+      - name: Compile V1.7.0 Build1702
         run: |
           python -m py_compile \
             v160_model.py v160_update_patch.py v161_model.py v161_update_patch.py v162_model.py v162_update_patch.py \
@@ -28,9 +28,9 @@ jobs:
             v165_sleep_resume_patch.py v165_keepawake_patch.py v165_ui_patch.py v165_15m_outer_patch.py \
             v166_ui_patch.py v166_readonly_resilience_patch.py \
             v167_strategy_patch.py v167_algo_sync_patch.py v167_15m_boll_only_fix.py \
-            v168_update_patch.py v168_build1681_patch.py v170_update_patch.py v170_build1701_patch.py \
+            v168_update_patch.py v168_build1681_patch.py v170_update_patch.py v170_build1701_patch.py v170_build1702_patch.py \
             test_v167_strategy.py test_v167_algo_sync.py test_v167_15m_boll_only_fix.py \
-            test_v168_update.py test_v168_build1681.py test_v170_update.py test_v170_build1701.py desktop.py
+            test_v168_update.py test_v168_build1681.py test_v170_update.py test_v170_build1701.py test_v170_build1702.py desktop.py
       - name: Preserved strategy/runtime regressions
         run: |
           python -m unittest -v test_engine
@@ -70,7 +70,9 @@ jobs:
         run: python -m unittest -v test_v170_update
       - name: V1.7.0 Build1701 strict-15m source/log regressions
         run: python -m unittest -v test_v170_build1701
-      - name: Verify V1.7.0 Build1701 semantic lock
+      - name: V1.7.0 Build1702 TP/SL reconciliation regressions
+        run: python -m unittest -v test_v170_build1702
+      - name: Verify V1.7.0 Build1702 semantic lock
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -83,11 +85,13 @@ jobs:
           import v167_15m_boll_only_fix as b1671
           import v170_update_patch as v170
           import v170_build1701_patch as v1701
+          import v170_build1702_patch as v1702
           spec=Path('OKXLocal.spec').read_text()
           desktop=Path('desktop.py').read_text()
-          assert v1701.VERSION=='1.7.0' and v1701.BUILD=='1701'
-          assert v170.VERSION=='1.7.0' and v170.BUILD=='1701'
-          assert model.VERSION=='1.7.0' and model.BUILD=='1701'
+          assert v1702.VERSION=='1.7.0' and v1702.BUILD=='1702'
+          assert v1701.VERSION=='1.7.0' and v1701.BUILD=='1702'
+          assert v170.VERSION=='1.7.0' and v170.BUILD=='1702'
+          assert model.VERSION=='1.7.0' and model.BUILD=='1702'
           assert model.THRESHOLD==6.0
           assert model.ENTRY_WINDOW_MS==900000
           assert model.BOLL_OUTER_SCORE==2.0
@@ -102,14 +106,16 @@ jobs:
           assert getattr(exchange.Exchange,'_kaytrade_v170_applied',False)
           assert getattr(app.App,'_kaytrade_v170_applied',False)
           assert "CFBundleShortVersionString': '1.7.0'" in spec
-          assert "CFBundleVersion': '1701'" in spec
-          assert 'v170_update_patch' in desktop and 'v170_build1701_patch' in desktop
-          text=v1701._rewrite_runtime_text_v1701('自动交易启动；V1.6.8 Build1681：1H EMA9/26趋势+1')
+          assert "CFBundleVersion': '1702'" in spec
+          assert 'v170_update_patch' in desktop and 'v170_build1701_patch' in desktop and 'v170_build1702_patch' in desktop
+          text=v1702._rewrite_runtime_text_v1702('自动交易启动；V1.6.8 Build1681：1H EMA9/26趋势+1')
           print('V170_RUNTIME_TEXT',repr(text))
-          assert text.startswith('自动交易启动；V1.7.0 Build1701') and 'PEE4' in text and '15m机会源锁' in text
+          assert text.startswith('自动交易启动；V1.7.0 Build1702') and 'PEE4' in text and '15m机会源锁' in text and 'TP/SL多源复核' in text
           assert getattr(model,'_kaytrade_v170_build1701_applied',False)
+          assert getattr(model,'_kaytrade_v170_build1702_applied',False)
+          assert getattr(exchange.Exchange,'_kaytrade_v170_build1702_applied',False)
           assert v1701._with_direction('V1.7.0未开仓 15m BOLL信号有效期','做多').startswith('方向：做多')
-          print('PASS V1.7.0 Build1701: strict closed-15m opportunity source + direction logs + preserved V1.7 strategy')
+          print('PASS V1.7.0 Build1702: strict 15m source + direction logs + TP/SL alias/fresh-REST protection verification')
           PY
 
 
@@ -143,38 +149,40 @@ jobs:
           python -m unittest -v test_v168_build1681
           python -m unittest -v test_v170_update
           python -m unittest -v test_v170_build1701
+          python -m unittest -v test_v170_build1702
       - run: python build_icon.py
       - run: python -m PyInstaller --noconfirm OKXLocal.spec
       - name: Verify V1.7.0 Intel bundle and metadata
         run: |
           python verify_bundle.py
           /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1.7.0'
-          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1701'
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1702'
           codesign --verify --deep --strict dist/KAYTRADE.app
-      - name: Packaged V1.7.0 Build1701 UI/runtime smoke test
+      - name: Packaged V1.7.0 Build1702 UI/runtime smoke test
         run: |
           TMPDIR_CHECK="$(mktemp -d)"
           dist/KAYTRADE.app/Contents/MacOS/KAYTRADE --smoke-test "$TMPDIR_CHECK/smoke.txt"
           cat "$TMPDIR_CHECK/smoke.txt"
-          grep 'V1.7.0 Build1701' "$TMPDIR_CHECK/smoke.txt"
+          grep 'V1.7.0 Build1702' "$TMPDIR_CHECK/smoke.txt"
           grep '1H EMA9/26 score removed' "$TMPDIR_CHECK/smoke.txt"
           grep 'BOLL5 overextension 0.10 ATR14 +1 latched' "$TMPDIR_CHECK/smoke.txt"
           grep 'strict closed-15m BOLL opportunity-source lock installed' "$TMPDIR_CHECK/smoke.txt"
           grep 'run logs include long/short direction' "$TMPDIR_CHECK/smoke.txt"
           grep 'PEE4 tiered Boolean risk exit and global Lock1H installed' "$TMPDIR_CHECK/smoke.txt"
-          grep 'write ambiguity remains fail-closed' "$TMPDIR_CHECK/smoke.txt"
+          grep 'confirmed missing protection remains fail-closed' "$TMPDIR_CHECK/smoke.txt"
+          grep 'attachAlgoClOrdId normalization and fresh-REST protection proof installed' "$TMPDIR_CHECK/smoke.txt"
       - name: Create installer
         run: |
           mkdir -p installer
           ditto dist/KAYTRADE.app installer/KAYTRADE.app
-          cp RELEASE-1.7.0-B1701.md installer/RELEASE-1.7.0-B1701.md
-          printf 'KAYTRADE V1.7.0 Build1701\nStrict closed-15m BOLL opportunity source + long/short direction logs, with the V1.7.0 NoEMA1H/BOLL5/PEE4/Lock1H strategy preserved and inherited Build1681 fail-closed safety.\n' > installer/RELEASE-1.7.0-B1701.txt
-          hdiutil create -volname 'KAYTRADE 1.7.0' -srcfolder installer -ov -format UDZO KAYTRADE-1.7.0-Intel-build1701.dmg
+          cp RELEASE-1.7.0-B1702.md installer/RELEASE-1.7.0-B1702.md
+          printf 'KAYTRADE V1.7.0 Build1702\nStrict closed-15m BOLL opportunity source + long/short direction logs + TP/SL alias/fresh-REST reconciliation hotfix, with V1.7.0 strategy semantics preserved.\n' > installer/RELEASE-1.7.0-B1702.txt
+          hdiutil create -volname 'KAYTRADE 1.7.0' -srcfolder installer -ov -format UDZO KAYTRADE-1.7.0-Intel-build1702.dmg
       - uses: actions/upload-artifact@v4
         with:
-          name: KAYTRADE-1.7.0-Intel-build1701
+          name: KAYTRADE-1.7.0-Intel-build1702
           path: |
             KAYTRADE-1.7.0-Intel-build1701.dmg
-            installer/RELEASE-1.7.0-B1701.md
-            installer/RELEASE-1.7.0-B1701.txt
+            installer/RELEASE-1.7.0-B1702.md
+            installer/RELEASE-1.7.0-B1702.txt
           if-no-files-found: error
