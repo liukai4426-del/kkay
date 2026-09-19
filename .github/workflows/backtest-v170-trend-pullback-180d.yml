@@ -39,6 +39,7 @@ jobs:
           restore-keys: |
             kaytrade-v168-okx-btc-180d-
             kaytrade-okx-btc-
+          save-always: true
 
       - name: Materialize audited historical simulator and proven PEE4 stack
         run: |
