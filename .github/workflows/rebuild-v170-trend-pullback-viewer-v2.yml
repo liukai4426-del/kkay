@@ -1,0 +1,95 @@
+name: Rebuild Trend Pullback 180D Viewer V2
+
+on:
+  push:
+    branches: [research/v170-trend-pullback-180d]
+    paths:
+      - .github/workflows/rebuild-v170-trend-pullback-viewer-v2.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  viewer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download successful 180D artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: KAYTRADE-Trend-Pullback-180D-2000U-with-Viewer
+          path: source_artifact
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 35438005480
+
+      - name: Restore previous viewer layout
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          candidates=list(Path('source_artifact').rglob('KAYTRADE-V1.7-Trend-Pullback-180D-Trade-Viewer.html'))
+          if not candidates:
+              raise SystemExit('source viewer not found')
+          src=candidates[0]
+          text=src.read_text(encoding='utf-8')
+
+          # Exact desktop/mobile widths from the earlier working viewer.
+          text=text.replace(
+              '#app{height:100%;display:grid;grid-template-columns:220px 1fr;overflow:hidden}',
+              '#app{height:100%;display:grid;grid-template-columns:340px 1fr;overflow:hidden}'
+          )
+          text=text.replace(
+              '@media(max-width:900px){#app{grid-template-columns:200px 1fr}',
+              '@media(max-width:900px){#app{grid-template-columns:260px 1fr}'
+          )
+
+          # Keep exactly 16 detail cells (4 x 4), matching the previous viewer.
+          new_details = r'''function updateDetails(){
+            const t=currentTrade(); if(!t)return;
+            const items=[
+              ['方向',t.side],['Front R',Number.isFinite(Number(t.front_r))?num(t.front_r,2)+'R':'∞/未知'],['Cost R',num(t.cost_r,3)+'R'],['净收益',signed(t.net_pnl,2)+' U'],
+              ['开仓时间',fmtFull(t.entry_time)],['平仓时间',fmtFull(t.exit_time)],['持仓',num(t.hold_min,0)+' min'],['退出原因',t.reason||'—'],
+              ['开仓价',num(t.entry,2)],['平仓价',num(t.exit,2)],['止损',num(t.stop,2)],['止盈',num(t.target,2)],
+              ['MFE',signed(t.mfe_r,2)+'R'],['MAE',signed(t.mae_r,2)+'R'],['1H趋势',t.trend_1h||'—'],['4H趋势',t.trend_4h||'—'],
+            ];
+            detailGrid.innerHTML=items.map(([k,v])=>`<div class="kv"><div class="k">${k}</div><div class="v" title="${String(v)}">${v}</div></div>`).join('');
+          }
+
+          function updateStats(){'''
+          text,n=re.subn(r'function updateDetails\(\)\{.*?\n\}\}\n\nfunction updateStats\(\)\{', new_details, text, count=1, flags=re.S)
+          if n != 1:
+              raise SystemExit(f'updateDetails patch failed: {n}')
+
+          outdir=Path('viewer_v2')
+          outdir.mkdir(exist_ok=True)
+          out=outdir/'KAYTRADE-Trend-Pullback-180D-Trade-Viewer-v2.html'
+          out.write_text(text,encoding='utf-8')
+
+          print('SOURCE',src)
+          print('OUTPUT',out)
+          print('BYTES',out.stat().st_size)
+          assert 'grid-template-columns:340px 1fr' in text
+          assert 'grid-template-columns:260px 1fr' in text
+          assert 'Front R' in text and 'Cost R' in text
+          assert text.count("['前方结构周期'") == 0
+          assert text.count("['BOLL路径'") == 0
+
+          a=text.rfind('<script>'); b=text.rfind('</script>')
+          assert a>=0 and b>a
+          Path('/tmp/viewer-v2.js').write_text(text[a+8:b],encoding='utf-8')
+          PY
+          node --check /tmp/viewer-v2.js
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-Trend-Pullback-180D-Viewer-V2
+          path: viewer_v2/
+          if-no-files-found: error
+          retention-days: 30
