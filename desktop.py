@@ -55,6 +55,8 @@ from v170_update_patch import apply as apply_v170_update_patch
 apply_v170_update_patch()
 from v170_build1701_patch import apply as apply_v170_build1701_patch
 apply_v170_build1701_patch()
+from v170_build1702_patch import apply as apply_v170_build1702_patch
+apply_v170_build1702_patch()
 
 
 def smoke_test():
@@ -78,6 +80,7 @@ def smoke_test():
     import v168_build1681_patch as b1681
     import v170_update_patch as v170
     import v170_build1701_patch as v1701
+    import v170_build1702_patch as v1702
     assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
     assert getattr(exchange.Exchange,'_kaytrade_v165_algo_fallback_applied',False)
     assert getattr(exchange.Exchange,'_kaytrade_v165_runtime_network_state_applied',False)
@@ -104,11 +107,15 @@ def smoke_test():
     assert getattr(app.App,'_kaytrade_v170_applied',False)
     assert getattr(model,'_kaytrade_v170_build1701_applied',False)
     assert getattr(app.App,'_kaytrade_v170_build1701_applied',False)
-    assert v1701.VERSION == '1.7.0' and v1701.BUILD == '1701'
-    assert v170.VERSION == '1.7.0' and v170.BUILD == '1701'
-    assert b1681.VERSION == '1.7.0' and b1681.BUILD == '1701'
-    assert v168.VERSION == '1.7.0' and v168.BUILD == '1701'
-    assert model.VERSION == '1.7.0' and model.BUILD == '1701'
+    assert getattr(model,'_kaytrade_v170_build1702_applied',False)
+    assert getattr(exchange.Exchange,'_kaytrade_v170_build1702_applied',False)
+    assert getattr(app.App,'_kaytrade_v170_build1702_applied',False)
+    assert v1702.VERSION == '1.7.0' and v1702.BUILD == '1702'
+    assert v1701.VERSION == '1.7.0' and v1701.BUILD == '1702'
+    assert v170.VERSION == '1.7.0' and v170.BUILD == '1702'
+    assert b1681.VERSION == '1.7.0' and b1681.BUILD == '1702'
+    assert v168.VERSION == '1.7.0' and v168.BUILD == '1702'
+    assert model.VERSION == '1.7.0' and model.BUILD == '1702'
     assert model.THRESHOLD == 6.0
     assert model.ENTRY_WINDOW_MS == 900000
     assert model.BOLL_OUTER_SCORE == 2.0
@@ -143,7 +150,7 @@ def smoke_test():
         try:
             with patch.object(app.App,'worker',lambda self:None), patch.object(app.messagebox,'showerror',side_effect=AssertionError):
                 ui=app.App(root,Path(folder)); root.update()
-                assert 'KAYTRADE' in root.title() and '1.7.0' in root.title() and '1701' in root.title()
+                assert 'KAYTRADE' in root.title() and '1.7.0' in root.title() and '1702' in root.title()
                 assert ui.mode.get() == 'OKX模拟盘'
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
@@ -154,6 +161,7 @@ def smoke_test():
                 assert getattr(ui,'_v168_build1681_ready',False)
                 assert getattr(ui,'_v170_strategy_ui_ready',False)
                 assert getattr(ui,'_v170_build1701_ready',False)
+                assert getattr(ui,'_v170_build1702_ready',False)
                 label=getattr(ui,'_v170_version_label',None)
                 if label is not None:
                     assert '1.7.0' in str(label.cget('text'))
@@ -174,7 +182,7 @@ def smoke_test():
         finally:
             root.destroy()
     Path(sys.argv[2]).write_text(
-        'PASS: KAYTRADE V1.7.0 Build1701 packaged UI/runtime; strict closed-15m BOLL opportunity-source lock installed, run logs include long/short direction, 1H EMA9/26 score removed, BOLL5 overextension 0.10 ATR14 +1 latched, PEE4 tiered Boolean risk exit and global Lock1H installed, and inherited write ambiguity remains fail-closed.\n'
+        'PASS: KAYTRADE V1.7.0 Build1702 packaged UI/runtime; strict closed-15m BOLL opportunity-source lock installed, run logs include long/short direction, TP/SL algoClOrdId/attachAlgoClOrdId normalization and fresh-REST protection proof installed, 1H EMA9/26 score removed, BOLL5 overextension 0.10 ATR14 +1 latched, PEE4 tiered Boolean risk exit and global Lock1H installed, and confirmed missing protection remains fail-closed.\n'
     )
 
 
