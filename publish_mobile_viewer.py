@@ -1,0 +1,210 @@
+#!/usr/bin/env python3
+from pathlib import Path
+
+srcs=list(Path('source_artifact').rglob('KAYTRADE-Trend-Pullback-180D-Trade-Viewer-v2.html'))
+if not srcs:
+    raise SystemExit('base viewer not found')
+text=srcs[0].read_text(encoding='utf-8')
+
+def rep(old,new,label):
+    global text
+    if old not in text:
+        raise SystemExit(f'missing patch target: {label}')
+    text=text.replace(old,new,1)
+
+rep(
+    '<meta name="viewport" content="width=device-width,initial-scale=1">',
+    '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">',
+    'viewport'
+)
+rep(
+    '<title>KAYTRADE · Trend Pullback 180D 回测交易K线审查</title>',
+    '<title>KAYTRADE · Trend Pullback 180D 手机自适应K线审查</title>',
+    'title'
+)
+rep(
+    '.chart-wrap{position:relative;flex:1;min-height:360px;background:#090b0e;overflow:hidden}',
+    '.chart-wrap{position:relative;flex:0 0 clamp(300px,45vh,480px);height:clamp(300px,45vh,480px);min-height:300px;background:#090b0e;overflow:hidden}\n#app.chart-large .chart-wrap{flex:1 1 auto;height:auto;min-height:360px}',
+    'chart compact'
+)
+rep(
+    '.bottom{height:218px;border-top:1px solid var(--line);display:grid;grid-template-columns:1.2fr 1fr;background:var(--panel);min-height:160px}',
+    '.bottom{height:218px;flex:0 0 218px;border-top:1px solid var(--line);display:grid;grid-template-columns:1.2fr 1fr;background:var(--panel);min-height:160px}',
+    'bottom'
+)
+
+mobile_css = r'''
+/* ===== Mobile responsive layout ===== */
+@media (max-width:700px){
+  html,body{height:auto;min-height:100%;overflow-x:hidden;overflow-y:auto;-webkit-text-size-adjust:100%;overscroll-behavior-y:auto}
+  body{padding-bottom:env(safe-area-inset-bottom)}
+  #app,#app.chart-large{height:auto;min-height:100dvh;display:flex;flex-direction:column;overflow:visible}
+  .sidebar{width:100%;flex:0 0 auto;border-right:0;border-bottom:1px solid var(--line);min-height:0;overflow:visible}
+  .brand{padding:11px 12px 8px}
+  .brand h1{font-size:15px;margin-bottom:4px}
+  .brand .sub{font-size:10.5px;line-height:1.35}
+  .filters{padding:8px;gap:6px;grid-template-columns:1fr 1fr}
+  .filters select,.filters input{font-size:12px;padding:9px 8px;border-radius:8px;min-height:38px}
+  .trade-list{display:flex;flex:0 0 auto;gap:7px;overflow-x:auto;overflow-y:hidden;padding:8px 10px 10px;max-height:116px;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .trade-list::-webkit-scrollbar{display:none}
+  .trade-item{flex:0 0 min(78vw,290px);margin:0;padding:8px 10px;border-radius:9px;scroll-snap-align:start}
+  .trade-top{font-size:12px}
+  .trade-meta{font-size:10px;margin-top:5px;gap:8px}
+  .main{display:flex;flex-direction:column;flex:0 0 auto;width:100%;min-width:0;min-height:0;overflow:visible}
+  .toolbar{height:auto;min-height:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:8px;background:#0e1217;position:sticky;top:0;z-index:20;border-bottom:1px solid var(--line)}
+  .toolbar button,.toolbar select,.toolbar label{width:100%;min-width:0;min-height:38px;padding:8px 6px;font-size:11px;border-radius:8px;display:flex;align-items:center;justify-content:center}
+  .toolbar label{gap:5px;white-space:nowrap}
+  .toolbar input[type=checkbox]{width:15px;height:15px;margin:0}
+  .toolbar .spacer{display:none}
+  #orderLabel{grid-column:1/-1;display:block;width:100%;padding:2px 4px 0;text-align:center;white-space:normal;line-height:1.3;font-size:10px!important}
+  .chart-wrap,#app.chart-large .chart-wrap{flex:0 0 auto;height:clamp(320px,52dvh,500px);min-height:320px;width:100%;touch-action:none}
+  #app.chart-large .chart-wrap{height:72dvh;min-height:430px}
+  .legend{left:8px;top:7px;right:42px;width:auto;padding:5px 7px;font-size:9px;line-height:1.3;white-space:normal;pointer-events:none}
+  .price-scroll{width:14px}
+  .price-scroll::-webkit-scrollbar{width:12px}
+  .price-scroll-label{right:18px;top:6px;font-size:8px;padding:3px 4px}
+  #tooltip{font-size:10px;min-width:145px;max-width:70vw;padding:6px 8px}
+  .bottom{height:auto;min-height:0;flex:0 0 auto;display:block;border-top:1px solid var(--line);overflow:visible}
+  .details,.stats{padding:11px 10px;overflow:visible}
+  .details{border-right:0;border-bottom:1px solid var(--line)}
+  .details h3,.stats h3{font-size:12px;margin-bottom:8px}
+  .grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+  .kv{padding:7px 8px;border-radius:7px}
+  .kv .k{font-size:9px;margin-bottom:3px}
+  .kv .v{font-size:11px;white-space:normal;overflow:visible;text-overflow:clip;word-break:break-word}
+  .stats-row{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+  .stat{padding:8px}
+  .stat .n{font-size:14px}
+  .stat .l{font-size:9px}
+  .note{font-size:10px;line-height:1.45;margin-top:8px}
+}
+@media (max-width:390px){
+  .trade-item{flex-basis:84vw}
+  .toolbar button,.toolbar select,.toolbar label{font-size:10px;padding-left:4px;padding-right:4px}
+  .chart-wrap,#app.chart-large .chart-wrap{height:48dvh;min-height:300px}
+  #app.chart-large .chart-wrap{height:68dvh;min-height:400px}
+}
+@media (max-width:700px) and (orientation:landscape){
+  .brand{display:none}
+  .filters{grid-template-columns:1fr 1fr 1.4fr}
+  .filters input{grid-column:auto}
+  .trade-list{max-height:92px;padding-top:6px;padding-bottom:6px}
+  .trade-item{flex-basis:230px}
+  .toolbar{grid-template-columns:repeat(5,minmax(0,1fr));position:static}
+  #orderLabel{grid-column:1/-1}
+  .chart-wrap,#app.chart-large .chart-wrap{height:74dvh;min-height:330px}
+  .bottom{display:grid;grid-template-columns:1.15fr 1fr}
+  .details{border-right:1px solid var(--line);border-bottom:0}
+}
+'''
+rep('</style>', mobile_css+'\n</style>', 'mobile css')
+
+rep(
+    '<option value="3">前后 3h</option>\n        <option value="6" selected>前后 6h</option>',
+    '<option value="3" selected>前后 3h</option>\n        <option value="6">前后 6h</option>',
+    'default context'
+)
+rep(
+    '<label><input id="emaToggle" type="checkbox"> EMA20/50</label>\n      <button id="resetBtn">重置视图</button>',
+    '<label><input id="emaToggle" type="checkbox"> EMA20/50</label>\n      <button id="fitCandlesBtn">适配K线</button>\n      <button id="fitTradeBtn">适配交易</button>\n      <button id="chartSizeBtn">K线放大</button>\n      <button id="resetBtn">重置视图</button>',
+    'toolbar buttons'
+)
+rep(
+    '滚轮缩放 · 左右拖拽 · 右侧滚动栏上下平移 · 悬浮查看OHLC',
+    '默认紧凑K线 · 适配K线看蜡烛主体 · 适配交易显示完整Entry/SL/TP · 滚轮缩放',
+    'legend'
+)
+rep(
+    'let priceScrollReady=false;',
+    'let priceScrollReady=false;\nlet includeTradeLevelsInScale=false;',
+    'scale state'
+)
+rep(
+    '  const ctxH=Number(contextSelect.value)||6;',
+    '  includeTradeLevelsInScale=false;\n  const ctxH=Number(contextSelect.value)||3;',
+    'focus defaults'
+)
+rep(
+    "scrollIntoView({block:'nearest'});",
+    "scrollIntoView({block:'nearest',inline:'nearest'});",
+    'mobile list scroll'
+)
+rep(
+    '  for(const v of [t.entry,t.exit,t.stop,t.target]){const n=Number(v);if(Number.isFinite(n)){lo=Math.min(lo,n);hi=Math.max(hi,n);}}',
+    '''  if(includeTradeLevelsInScale){
+    for(const v of [t.entry,t.exit,t.stop,t.target]){
+      const n=Number(v);
+      if(Number.isFinite(n)){lo=Math.min(lo,n);hi=Math.max(hi,n);}
+    }
+  }''',
+    'price scaling'
+)
+
+touch = r'''
+// Mobile touch controls: one-finger horizontal pan, two-finger pinch zoom.
+let touchDrag=false,touchX=0,touchStartView=0,touchEndView=0;
+let pinchStartDist=0,pinchStartSpan=0,pinchCenterRatio=.5,pinchCenterView=0;
+function touchDistance(a,b){const dx=a.clientX-b.clientX,dy=a.clientY-b.clientY;return Math.hypot(dx,dy);}
+canvas.addEventListener('touchstart',e=>{
+  if(e.touches.length===1){
+    const t=e.touches[0];touchDrag=true;touchX=t.clientX;touchStartView=viewStart;touchEndView=viewEnd;
+  }else if(e.touches.length===2){
+    e.preventDefault();touchDrag=false;
+    const a=e.touches[0],b=e.touches[1],rect=canvas.getBoundingClientRect();
+    pinchStartDist=Math.max(1,touchDistance(a,b));pinchStartSpan=Math.max(20,viewEnd-viewStart);
+    const midX=(a.clientX+b.clientX)/2;
+    pinchCenterRatio=Math.max(0,Math.min(1,(midX-rect.left-14)/Math.max(1,canvas.clientWidth-90)));
+    pinchCenterView=viewStart+pinchCenterRatio*(viewEnd-viewStart);
+  }
+},{passive:false});
+canvas.addEventListener('touchmove',e=>{
+  if(e.touches.length===1&&touchDrag){
+    e.preventDefault();
+    const dx=e.touches[0].clientX-touchX,bars=(touchEndView-touchStartView+1);
+    const shift=-dx/Math.max(1,canvas.clientWidth-90)*bars;
+    viewStart=touchStartView+shift;viewEnd=touchEndView+shift;
+    if(viewStart<0){viewEnd-=viewStart;viewStart=0;}
+    if(viewEnd>candles.length-1){const d=viewEnd-(candles.length-1);viewStart-=d;viewEnd-=d;}
+    draw();
+  }else if(e.touches.length===2&&pinchStartDist>0){
+    e.preventDefault();
+    const dist=Math.max(1,touchDistance(e.touches[0],e.touches[1]));
+    const scale=pinchStartDist/dist;
+    const span=Math.max(20,Math.min(candles.length-1,pinchStartSpan*scale));
+    viewStart=pinchCenterView-span*pinchCenterRatio;viewEnd=viewStart+span;
+    if(viewStart<0){viewEnd-=viewStart;viewStart=0;}
+    if(viewEnd>candles.length-1){const d=viewEnd-(candles.length-1);viewStart-=d;viewEnd-=d;}
+    draw();
+  }
+},{passive:false});
+canvas.addEventListener('touchend',e=>{
+  if(e.touches.length===0){touchDrag=false;pinchStartDist=0;}
+  else if(e.touches.length===1){touchDrag=true;touchX=e.touches[0].clientX;touchStartView=viewStart;touchEndView=viewEnd;pinchStartDist=0;}
+},{passive:true});
+
+'''
+rep('\nfunction step(dir){','\n'+touch+'function step(dir){','touch controls')
+rep(
+    "document.getElementById('resetBtn').onclick=()=>{focusTrade();resetPricePan(true);};",
+    """document.getElementById('fitCandlesBtn').onclick=()=>{includeTradeLevelsInScale=false;resetPricePan(false);draw();};
+document.getElementById('fitTradeBtn').onclick=()=>{includeTradeLevelsInScale=true;resetPricePan(false);draw();};
+document.getElementById('chartSizeBtn').onclick=()=>{
+  const app=document.getElementById('app');
+  const large=app.classList.toggle('chart-large');
+  document.getElementById('chartSizeBtn').textContent=large?'K线缩小':'K线放大';
+  requestAnimationFrame(resize);
+};
+document.getElementById('resetBtn').onclick=()=>{includeTradeLevelsInScale=false;focusTrade();resetPricePan(true);};""",
+    'mobile handlers'
+)
+
+out=Path('publish')
+out.mkdir(exist_ok=True)
+p=out/'index.html'
+p.write_text(text,encoding='utf-8')
+assert 'const DATA=' in text
+assert 'touchstart' in text
+assert 'Mobile responsive layout' in text
+print('PUBLISHED_HTML_BYTES',p.stat().st_size)
+a=text.rfind('<script>'); b=text.rfind('</script>')
+Path('/tmp/viewer.js').write_text(text[a+8:b],encoding='utf-8')
