@@ -19,7 +19,7 @@ EXIT:
 - production PEE4 tiered Boolean logic, first 4h, permanently disabled after MFE>=+0.60R.
 - actual PEE4 exit => global Lock1H for both sides.
 
-Research only. Production V1.7 files are not modified.
+Research only. Production V1.7 files are not modified.\nWorkflow trigger: 15m-aligned 180D A/B.
 """
 from __future__ import annotations
 
