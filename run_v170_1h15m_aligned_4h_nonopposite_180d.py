@@ -2,9 +2,10 @@
 """KAYTRADE research: 1H+15m aligned trend with 4H non-opposite gate / direct 15m BOLL pullback, 180D.
 
 ENTRY (no score system):
-- 4H, 1H and 15m must independently show the same full trend:
+- 1H and 15m must independently show the same full trend:
   long = close>EMA200, EMA20>EMA50 and indicator up=True;
   short = close<EMA200, EMA20<EMA50 and indicator down=True.
+- 4H is only a non-opposite hard gate: same direction or neutral passes; explicit opposite trend blocks.
 - that same latest CLOSED 15m candle also touches the direction-side BOLL outer:
   long low<=lower; short high>=upper.
 - front strong structure space must be strictly >1.50R.
@@ -430,8 +431,8 @@ def verify(start=None, end=None):
     assert not (0.30 < COST_MAX_R)
     assert 0.299999 < COST_MAX_R
 
-    # Trend must align on 4H, 1H and 15m; 15m also supplies the BOLL trigger.
-    assert TREND_TIMEFRAMES == ("4H", "1H", "15m")
+    # Trend must align on 1H and 15m; 4H only blocks an explicit opposite trend.
+    assert TREND_TIMEFRAMES == ("1H", "15m")
     assert TrendPullbackModel.BOLL_TRIGGER_TIMEFRAME == "15m"
     assert TrendPullbackModel.THRESHOLD == 0.0
 
@@ -593,8 +594,8 @@ def main():
     (OUT / RESULT_NAME).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     _write_csv(rows, OUT / TRADES_NAME)
     (OUT / "README.txt").write_text(
-        "KAYTRADE Trend Pullback 15m-Aligned 180D research.\n"
-        "4H+1H+15m same full trend -> latest closed 15m direction-side BOLL outer touch -> "
+        "KAYTRADE Trend Pullback 1H+15m Aligned / 4H Non-Opposite 180D research.\n"
+        "1H+15m same full trend + 4H non-opposite -> latest closed 15m direction-side BOLL outer touch -> "
         "Front R >1.50 and Cost R <0.30 -> fixed 1x LIMIT. "
         "Exit: 1H ATR SL, full 2R TP, PEE4, global Lock1H, No-BE.\n",
         encoding="utf-8",
