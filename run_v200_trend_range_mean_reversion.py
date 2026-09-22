@@ -90,7 +90,7 @@ class TrendRangeMeanReversionModel:
     VERSION="V2.0-TrendRangeMeanReversion-Research"
     BUILD=f"V200-{DAYS}D"
     THRESHOLD=0.0; ENTRY_WINDOW_MS=15*60_000
-    BOLL_TRIGGER_TIMEFRAME="4h-range"; FIVE_MINUTE_BOLL_ENABLED=False
+    BOLL_TRIGGER_TIMEFRAME="15m"; FIVE_MINUTE_BOLL_ENABLED=False
 
     @staticmethod
     def evaluate(hour,quarter,five,one,four,opportunity=None,stop_atr=1.0,
