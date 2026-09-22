@@ -132,7 +132,7 @@ def configure():
     src.OUT=OUT; src.RESULT_NAME=RESULT_NAME; src.TRADES_NAME=TRADES_NAME
     src.TrendPullbackModel=TrendRangeMeanReversionModel
     # Keep execution/risk comparable; remove the old Front-R entry restriction.
-    src.FRONT_MIN_R=0.0; src.COST_MAX_R=0.30; src.STOP_ATR=1.0; src.REWARD_R=2.0
+    src.FRONT_MIN_R=1.50; src.COST_MAX_R=0.30; src.STOP_ATR=1.0; src.REWARD_R=2.0
 
 def main():
     configure()
@@ -147,7 +147,7 @@ def main():
       "range":"post-impulse 4H high/low, max 30 bars; midpoint is mean",
       "long":"bull regime + 15m close in lower half + bullish 5m close above EMA20",
       "short":"bear regime + 15m close in upper half + bearish 5m close below EMA20",
-      "score":False,"rsi":False,"macd":False,"kdj":False,"front_r_gate":False,
+      "score":False,"rsi":False,"macd":False,"kdj":False,"front_r_gate":"inherited >1.50R known-only",
       "stop":"1.0x 1H ATR","tp":"2R full"}
     p.write_text(json.dumps(d,ensure_ascii=False,indent=2),encoding="utf-8")
 
