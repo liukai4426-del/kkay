@@ -154,3 +154,5 @@ def main():
 if __name__=="__main__": main()
 
 # CI trigger: V2.0 baseline 360D
+
+# CI rerun after semantic-lock fix
