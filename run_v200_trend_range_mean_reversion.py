@@ -12,7 +12,7 @@ Idea:
 Research only; production strategy untouched.
 """
 from __future__ import annotations
-import json, math, os
+import json, math, os, time
 from datetime import timedelta
 from pathlib import Path
 from core import indicators, ema
@@ -29,6 +29,11 @@ WIDTH_RATIO=1.20
 IMPULSE_LOOKBACK=48
 MIN_RANGE_BARS=6
 MAX_RANGE_BARS=30
+
+_RANGE_CACHE_KEY = None
+_RANGE_CACHE_VALUE = None
+_EMA20_CACHE_KEY = None
+_EMA20_CACHE_VALUE = None
 
 def _bw(rows):
     q=indicators(rows); mid=float(q["middle"])
@@ -58,18 +63,37 @@ def _latest_impulse(four):
     return best
 
 def _range_state(four):
+    global _RANGE_CACHE_KEY, _RANGE_CACHE_VALUE
+    if not four:
+        return None
+    key = (len(four), int(four[-1]["t"]))
+    if key == _RANGE_CACHE_KEY:
+        return _RANGE_CACHE_VALUE
     imp=_latest_impulse(four)
-    if not imp: return None
-    bars=four[imp["idx"]+1:]
-    if len(bars)<MIN_RANGE_BARS: return None
-    bars=bars[-MAX_RANGE_BARS:]
-    hi=max(float(x["h"]) for x in bars); lo=min(float(x["l"]) for x in bars)
-    if hi<=lo: return None
-    return {**imp,"high":hi,"low":lo,"mean":(hi+lo)/2.0,"bars":len(bars)}
+    if not imp:
+        value=None
+    else:
+        bars=four[imp["idx"]+1:]
+        if len(bars)<MIN_RANGE_BARS:
+            value=None
+        else:
+            bars=bars[-MAX_RANGE_BARS:]
+            hi=max(float(x["h"]) for x in bars); lo=min(float(x["l"]) for x in bars)
+            value=None if hi<=lo else {**imp,"high":hi,"low":lo,"mean":(hi+lo)/2.0,"bars":len(bars)}
+    _RANGE_CACHE_KEY=key
+    _RANGE_CACHE_VALUE=value
+    return value
 
 def _ema20_5m(five):
+    global _EMA20_CACHE_KEY, _EMA20_CACHE_VALUE
+    key = (len(five), int(five[-1]["t"]))
+    if key == _EMA20_CACHE_KEY:
+        return _EMA20_CACHE_VALUE
     vals=[float(x["c"]) for x in five]
-    return float(ema(vals,20)[-1])
+    value=float(ema(vals,20)[-1])
+    _EMA20_CACHE_KEY=key
+    _EMA20_CACHE_VALUE=value
+    return value
 
 def _trigger(quarter,five,rs):
     q=quarter[-1]; f=five[-1]; mean=rs["mean"]; hi=rs["high"]; lo=rs["low"]; e=_ema20_5m(five)
@@ -85,6 +109,38 @@ def _trigger(quarter,five,rs):
     return {"bar_t":int(q["t"]),"signal_close_ms":int(q["t"])+15*60_000,
             "lower":lo,"middle":mean,"upper":hi,"reference":ref,"path":path,
             "bar_o":float(q["o"]),"bar_h":float(q["h"]),"bar_l":float(q["l"]),"bar_c":float(q["c"])}
+
+def _make_v2_opportunity(hour, side, trig, rs):
+    h1=indicators(hour)
+    return {
+        "id": f"v200-{side}-{int(trig['bar_t'])}",
+        "side": side,
+        "signal_path": trig["path"],
+        "signal_bar_t": int(trig["bar_t"]),
+        "signal_close_ms": int(trig["signal_close_ms"]),
+        "created_ms": int(trig["signal_close_ms"]),
+        "expires_ms": int(trig["signal_close_ms"]) + 15*60_000,
+        "trigger_reference": float(trig["reference"]),
+        "trigger_detail": {
+            "boll_lower": float(trig["lower"]),
+            "boll_middle": float(trig["middle"]),
+            "boll_upper": float(trig["upper"]),
+            "bar_o": trig["bar_o"], "bar_h": trig["bar_h"],
+            "bar_l": trig["bar_l"], "bar_c": trig["bar_c"],
+        },
+        "atr1h": float(h1["atr"]),
+        "front_structure": None,
+        "trend_1h": "not_used",
+        "trend_4h": side,
+        "regime_impulse_t": rs["t"],
+        "impulse_volume_ratio": rs["volume_ratio"],
+        "impulse_width_ratio": rs["width_ratio"],
+        "range_high": rs["high"],
+        "range_low": rs["low"],
+        "range_mean": rs["mean"],
+        "range_bars": rs["bars"],
+        "consumed": False,
+    }
 
 class TrendRangeMeanReversionModel:
     VERSION="V2.0-TrendRangeMeanReversion-Research"
@@ -109,10 +165,7 @@ class TrendRangeMeanReversionModel:
         if allow_new and trig:
             old=int((opp or {}).get("signal_bar_t") or -1)
             if opp is None or int(trig["bar_t"])>old:
-                opp=src._make_opportunity(hour,quarter,five,one,four,direction,trig)
-                opp.update({"regime_impulse_t":rs["t"],"impulse_volume_ratio":rs["volume_ratio"],
-                            "impulse_width_ratio":rs["width_ratio"],"range_high":rs["high"],
-                            "range_low":rs["low"],"range_mean":rs["mean"],"range_bars":rs["bars"]})
+                opp=_make_v2_opportunity(hour,direction,trig,rs)
                 transition=("created",str(opp["id"]))
         scores={s:{"total":0.0,"gate":False,"eligible":False,"confirmations":{},"layers":{}} for s in ("做多","做空")}
         if opp:
@@ -123,36 +176,192 @@ class TrendRangeMeanReversionModel:
         return {"side":str((opp or {}).get("side") or "观望"),"direction":direction,"scores":scores,
                 "opportunity":dict(opp) if opp else None,"opportunity_id":str((opp or {}).get("id") or ""),
                 "strategy_version":TrendRangeMeanReversionModel.VERSION,
-                "trend_1h":src._trend_state(hour),"trend_4h":direction},opp,transition
+                "trend_1h":"not_used","trend_4h":direction},opp,transition
     @staticmethod
     def execution_checks(plan,opportunity,score): return True,{},[]
 
+def _submit_pure(self, result, now_ms, mark):
+    opp=result.get("opportunity")
+    if not isinstance(opp,dict):
+        return
+    side=str(opp.get("side") or "")
+    if side not in ("做多","做空"):
+        return
+    signal_bar_t=int(opp.get("signal_bar_t") or -1)
+    if signal_bar_t <= int(getattr(self,"_trend_last_submitted_signal_bar_t",-1)):
+        self.stats["same_15m_signal_repeat_block"] += 1
+        return
+    if not self.can_submit(now_ms):
+        return
+
+    entry=float(mark)
+    stop_distance=float(opp.get("atr1h") or 0.0) * src.STOP_ATR
+    if stop_distance <= 0:
+        self.stats["invalid_atr1h"] += 1
+        return
+
+    direction=src.research.side_dir(side)
+    stop=entry-direction*stop_distance
+    target=entry+direction*stop_distance*src.REWARD_R
+
+    eq=self.equity(mark)
+    risk_capital=min(src.CAPITAL,eq)
+    base_risk=min(src.RISK_USDT,risk_capital*src.RISK_PCT/100.0)
+    risk_budget=min(base_risk,self.daily_remaining(now_ms,mark))
+    if risk_budget <= 0:
+        self.stats["sizing_skips"] += 1
+        return
+
+    maker=src.research.MAKER_BPS/10000.0
+    taker=src.research.TAKER_BPS/10000.0
+    slip=src.research.SLIPPAGE_BPS/10000.0
+    per_btc=stop_distance + entry*max(maker,taker) + stop*(taker+slip)
+    notional_cap=min(
+        src.BASE_POSITION_NOTIONAL,
+        risk_capital*src.LEVERAGE,
+        max(eq,0.0)*0.9*src.LEVERAGE,
+    )
+    btc=src.research.round_contract_btc(min(risk_budget/per_btc,notional_cap/entry),self.meta)
+    if btc <= 0:
+        self.stats["sizing_skips"] += 1
+        return
+
+    cost_r=src.structure_model.estimated_cost_r(
+        entry,stop_distance,side,
+        maker_bps=src.research.MAKER_BPS,
+        taker_bps=src.research.TAKER_BPS,
+        slippage_bps=src.research.SLIPPAGE_BPS,
+    )
+    factors={
+        "signal_path":str(opp.get("signal_path") or ""),
+        "4h_impulse_regime":side,
+        "impulse_volume_ratio":opp.get("impulse_volume_ratio"),
+        "impulse_width_ratio":opp.get("impulse_width_ratio"),
+        "range_high":opp.get("range_high"),
+        "range_mean":opp.get("range_mean"),
+        "range_low":opp.get("range_low"),
+        "range_bars":opp.get("range_bars"),
+        "front_gate":"OFF",
+        "cost_gate":"OFF",
+        "cost_r_info":float(cost_r),
+        "entry_rule":"4H impulse/range + trend-side half + 5m EMA20 reversal",
+        "position_multiplier":1.0,
+    }
+    self.pending=src.research.PendingEntry(
+        side=side,
+        limit=entry,
+        stop=stop,
+        target=target,
+        quantity_btc=btc,
+        score=0.0,
+        opportunity_id=str(opp["id"]),
+        signal_bar_t=signal_bar_t,
+        signal_close_ms=int(opp.get("signal_close_ms") or now_ms),
+        submitted_ms=int(now_ms),
+        expires_ms=int(now_ms)+src.ORDER_TTL_MS,
+        factors=factors,
+        score_components={},
+        trigger_combination=dict(opp.get("trigger_detail") or {}),
+        front_r=math.inf,
+        cost_r=float(cost_r),
+    )
+    self._trend_last_submitted_signal_bar_t=signal_bar_t
+    self.stats["v200_pure_limit_submitted"] += 1
+    self.stats["limit_submitted"] += 1
+
+
+_SRC_CONFIGURE = src.configure
+
 def configure():
-    src.DAYS=DAYS; src.FIXED_START=src.FIXED_END-timedelta(days=DAYS)
-    src.OUT=OUT; src.RESULT_NAME=RESULT_NAME; src.TRADES_NAME=TRADES_NAME
+    src.DAYS=DAYS
+    src.FIXED_START=src.FIXED_END-timedelta(days=DAYS)
+    src.OUT=OUT
+    src.RESULT_NAME=RESULT_NAME
+    src.TRADES_NAME=TRADES_NAME
     src.TrendPullbackModel=TrendRangeMeanReversionModel
-    # Keep execution/risk comparable; remove the old Front-R entry restriction.
-    src.FRONT_MIN_R=1.50; src.COST_MAX_R=0.30; src.STOP_ATR=1.0; src.REWARD_R=2.0
+    start,end=_SRC_CONFIGURE()
+
+    import run_v166_15m_boll_macd_adverse_only_360d_fast as proven
+    src.research.model=TrendRangeMeanReversionModel
+    src.research.Simulator.submit=_submit_pure
+    src.research.Simulator.process_pending=proven._ORIG_PENDING
+    src.research.Simulator.process_exit=proven._ORIG_EXIT
+    src.research.Simulator.finish=proven._ORIG_FINISH
+    return start,end
+
 
 def main():
-    configure()
-    print("V200_CONFIG",f"days={DAYS}","4H impulse: volume>=1.5x OR BOLL width>=1.2x",
-          "range=post-impulse 4H","entry=trend-side half + 5m EMA20 reversal",
-          "SL=1H ATR","TP=2R","no score/RSI/MACD/KDJ",flush=True)
-    src.main()
-    p=OUT/RESULT_NAME
-    d=json.loads(p.read_text(encoding="utf-8"))
-    d["research"]="V2.0 4H impulse -> dynamic range -> trend-side mean reversion baseline"
-    d["strategy_lock"]={"impulse":"4H volume ratio >=1.50 OR BOLL width ratio >=1.20; candle/mid direction",
-      "range":"post-impulse 4H high/low, max 30 bars; midpoint is mean",
-      "long":"bull regime + 15m close in lower half + bullish 5m close above EMA20",
-      "short":"bear regime + 15m close in upper half + bearish 5m close below EMA20",
-      "score":False,"rsi":False,"macd":False,"kdj":False,"front_r_gate":"inherited >1.50R known-only",
-      "stop":"1.0x 1H ATR","tp":"2R full"}
-    p.write_text(json.dumps(d,ensure_ascii=False,indent=2),encoding="utf-8")
+    started=time.perf_counter()
+    start,end=configure()
+    OUT.mkdir(parents=True,exist_ok=True)
 
-if __name__=="__main__": main()
+    print(
+        "V200_PURE_CONFIG",
+        f"days={DAYS}",
+        "4H impulse=volume>=1.5x OR BOLL-width>=1.2x",
+        "range=post-impulse 4H max30",
+        "entry=trend-side half + 5m EMA20 reversal",
+        "front_gate=OFF","cost_gate=OFF","pee4=OFF","lock1h=OFF",
+        "sl=1H_ATR_x1","tp=2R_full","be=OFF",
+        flush=True,
+    )
 
-# CI trigger: V2.0 baseline 360D
+    meta,data,funding,cache_manifest=src.load_market(src.research.base,src.TIMEFRAMES)
+    ts={tf:[int(r["t"]) for r in rows] for tf,rows in data.items()}
+    src.research.cache_patch.prime_one_minute(data["1m"],src.research.MODEL_WINDOW)
+    for tf in src.TIMEFRAMES:
+        rows=data[tf]
+        step=src.research.base.BAR_MS[tf]
+        assert rows and all(int(b["t"])-int(a["t"])==step for a,b in zip(rows,rows[1:])), f"AUDIT FAIL {tf}"
 
-# CI rerun after semantic-lock fix
+    print("AUDIT PASS: V2.0 pure entry + ordinary SL/TP; Front/Cost/PEE4/Lock1H disabled",flush=True)
+    sim,raw_metrics=src.research.run(data,ts,meta,funding,variant=f"v200_pure_{DAYS}d")
+    rows=list(sim.trades)
+    metrics=dict(raw_metrics)
+
+    payload={
+        "research":"V2.0 PURE: 4H impulse -> dynamic range -> trend-side mean reversion",
+        "window":{"start":start.isoformat(),"end":end.isoformat(),"days":DAYS},
+        "capital":src.CAPITAL,
+        "strategy_lock":{
+            "impulse":"4H volume ratio >=1.50 OR BOLL width ratio >=1.20; impulse candle/mid defines direction",
+            "range":"post-impulse 4H high/low, max 30 bars; midpoint is mean",
+            "long":"bull regime + latest closed 15m close in lower half + bullish 5m close above EMA20",
+            "short":"bear regime + latest closed 15m close in upper half + bearish 5m close below EMA20",
+            "score_system":False,
+            "rsi_entry_gate":False,
+            "macd_entry_gate":False,
+            "kdj_entry_gate":False,
+            "front_r_gate":False,
+            "cost_r_gate":False,
+            "pee4":False,
+            "post_exit_lock":False,
+            "break_even":False,
+            "entry":"LIMIT at first closed-1m mark after signal; 60s historical touch proxy",
+            "stop":"1.0 x closed 1H ATR",
+            "tp":"2R full position",
+            "fees_slippage":"retained in simulator and sizing",
+        },
+        "metrics":metrics,
+        "analysis":src._analysis(rows),
+        "simulator_stats":dict(sim.stats),
+        "top_blockers":sim.blockers.most_common(30),
+        "transitions":dict(sim.transitions),
+        "cache":cache_manifest,
+        "timing_sec":{"total":time.perf_counter()-started},
+        "production_strategy_variables_changed":False,
+    }
+    (OUT/RESULT_NAME).write_text(json.dumps(payload,ensure_ascii=False,indent=2),encoding="utf-8")
+    src._write_csv(rows,OUT/TRADES_NAME)
+    (OUT/"README.txt").write_text(
+        "KAYTRADE V2.0 PURE research.\n"
+        "4H impulse (volume/BOLL expansion) -> dynamic 4H range -> trend-side mean reversion -> "
+        "5m EMA20 reversal confirmation. Front/Cost entry gates OFF; PEE4/Lock1H OFF. "
+        "Exit only ordinary 1H ATR SL or full 2R TP.\n",
+        encoding="utf-8",
+    )
+    print("V200_PURE_RESULT",json.dumps(payload,ensure_ascii=False,indent=2),flush=True)
+
+
+if __name__=="__main__":
+    main()
