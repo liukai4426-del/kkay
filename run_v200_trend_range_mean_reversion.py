@@ -12,7 +12,7 @@ Idea:
 Research only; production strategy untouched.
 """
 from __future__ import annotations
-import json, math, os, time
+import json, math, os, time, sys, inspect, re
 from datetime import timedelta
 from pathlib import Path
 from core import indicators, ema
@@ -29,6 +29,13 @@ WIDTH_RATIO=1.20
 IMPULSE_LOOKBACK=48
 MIN_RANGE_BARS=6
 MAX_RANGE_BARS=30
+
+PURE_FACTOR_KEYS = {
+    "boll_path","signal_path","boll_timeframe","trend_1h","trend_4h",
+    "4h_impulse_regime","impulse_volume_ratio","impulse_width_ratio",
+    "range_high","range_mean","range_low","range_bars",
+    "front_gate","cost_gate","cost_r_info","entry_rule","position_multiplier",
+}
 
 _RANGE_CACHE_KEY = None
 _RANGE_CACHE_VALUE = None
@@ -233,7 +240,11 @@ def _submit_pure(self, result, now_ms, mark):
         slippage_bps=src.research.SLIPPAGE_BPS,
     )
     factors={
+        "boll_path":str(opp.get("signal_path") or ""),
         "signal_path":str(opp.get("signal_path") or ""),
+        "boll_timeframe":"15m",
+        "trend_1h":"not_used",
+        "trend_4h":side,
         "4h_impulse_regime":side,
         "impulse_volume_ratio":opp.get("impulse_volume_ratio"),
         "impulse_width_ratio":opp.get("impulse_width_ratio"),
@@ -288,6 +299,43 @@ def configure():
     src.research.Simulator.process_exit=proven._ORIG_EXIT
     src.research.Simulator.finish=proven._ORIG_FINISH
     return start,end
+
+
+def preflight():
+    # Must run before any market-data fetch / full backtest.
+    assert DAYS in (180,360,720)
+    assert src.STOP_ATR == 1.0 and src.REWARD_R == 2.0
+    start,end=configure()
+    assert (end-start).days == DAYS
+
+    import run_v166_15m_boll_macd_adverse_only_360d_fast as proven
+    assert src.research.Simulator.submit is _submit_pure
+    assert src.research.Simulator.process_pending is proven._ORIG_PENDING
+    assert src.research.Simulator.process_exit is proven._ORIG_EXIT
+    assert src.research.Simulator.finish is proven._ORIG_FINISH
+
+    exit_source=inspect.getsource(proven._ORIG_EXIT)
+    required=set(re.findall(r'p\\.factors\\[["\\\']([^"\\\']+)["\\\']\\]', exit_source))
+    missing=required-PURE_FACTOR_KEYS
+    assert not missing, f"PURE factor contract missing required keys: {sorted(missing)}"
+
+    submit_source=inspect.getsource(_submit_pure)
+    forbidden=("front_r_le_150_block","cost_r_ge_030_block","_trend_lock_until_ms","pee4_lock1h")
+    leaked=[x for x in forbidden if x in submit_source]
+    assert not leaked, f"legacy gate leaked into V2.0 pure submit: {leaked}"
+
+    assert TrendRangeMeanReversionModel.THRESHOLD == 0.0
+    assert TrendRangeMeanReversionModel.BOLL_TRIGGER_TIMEFRAME == "15m"
+    assert TrendRangeMeanReversionModel.FIVE_MINUTE_BOLL_ENABLED is False
+    print(
+        "V200_PREFLIGHT_PASS",
+        f"days={DAYS}",
+        f"required_factor_keys={sorted(required)}",
+        "front_gate=OFF","cost_gate=OFF","pee4=OFF","lock1h=OFF",
+        "ordinary_pending_exit_finish=PASS",
+        flush=True,
+    )
+    return True
 
 
 def main():
@@ -364,4 +412,7 @@ def main():
 
 
 if __name__=="__main__":
-    main()
+    if "--preflight" in sys.argv:
+        preflight()
+    else:
+        main()
