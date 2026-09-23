@@ -13,6 +13,7 @@ Research only; production strategy untouched.
 """
 from __future__ import annotations
 import json, math, os, time, sys, inspect, re
+from types import SimpleNamespace
 from datetime import timedelta
 from pathlib import Path
 from core import indicators, ema
@@ -37,6 +38,7 @@ PURE_FACTOR_KEYS = {
     "4h_impulse_regime","impulse_volume_ratio","impulse_width_ratio",
     "range_high","range_mean","range_low","range_bars",
     "front_gate","cost_gate","cost_r_info","entry_rule","position_multiplier",
+    "signal_age_min","atr1h_pct","local_hour_cn","weekday_cn","month_cn",
 }
 
 _RANGE_CACHE_KEY = None
@@ -241,6 +243,7 @@ def _submit_pure(self, result, now_ms, mark):
         taker_bps=src.research.TAKER_BPS,
         slippage_bps=src.research.SLIPPAGE_BPS,
     )
+    dt=src.research.local_dt(now_ms)
     factors={
         "boll_path":str(opp.get("signal_path") or ""),
         "signal_path":str(opp.get("signal_path") or ""),
@@ -259,6 +262,11 @@ def _submit_pure(self, result, now_ms, mark):
         "cost_r_info":float(cost_r),
         "entry_rule":"4H impulse/range + trend-side half + 5m EMA20 reversal",
         "position_multiplier":1.0,
+        "signal_age_min":max(0.0,(int(now_ms)-int(opp.get("signal_close_ms") or now_ms))/60_000.0),
+        "atr1h_pct":100.0*stop_distance/max(entry,1e-12),
+        "local_hour_cn":int(dt.hour),
+        "weekday_cn":dt.strftime("%a"),
+        "month_cn":dt.strftime("%Y-%m"),
     }
     self.pending=src.research.PendingEntry(
         side=side,
@@ -318,9 +326,28 @@ def preflight():
     assert src.research.Simulator.finish is proven._ORIG_FINISH
 
     exit_source=inspect.getsource(proven._ORIG_EXIT)
-    required=set(re.findall(r'p\\.factors\\[["\\\']([^"\\\']+)["\\\']\\]', exit_source))
+    required=set(re.findall(r'p\.factors\["([^"]+)"\]', exit_source))
+    report_required={"boll_path","month_cn","weekday_cn"}
+    required |= report_required
     missing=required-PURE_FACTOR_KEYS
     assert not missing, f"PURE factor contract missing required keys: {sorted(missing)}"
+
+    smoke_row={
+        "net_pnl":1.0,"entry_fee":0.0,"exit_fee":0.0,"funding_pnl":0.0,
+        "hold_min":1.0,"side":"做多","boll_path":"v200-smoke","score":0.0,
+        "month_cn":"2099-01","weekday_cn":"Mon",
+    }
+    smoke=SimpleNamespace(
+        trades=[smoke_row],
+        equity_curve=[(0,src.CAPITAL),(1,src.CAPITAL+1.0)],
+        cash=src.CAPITAL+1.0,
+        variant="preflight",
+        stats={},
+        blockers={},
+    )
+    smoke_metrics=src.research.metrics(smoke,100.0,101.0)
+    assert smoke_metrics["by_month_cn"]["2099-01"]["trades"] == 1
+    assert smoke_metrics["by_weekday_cn"]["Mon"]["trades"] == 1
 
     submit_source=inspect.getsource(_submit_pure)
     forbidden=("front_r_le_150_block","cost_r_ge_030_block","_trend_lock_until_ms","pee4_lock1h")
