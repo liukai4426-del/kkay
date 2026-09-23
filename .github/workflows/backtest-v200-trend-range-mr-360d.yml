@@ -18,7 +18,7 @@ jobs:
     env:
       BACKTEST_MARKET_CACHE: .backtest_cache
       BACKTEST_DAYS: '180'
-  BACKTEST_WINDOW_SHIFT_DAYS: '180'
+      BACKTEST_WINDOW_SHIFT_DAYS: '180'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -59,6 +59,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: KAYTRADE-V200-PURE-Prev180D-2000U
-          path: backtest_output_v200_trend_range_mr_360d/
+          path: backtest_output_v200_trend_range_mr_180d/
           if-no-files-found: error
           retention-days: 30
