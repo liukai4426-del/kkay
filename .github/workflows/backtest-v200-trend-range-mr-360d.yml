@@ -1,8 +1,8 @@
-name: Backtest V2.0 Pure Trend Range Mean Reversion 180D
+name: Backtest V2.0 Pure Previous 180D
 
 on:
   push:
-    branches: [research/v200-pure-180d]
+    branches: [research/v200-pure-prev180d]
     paths:
       - run_v200_trend_range_mean_reversion.py
       - .github/workflows/backtest-v200-trend-range-mr-360d.yml
@@ -18,6 +18,7 @@ jobs:
     env:
       BACKTEST_MARKET_CACHE: .backtest_cache
       BACKTEST_DAYS: '180'
+  BACKTEST_WINDOW_SHIFT_DAYS: '180'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -29,7 +30,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .backtest_cache
-          key: kaytrade-v200-pure-180d-end-20260914-market-v1
+          key: kaytrade-v200-pure-prev180d-end-20260318-market-v1
           restore-keys: |
             kaytrade-v171-asym-360d-
             kaytrade-v168-okx-btc-360d-
@@ -53,11 +54,11 @@ jobs:
         run: python -m py_compile run_v200_trend_range_mean_reversion.py run_v170_trend_pullback_180d.py
       - name: Preflight V2.0 Pure
         run: python run_v200_trend_range_mean_reversion.py --preflight
-      - name: Run V2.0 Pure 180D
+      - name: Run V2.0 Pure Previous 180D
         run: time python run_v200_trend_range_mean_reversion.py
       - uses: actions/upload-artifact@v4
         with:
-          name: KAYTRADE-V200-PURE-Trend-Range-MR-180D-2000U
+          name: KAYTRADE-V200-PURE-Prev180D-2000U
           path: backtest_output_v200_trend_range_mr_360d/
           if-no-files-found: error
           retention-days: 30
