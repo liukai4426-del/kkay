@@ -19,7 +19,9 @@ from core import indicators, ema
 import run_v170_trend_pullback_180d as src
 
 DAYS=int(os.environ.get("BACKTEST_DAYS","360"))
+WINDOW_SHIFT_DAYS=int(os.environ.get("BACKTEST_WINDOW_SHIFT_DAYS","0"))
 if DAYS not in (180,360,720): raise ValueError("BACKTEST_DAYS must be 180/360/720")
+if WINDOW_SHIFT_DAYS < 0: raise ValueError("BACKTEST_WINDOW_SHIFT_DAYS must be >= 0")
 OUT=Path(f"backtest_output_v200_trend_range_mr_{DAYS}d")
 RESULT_NAME=f"result_v200_trend_range_mr_{DAYS}d.json"
 TRADES_NAME=f"trades_v200_trend_range_mr_{DAYS}d.csv"
@@ -285,6 +287,7 @@ _SRC_CONFIGURE = src.configure
 
 def configure():
     src.DAYS=DAYS
+    src.FIXED_END=src.FIXED_END-timedelta(days=WINDOW_SHIFT_DAYS)
     src.FIXED_START=src.FIXED_END-timedelta(days=DAYS)
     src.OUT=OUT
     src.RESULT_NAME=RESULT_NAME
@@ -330,6 +333,9 @@ def preflight():
     print(
         "V200_PREFLIGHT_PASS",
         f"days={DAYS}",
+        f"window_shift_days={WINDOW_SHIFT_DAYS}",
+        f"window_start={start.isoformat()}",
+        f"window_end={end.isoformat()}",
         f"required_factor_keys={sorted(required)}",
         "front_gate=OFF","cost_gate=OFF","pee4=OFF","lock1h=OFF",
         "ordinary_pending_exit_finish=PASS",
@@ -346,6 +352,9 @@ def main():
     print(
         "V200_PURE_CONFIG",
         f"days={DAYS}",
+        f"window_shift_days={WINDOW_SHIFT_DAYS}",
+        f"start={start.isoformat()}",
+        f"end={end.isoformat()}",
         "4H impulse=volume>=1.5x OR BOLL-width>=1.2x",
         "range=post-impulse 4H max30",
         "entry=trend-side half + 5m EMA20 reversal",
