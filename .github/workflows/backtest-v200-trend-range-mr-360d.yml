@@ -51,6 +51,8 @@ jobs:
           git show FETCH_HEAD:research_backtest_data_cache.py > research_backtest_data_cache.py
       - name: Compile
         run: python -m py_compile run_v200_trend_range_mean_reversion.py run_v170_trend_pullback_180d.py
+      - name: Preflight V2.0 Pure
+        run: python run_v200_trend_range_mean_reversion.py --preflight
       - name: Run V2.0 Pure 180D
         run: time python run_v200_trend_range_mean_reversion.py
       - uses: actions/upload-artifact@v4
