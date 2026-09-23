@@ -58,6 +58,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: KAYTRADE-V200-PURE-Trend-Range-MR-180D-2000U
-          path: backtest_output_v200_trend_range_mr_360d/
+          path: backtest_output_v200_trend_range_mr_180d/
           if-no-files-found: error
           retention-days: 30
