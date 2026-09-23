@@ -1,8 +1,8 @@
-name: Backtest V2.0 Pure Trend Range Mean Reversion 180D
+name: Backtest V2.1 4H Range 1H RSI BOLL 5m Reversal 180D
 
 on:
   push:
-    branches: [research/v200-pure-180d]
+    branches: [research/v210-4h-range-1h-rsi-boll-5m-reversal-180d]
     paths:
       - run_v200_trend_range_mean_reversion.py
       - .github/workflows/backtest-v200-trend-range-mr-360d.yml
@@ -51,13 +51,13 @@ jobs:
           git show FETCH_HEAD:research_backtest_data_cache.py > research_backtest_data_cache.py
       - name: Compile
         run: python -m py_compile run_v200_trend_range_mean_reversion.py run_v170_trend_pullback_180d.py
-      - name: Preflight V2.0 Pure
+      - name: Preflight V2.1 semantic and contract audit
         run: python run_v200_trend_range_mean_reversion.py --preflight
-      - name: Run V2.0 Pure 180D
+      - name: Run V2.1 180D only after preflight passes
         run: time python run_v200_trend_range_mean_reversion.py
       - uses: actions/upload-artifact@v4
         with:
-          name: KAYTRADE-V200-PURE-Trend-Range-MR-180D-2000U
-          path: backtest_output_v200_trend_range_mr_180d/
+          name: KAYTRADE-V210-4HRange-1HRSIBOLL-5mReversal-180D-2000U
+          path: backtest_output_v210_4h_range_1h_rsi_boll_5m_reversal_180d/
           if-no-files-found: error
           retention-days: 30
