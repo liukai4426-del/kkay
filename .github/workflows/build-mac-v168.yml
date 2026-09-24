@@ -1,0 +1,162 @@
+name: Build KAYTRADE Intel Mac 1.6.8 Build1680
+
+on:
+  push:
+    branches: [feature/v168-strategy]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install V1.6.8 runtime test dependencies
+        run: python -m pip install 'websocket-client==1.8.0' 'certifi==2025.8.3'
+      - name: Compile V1.6.8 Build1680
+        run: |
+          python -m py_compile \
+            v160_model.py v160_update_patch.py v161_model.py v161_update_patch.py v162_model.py v162_update_patch.py \
+            v163_model.py v163_update_patch.py v163_ui_patch.py v164_model.py v164_update_patch.py v164_ui_patch.py \
+            v165_model.py v165_update_patch.py v165_algo_fallback_patch.py v165_runtime_network_patch.py \
+            v165_sleep_resume_patch.py v165_keepawake_patch.py v165_ui_patch.py v165_15m_outer_patch.py \
+            v166_ui_patch.py v166_readonly_resilience_patch.py \
+            v167_strategy_patch.py v167_algo_sync_patch.py v167_15m_boll_only_fix.py v168_update_patch.py \
+            test_v167_strategy.py test_v167_algo_sync.py test_v167_15m_boll_only_fix.py test_v168_update.py desktop.py
+      - name: Preserved strategy/runtime regressions
+        run: |
+          python -m unittest -v test_engine
+          python -m unittest -v test_candles
+          python -m unittest -v test_v152_strategy
+          python -m unittest -v test_v153_strategy
+          python -m unittest -v test_v154_strategy
+          python -m unittest -v test_v155_update
+          python -m unittest -v \
+            test_v156_build1561.V156Build1561Tests.test_fixed_loss_control_markers_cover_value_row_and_note \
+            test_v156_build1561.V156Build1561Tests.test_identity_and_preserved_flags \
+            test_v156_build1561.V156Build1561Tests.test_log_order_helper_is_newest_first_and_capped
+          python -m unittest -v test_v160_update
+          python -m unittest -v test_v161_update
+          python -m unittest -v test_v162_update
+          python -m unittest -v test_v163_update
+          python -m unittest -v test_v163_ui
+          python -m unittest -v test_v164_update
+          python -m unittest -v test_v164_execution
+          python -m unittest -v test_v164_ui
+          python -m unittest -v test_v165_update
+          python -m unittest -v test_v165_execution
+          python -m unittest -v test_v165_runtime_network_state
+          python -m unittest -v test_v165_sleep_resume
+          python -m unittest -v test_v165_keepawake
+          python -m unittest -v test_v165_ui
+          python -m unittest -v test_v166_ui
+          python -m unittest -v test_v166_readonly_resilience
+          python -m unittest -v test_v167_strategy
+          python -m unittest -v test_v167_algo_sync
+          python -m unittest -v test_v167_15m_boll_only_fix
+      - name: V1.6.8 regressions
+        run: python -m unittest -v test_v168_update
+      - name: Verify V1.6.8 Build1680 semantic lock
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import app
+          import engine
+          import exchange
+          import v153_model as signal_core
+          import v161_ui_status_patch as ui161
+          import v164_model as v164
+          import v165_model as model
+          import v167_15m_boll_only_fix as b1671
+          import v168_update_patch as v168
+          spec=Path('OKXLocal.spec').read_text()
+          desktop=Path('desktop.py').read_text()
+          assert v168.VERSION=='1.6.8' and v168.BUILD=='1680'
+          assert model.VERSION=='1.6.8' and model.BUILD=='1680'
+          assert model.THRESHOLD==6.0
+          assert model.ENTRY_WINDOW_MS==900000 and v164.ENTRY_WINDOW_MS==900000
+          assert model.BOLL_OUTER_SCORE==2.0 and v164.BOLL_OUTER_SCORE==2.0
+          assert model.BOLL_TRIGGER_TIMEFRAME=='15m'
+          assert model.FIVE_MINUTE_BOLL_ENABLED is False
+          assert signal_core.boll_entry_signal is b1671._signal_adapter_15m_only
+          labels=dict(ui161._STATUS_ITEMS)
+          assert labels['signal_window']=='15m BOLL信号有效'
+          assert labels['outer_4h']=='4H同向 Hard Gate'
+          assert labels['ema1h']=='1H EMA9/26趋势'
+          assert getattr(exchange.Exchange,'_kaytrade_v167_algo_sync_applied',False)
+          assert getattr(engine.Engine,'_kaytrade_v167_algo_sync_applied',False)
+          assert getattr(app.App,'_kaytrade_v168_applied',False)
+          assert getattr(model,'_kaytrade_v168_applied',False)
+          assert "CFBundleShortVersionString': '1.6.8'" in spec
+          assert "CFBundleVersion': '1680'" in spec
+          assert 'v168_update_patch' in desktop
+          print('PASS Build1680: strict 15m BOLL source, 15m lifecycle, BOLL=2, 4H aligned +1 Hard Gate, 1H EMA9/26 +1 score')
+          PY
+
+  build:
+    needs: unit
+    runs-on: macos-15-intel
+    timeout-minutes: 70
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0' 'websocket-client==1.8.0'
+      - name: Runtime/UI tests in isolated interpreters
+        run: |
+          python -m unittest -v test_v165_update
+          python -m unittest -v test_v165_execution
+          python -m unittest -v test_v165_runtime_network_state
+          python -m unittest -v test_v165_sleep_resume
+          python -m unittest -v test_v165_keepawake
+          python -m unittest -v test_v165_ui
+          python -m unittest -v test_v166_ui
+          python -m unittest -v test_v166_readonly_resilience
+          python -m unittest -v test_v167_strategy
+          python -m unittest -v test_v167_algo_sync
+          python -m unittest -v test_v167_15m_boll_only_fix
+          python -m unittest -v test_v168_update
+      - run: python build_icon.py
+      - run: python -m PyInstaller --noconfirm OKXLocal.spec
+      - name: Verify Intel bundle and metadata
+        run: |
+          python verify_bundle.py
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1.6.8'
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1680'
+          codesign --verify --deep --strict dist/KAYTRADE.app
+      - name: Packaged V1.6.8 Build1680 UI/runtime smoke test
+        run: |
+          TMPDIR_CHECK="$(mktemp -d)"
+          dist/KAYTRADE.app/Contents/MacOS/KAYTRADE --smoke-test "$TMPDIR_CHECK/smoke.txt"
+          cat "$TMPDIR_CHECK/smoke.txt"
+          grep 'V1.6.8 Build1680' "$TMPDIR_CHECK/smoke.txt"
+          grep 'BOLL remains strict closed-15m outer-only and scores 2 points' "$TMPDIR_CHECK/smoke.txt"
+          grep 'valid until the next 15m close' "$TMPDIR_CHECK/smoke.txt"
+          grep '4H alignment is a +1 mandatory Hard Gate' "$TMPDIR_CHECK/smoke.txt"
+          grep '1H EMA9/26 trend adds +1 score' "$TMPDIR_CHECK/smoke.txt"
+          grep 'write ambiguity remains fail-closed' "$TMPDIR_CHECK/smoke.txt"
+      - name: Create installer
+        run: |
+          mkdir -p installer
+          ditto dist/KAYTRADE.app installer/KAYTRADE.app
+          cp RELEASE-1.6.8-B1680.md installer/RELEASE-1.6.8-B1680.md
+          printf 'KAYTRADE V1.6.8 Build1680\n15m BOLL outer-only = 2 points and remains valid until the next 15m candle closes. 4H aligned = +1 and mandatory Hard Gate; neutral/opposite blocks entry. 1H EMA9/26 trend = +1 auxiliary score. Existing MACD adverse-only, KDJ removal, RSI/Volume gates, Algo synchronization and write-safety protections remain.\n' > installer/RELEASE-1.6.8-B1680.txt
+          hdiutil create -volname 'KAYTRADE 1.6.8' -srcfolder installer -ov -format UDZO KAYTRADE-1.6.8-Intel-build1680.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-1.6.8-Intel-build1680
+          path: |
+            KAYTRADE-1.6.8-Intel-build1680.dmg
+            installer/RELEASE-1.6.8-B1680.md
+            installer/RELEASE-1.6.8-B1680.txt
+          if-no-files-found: error

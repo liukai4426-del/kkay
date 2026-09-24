@@ -32,13 +32,14 @@ class FakeExchange:
         self.writes.append((path,body))
         if self.fail and path.endswith('/order'): raise APIError('网络未知')
         return [{'ordId':'test','sCode':'0'}]
-    def order(self,cid): return self.ord
+    def order(self,cid='',order_id=''): return self.ord
+    def recent_orders(self): return []
 
 class RiskTests(unittest.TestCase):
     def test_settings(self): self.assertEqual(Settings().validate().leverage,5)
     def test_invalid_settings(self):
         for kwargs in [dict(capital=0),dict(risk_pct=float('nan')),dict(leverage=11),dict(leverage=2.5),
-                       dict(risk_usdt=6),dict(max_notional=1000),dict(fee_bps=0),dict(daily_loss=101)]:
+                       dict(max_notional=1000),dict(fee_bps=0),dict(daily_loss=101)]:
             with self.subTest(kwargs=kwargs),self.assertRaises(Halt): replace(Settings(),**kwargs).validate()
     def test_long_plan(self):
         p=make_plan(Settings(),'做多',TICK,META,200,100,3)
@@ -70,7 +71,7 @@ class EngineTests(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory(); self.x=FakeExchange(); self.events=[]
         self.e=Engine(self.x,self.tmp.name,lambda k,d:self.events.append((k,d))); self.e.connect()
         self.e.arm(Settings())
-        self.e.market={'side':'做多','bar':int(time.time()//900)*900000-900000,'close':60000,'h':{'atr':200}}
+        self.e.market={'side':'做多','bar':int(time.time()//300)*300000-300000,'close':60000,'h':{'atr':2000},'m':{'atr':200},'scores':{'做多':{'gate':True,'total':8}}}
         self.e.market_at=time.time()
     def tearDown(self): self.tmp.cleanup()
     def active(self):
@@ -78,16 +79,26 @@ class EngineTests(unittest.TestCase):
         return p
     def position(self,p):
         return dict(mgnMode='isolated',posSide=p['posSide'],pos=p['sz'])
-    def protection(self,p):
-        return dict(algoClOrdId=p['algo_id'],state='live',posSide=p['posSide'],side='sell',tdMode='isolated',
-                    slTriggerPx=p['sl'],tpTriggerPx=p['tp'],slOrdPx='-1',tpOrdPx='-1',sz=p['sz'])
+    def protections(self,p):
+        opposite='sell' if p['posSide']=='long' else 'buy'
+        return [
+            dict(algoClOrdId=p['tp1_id'],state='live',posSide=p['posSide'],side=opposite,tdMode='isolated',tpTriggerPx=p['tp1'],sz=p['tp1_sz']),
+            dict(algoClOrdId=p['tp2_id'],state='live',posSide=p['posSide'],side=opposite,tdMode='isolated',tpTriggerPx=p['tp2'],sz=p['tp2_sz']),
+            dict(algoClOrdId=p['sl_id'],state='live',posSide=p['posSide'],side=opposite,tdMode='isolated',slTriggerPx=p['sl'],slOrdPx='-1',amendPxOnTriggerType='1')
+        ]
     def test_read_connection_no_orders(self):
         self.assertEqual(self.x.writes,[])
     def test_attached_and_isolated(self):
         p=self.active(); path,b=self.x.writes[-1]
-        self.assertEqual(b['tdMode'],'isolated'); self.assertEqual(b['ordType'],'fok')
-        self.assertTrue(b['attachAlgoOrds'][0]['slTriggerPx']); self.assertTrue(b['attachAlgoOrds'][0]['tpTriggerPx'])
+        self.assertEqual(b['tdMode'],'isolated'); self.assertEqual(b['ordType'],'limit')
+        self.assertEqual(len(b['attachAlgoOrds']),3)
+        tps=[x for x in b['attachAlgoOrds'] if x.get('tpTriggerPx')]; sl=[x for x in b['attachAlgoOrds'] if x.get('slTriggerPx')]
+        self.assertEqual(len(tps),2); self.assertEqual(len(sl),1); self.assertEqual(sl[0]['amendPxOnTriggerType'],'1')
+        self.assertAlmostEqual(sum(float(x['sz']) for x in tps),float(p['sz']))
         self.assertEqual(b['clOrdId'],p['client_id'])
+    def test_execution_uses_15m_atr(self):
+        p=self.active()
+        self.assertAlmostEqual(abs(float(p['px'])-float(p['sl'])),200,delta=.2)
     def test_pending_survives_network_error(self):
         self.x.fail=True
         with self.assertRaises(APIError): self.e.cycle()
@@ -95,17 +106,18 @@ class EngineTests(unittest.TestCase):
         self.assertTrue(store.data['active']['client_id']); self.assertTrue(store.data['last_bar'])
     def test_no_duplicate_while_pending(self):
         self.active(); self.x.ord={'state':'live'}
-        with self.assertRaises(Halt): self.e.cycle()
+        self.e.cycle()
         self.assertEqual(len([x for x in self.x.writes if x[0].endswith('/order')]),1)
     def test_protection_missing_locks(self):
         p=self.active(); self.x.pos=[self.position(p)]; self.e.cycle()
+        p['filled_at']=time.time()-20; self.e.store.save(); self.e.cycle()
         self.assertFalse(self.e.enabled); self.assertIn('保护',self.e.store.data['halt'])
     def test_protection_verified(self):
-        p=self.active(); self.x.pos=[self.position(p)]; self.x.protections=[self.protection(p)]
+        p=self.active(); self.x.pos=[self.position(p)]; self.x.protections=self.protections(p)
         self.e.cycle(); self.assertTrue(p['protected'])
     def test_undersized_protection_locks(self):
-        p=self.active(); self.x.pos=[self.position(p)]; a=self.protection(p); a['sz']='0.00001'; self.x.protections=[a]
-        self.e.cycle(); self.assertFalse(self.e.enabled)
+        p=self.active(); self.x.pos=[self.position(p)]; a=self.protections(p); a[1]['sz']='0.00001'; self.x.protections=a
+        self.e.cycle(); p['filled_at']=time.time()-20; self.e.store.save(); self.e.cycle(); self.assertFalse(self.e.enabled)
     def test_foreign_position_halts(self):
         self.x.pos=[{'pos':'1'}]
         with self.assertRaises(Halt): self.e.cycle()
@@ -114,7 +126,7 @@ class EngineTests(unittest.TestCase):
         p=self.active(); self.x.pos=[dict(self.position(p),mgnMode='cross')]
         with self.assertRaises(Halt): self.e.cycle()
     def test_stop_does_not_cancel_protection(self):
-        p=self.active(); self.x.pos=[self.position(p)]; self.x.protections=[self.protection(p)]
+        p=self.active(); self.x.pos=[self.position(p)]; self.x.protections=self.protections(p)
         before=len(self.x.writes); self.e.stop(); self.e.cycle()
         self.assertEqual(len(self.x.writes),before); self.assertTrue(p['protected'])
     def test_daily_loss(self):
@@ -122,17 +134,18 @@ class EngineTests(unittest.TestCase):
         with self.assertRaises(Halt): self.e.cycle()
         self.assertEqual(self.x.writes,[])
     def test_daily_loss_while_position_active(self):
-        p=self.active(); self.x.pos=[self.position(p)]; self.x.protections=[self.protection(p)]; self.x.equity=96
+        p=self.active(); self.x.pos=[self.position(p)]; self.x.protections=self.protections(p); self.x.equity=96
         with self.assertRaises(Halt): self.e.cycle()
         self.assertTrue(p['protected'])
     def test_streak_blocks(self):
-        self.e.store.data['streak']=3
-        with self.assertRaises(Halt): self.e.cycle()
+        self.e._reset_streak_day(); self.e.store.data['streak']=3; self.e.store.save()
+        before=len(self.x.writes); self.e.cycle()
+        self.assertEqual(len(self.x.writes),before); self.assertTrue(self.e.enabled)
     def test_restart_preserves_dedup(self):
         p=self.active(); self.assertEqual(Store(self.e.store.path).data['active']['client_id'],p['client_id'])
-    def test_fok_cancel_cooldown(self):
+    def test_limit_cancel_is_not_a_trade(self):
         self.active(); self.x.ord={'state':'canceled','accFillSz':'0'}; self.e.cycle()
-        self.assertIsNone(self.e.store.data['active']); self.assertGreater(self.e.store.data['last_close'],0)
+        self.assertIsNone(self.e.store.data['active']); self.assertEqual(self.e.store.data['last_close'],0)
     def test_sleep_locks(self):
         self.e.poll_at=time.monotonic()-61; self.e.cycle()
         self.assertFalse(self.e.enabled); self.assertEqual(self.x.writes,[])
@@ -150,6 +163,7 @@ class EngineTests(unittest.TestCase):
         with self.assertRaises(Halt): Store(self.e.store.path)
     def test_loss_count_persisted(self):
         self.active(); self.x.equity=99; self.e.reconcile()
+        p=self.e.store.data['active']; p['filled_at']=time.time()-20; self.e.store.save(); self.e.reconcile()
         self.assertEqual(Store(self.e.store.path).data['streak'],1)
 
 class AdapterTests(unittest.TestCase):

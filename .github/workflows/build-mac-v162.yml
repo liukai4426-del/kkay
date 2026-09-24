@@ -1,0 +1,92 @@
+name: Build KAYTRADE Intel Mac 1.6.2 Build1620
+
+on:
+  push:
+    branches: [release/v1.6.2]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile V1.6.2
+        run: python -m py_compile v160_model.py v160_update_patch.py v161_model.py v161_update_patch.py v162_model.py v162_update_patch.py test_v162_update.py desktop.py
+      - name: Preserved regressions
+        run: |
+          # Run versioned regression suites in isolated Python processes.
+          # Several historical runtime overlays intentionally monkey-patch shared
+          # modules at import time, so combining versions in one unittest process
+          # makes later-version imports mutate earlier-version expectations.
+          python -m unittest -v test_engine
+          python -m unittest -v test_candles
+          python -m unittest -v test_v152_strategy
+          python -m unittest -v test_v153_strategy
+          python -m unittest -v test_v154_strategy
+          python -m unittest -v test_v155_update
+          python -m unittest -v test_v156_build1561
+          python -m unittest -v test_v160_update
+          python -m unittest -v test_v161_update
+          python -m unittest -v test_v162_update
+      - name: Verify V1.6.2 wiring
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import v137_strategy_patch as v137
+          import v138_strategy_patch as v138
+          import v161_update_patch as v161
+          import v162_model as model
+          import v162_update_patch as v162
+          spec=Path('OKXLocal.spec').read_text()
+          assert model.VERSION=='1.6.2' and model.THRESHOLD==6.0
+          assert v162.VERSION=='1.6.2' and v162.BUILD=='1620'
+          assert v138._prepare_order is v162._prepare_order_v162
+          assert v138._submit_initial is v162._submit_v162
+          assert v161._maybe_trigger_be(None) is None
+          assert "runtime_hooks=[str(root / 'v162_update_patch.py')]" in spec
+          assert "CFBundleShortVersionString': '1.6.2'" in spec
+          assert "CFBundleVersion': '1620'" in spec
+          print('PASS V1.6.2 wiring')
+          PY
+
+  build:
+    needs: unit
+    runs-on: macos-15-intel
+    timeout-minutes: 65
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0'
+      - run: python -m unittest -v test_v162_update
+      - run: python build_icon.py
+      - run: python -m PyInstaller --noconfirm OKXLocal.spec
+      - name: Verify bundle metadata
+        run: |
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1.6.2'
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1620'
+          codesign --verify --deep --strict dist/KAYTRADE.app
+      - name: Create installer
+        run: |
+          mkdir -p installer
+          ditto dist/KAYTRADE.app installer/KAYTRADE.app
+          printf 'KAYTRADE V1.6.2 Build1620\nAll BOLL paths require 4H aligned; all entries 1x LIMIT; +1R BE disabled; explicit direction logs; OKX 51290 soft recovery.\n' > installer/RELEASE-1.6.2.txt
+          hdiutil create -volname 'KAYTRADE 1.6.2' -srcfolder installer -ov -format UDZO KAYTRADE-1.6.2-Intel-build1620.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-1.6.2-Intel-build1620
+          path: |
+            KAYTRADE-1.6.2-Intel-build1620.dmg
+            installer/RELEASE-1.6.2.txt
+          if-no-files-found: error

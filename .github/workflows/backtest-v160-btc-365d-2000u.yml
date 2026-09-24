@@ -1,0 +1,98 @@
+name: Backtest KAYTRADE V1.6.0 BTC 365D 2000U
+
+on:
+  push:
+    branches: [research/v160-btc-365d-2000u]
+    paths:
+      - run_v160_365d_2000u.py
+      - .github/workflows/backtest-v160-btc-365d-2000u.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    name: v160-btc-365d-2000u
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Materialize audited historical simulator
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+          git fetch --depth=1 origin research/v155-outer-bands-180d
+          git show FETCH_HEAD:research_v1544_cache_patch.py > research_v1544_cache_patch.py
+          git show FETCH_HEAD:research_v1544_180d_backtest.py > research_v1544_180d_backtest.py
+          git show FETCH_HEAD:run_v1544_180d_fixed.py > run_v1544_180d_fixed.py
+
+      - name: Compile and verify V1.6.0 strategy/profile lock
+        run: |
+          python -m py_compile \
+            research_v146_backtest.py \
+            research_v1544_cache_patch.py \
+            research_v1544_180d_backtest.py \
+            run_v1544_180d_fixed.py \
+            v152_model.py v153_model.py v154_model.py v160_model.py \
+            v154_build1544_patch.py run_v160_365d_2000u.py
+          python - <<'PY'
+          import run_v160_365d_2000u as bt
+          start, end = bt._configure()
+          bt._verify_lock()
+          assert bt.DAYS == 365
+          assert bt.CAPITAL == 2000.0
+          assert bt.BASE_POSITION_NOTIONAL == 2000.0
+          assert bt.LEVERAGE == 5
+          assert bt.RISK_USDT == 20.0
+          assert bt.DAILY_LOSS == 60.0
+          assert bt.production.VERSION == '1.6.0'
+          assert bt.production.THRESHOLD == 6.0
+          assert bt.research.COOLDOWN_MS == 0
+          print('PASS: V1.6.0 365D / 2000U lock verified')
+          print('WINDOW', start.isoformat(), end.isoformat())
+          PY
+
+      - name: Run one-year backtest
+        run: time python run_v160_365d_2000u.py
+
+      - name: Verify result files
+        run: |
+          python - <<'PY'
+          import csv, json
+          from pathlib import Path
+          out = Path('backtest_output_v160_365d_2000u')
+          m = json.loads((out/'metrics_365d.json').read_text())
+          rows = list(csv.DictReader((out/'trades_365d.csv').open())) if (out/'trades_365d.csv').stat().st_size else []
+          assert m['release'] == '1.6.0'
+          assert m['release_build'] == 1600
+          assert m['days'] == 365
+          assert m['capital'] == 2000.0
+          assert m['base_position_notional_usdt'] == 2000.0
+          assert m['outer_position_notional_cap_usdt'] == 4000.0
+          assert m['middle_position_multiplier'] == 1.0
+          assert m['outer_position_multiplier'] == 2.0
+          assert m['middle_macd_required'] is True
+          assert m['score_threshold'] == 6.0
+          assert m['path_c_enabled'] is False
+          assert m['cooldown_minutes'] == 0
+          assert m['loss_pause_enabled'] is False
+          assert m['entry_order_type'] == 'LIMIT'
+          assert m['stop_atr_multiplier'] == 1.0
+          assert m['reward_r'] == 2.0
+          assert len(rows) == m['trades']
+          print('RESULT_METRICS_JSON')
+          print(json.dumps(m, ensure_ascii=False, indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.6.0-BTC-365D-2000U
+          path: backtest_output_v160_365d_2000u/
+          if-no-files-found: error
+          retention-days: 30

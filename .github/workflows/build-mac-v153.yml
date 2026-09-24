@@ -1,0 +1,127 @@
+name: Build KAYTRADE Intel Mac 1.5.3
+on:
+  push:
+    branches: [codex/v1-5-3-update]
+    paths:
+      - '**.py'
+      - OKXLocal.spec
+      - RELEASE-1.5.3.md
+      - .github/workflows/build-mac-v153.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  unit:
+    name: v153-strategy-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile V1.5.3 runtime and backtest core
+        run: >-
+          python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py
+          v151_strategy_patch.py v152_model.py v152_strategy_patch.py v152_safety_patch.py
+          v152_ui_busy_fix.py v152_backtest_core.py v153_model.py v153_runtime_patch.py
+          v153_backtest_core.py test_v153_strategy.py test_v153_ui_scroll.py
+      - name: Run preserved execution regressions
+        run: |
+          python -m unittest -v test_engine test_candles
+          python -m unittest -v test_v135_execution test_v135_safety2 test_v135_order_state
+          python -m unittest -v test_v136_runtime test_v137_strategy test_v138_strategy
+          python -m unittest -v test_v141_exit_limit test_v143_score_arbitration
+          python -m unittest -v test_v146_ui_fix test_v147_strategy
+          python -m unittest -v test_v150_strategy
+          python -m unittest -v test_v151_strategy
+      - name: Run V1.5.2 regression tests before V1.5.3 overlay
+        run: |
+          python -m unittest -v test_v152_strategy
+          python -m unittest -v test_v152_ui_busy_fix
+      - name: Run V1.5.3 tests
+        run: |
+          python -m unittest -v test_v153_strategy
+          python -m unittest -v test_v153_ui_scroll
+      - name: Verify V1.5.3 production wiring
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import app
+          import engine
+          import v138_strategy_patch as v138
+          import v152_strategy_patch as v152_runtime
+          import v153_model as model
+          import v153_backtest_core as bt
+          import v153_runtime_patch
+          spec=Path('OKXLocal.spec').read_text()
+          assert model.VERSION == '1.5.3'
+          assert model.THRESHOLD == 6.0
+          assert model.ENTRY_WINDOW_MS == 240000
+          assert model.MIDDLE_TOUCH_ATR == 0.10
+          assert model.LONG_MIDDLE_RSI_MIN == 30.0
+          assert model.SHORT_MIDDLE_RSI_MAX == 70.0
+          assert model.FRONT_MIN_R == 1.5
+          assert model.COST_MAX_R == 0.30
+          assert engine.Engine._kaytrade_v153_applied
+          assert app.App._kaytrade_v153_hidden_scrollbars_applied
+          assert v138._prepare_order.__module__ == 'v153_runtime_patch'
+          assert v152_runtime.model is model
+          assert bt.model is model
+          assert 'v153_runtime_patch.py' in spec
+          assert "CFBundleShortVersionString': '1.5.3'" in spec
+          assert "CFBundleVersion': '153'" in spec
+          print('PASS: V1.5.3 BOLL model + 4m direct-entry window + hidden scrolling are wired')
+          PY
+  build:
+    name: intel-mac-package
+    needs: unit
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - name: Install packaging dependencies
+        run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0'
+      - name: Re-run V1.5.3 tests on Intel Mac
+        run: |
+          python -m py_compile v152_model.py v152_strategy_patch.py v152_safety_patch.py v152_ui_busy_fix.py v153_model.py v153_runtime_patch.py v153_backtest_core.py test_v153_strategy.py test_v153_ui_scroll.py build_icon.py
+          python -m unittest -v test_v151_strategy
+          python -m unittest -v test_v152_strategy
+          python -m unittest -v test_v152_ui_busy_fix
+          python -m unittest -v test_v153_strategy
+          python -m unittest -v test_v153_ui_scroll
+      - name: Create application icon
+        run: |
+          python build_icon.py
+          test -s OKXLocal.icns
+      - name: Build Intel application
+        run: python -m PyInstaller --noconfirm OKXLocal.spec
+      - name: Verify bundle
+        run: |
+          python verify_bundle.py
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1.5.3'
+          test -s dist/KAYTRADE.app/Contents/Resources/assets/kaytrade-v142-logo.png || find dist/KAYTRADE.app -name 'kaytrade-v142-logo.png' -print -quit | grep .
+          codesign --verify --deep --strict dist/KAYTRADE.app
+      - name: Create installer
+        run: |
+          mkdir -p installer
+          ditto dist/KAYTRADE.app installer/KAYTRADE.app
+          cp RELEASE-1.5.3.md installer/RELEASE-1.5.3.md
+          printf 'PASS: V1.5.3 mirrored 5m BOLL entry; +2 non-stacking BOLL module; four 1m direct-entry minutes without 1m technical confirmation; fixed score 6; one 1x position/no add-ons; front space 1.5R; 1.0x 1H ATR stop; 2R full TP; hidden scrollbar controls with wheel/trackpad scrolling.\n' > installer/BUILD-TEST.txt
+          ln -s /Applications installer/Applications
+          hdiutil create -volname KAYTRADE-1.5.3 -srcfolder installer -ov -format UDZO KAYTRADE-1.5.3-Intel-test.dmg
+          shasum -a 256 KAYTRADE-1.5.3-Intel-test.dmg > SHA256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-1.5.3-Intel-test
+          path: |
+            KAYTRADE-1.5.3-Intel-test.dmg
+            SHA256.txt
+          if-no-files-found: error
+          retention-days: 14

@@ -7,3 +7,4 @@ installer/
 .env
 *.log
 settings.json
+settings-v1.1.json

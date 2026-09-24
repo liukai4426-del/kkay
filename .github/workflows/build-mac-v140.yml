@@ -1,0 +1,151 @@
+name: Build KAYTRADE Intel Mac 1.4 Score Dialogs
+on:
+  push:
+    branches: [codex/v1-4-score-dialogs]
+    paths:
+      - candles.py
+      - engine.py
+      - exchange.py
+      - app.py
+      - strategy.py
+      - visual.py
+      - desktop.py
+      - OKXLocal.spec
+      - v135_patch.py
+      - v135_execution_patch.py
+      - v135_flatten_noop_hotfix.py
+      - v135_auto_entry_guard.py
+      - v136_runtime.py
+      - v136_entry_fix.py
+      - v137_strategy_patch.py
+      - v137_cancel_fix.py
+      - v138_strategy_patch.py
+      - v139_position_patch.py
+      - v140_score_dialog_patch.py
+      - test_v140_score_dialog.py
+      - RELEASE-1.4.md
+      - .github/workflows/build-mac-v140.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  unit:
+    name: v140-strategy-and-safety-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile V1.4 runtime
+        run: python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py v137_strategy_patch.py v137_cancel_fix.py v138_strategy_patch.py v139_position_patch.py v140_score_dialog_patch.py test_v140_score_dialog.py
+      - name: Run preserved safety and strategy tests
+        run: |
+          python -m unittest -v test_engine test_candles test_v134 test_v135 test_v135_execution test_v135_safety2
+          python -m unittest -v test_v135_order_state test_v135_ack test_v135_fills test_v135_runtime_stability
+          python -m unittest -v test_v135_auto_entry_guard
+          python -m unittest -v test_v136_runtime test_v136_entry_fix
+          python -m unittest -v test_v137_strategy test_v137_cancel_fix
+          python -m unittest -v test_v138_strategy
+          python -m unittest -v test_v139_position
+      - name: Run V1.4 tests
+        run: python -m unittest -v test_v140_score_dialog
+      - name: Verify V1.4 wiring
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          spec=Path('OKXLocal.spec').read_text()
+          patch=Path('v140_score_dialog_patch.py').read_text()
+          assert 'v140_score_dialog_patch.py' in spec
+          assert "CFBundleShortVersionString': '1.4'" in spec
+          for token in ('V140_THRESHOLD=4.0','4.0–6.0','6.5–7.5','8.0–10','_rounded_modal','平仓成功','设置保存成功'):
+              assert token in patch, token
+          print('PASS: V1.4 runtime/score/dialog wiring')
+          PY
+  build:
+    name: intel-mac-package
+    needs: unit
+    runs-on: macos-15-intel
+    timeout-minutes: 35
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - name: Install packaging dependencies
+        run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0'
+      - name: Re-run V1.4 tests on Intel Mac
+        run: |
+          python -m py_compile v140_score_dialog_patch.py test_v140_score_dialog.py
+          python -m unittest -v test_v140_score_dialog
+      - name: V1.4 UI source smoke test
+        run: |
+          python - <<'PY'
+          import tempfile
+          import tkinter as tk
+          from pathlib import Path
+          from unittest.mock import patch
+          import v140_score_dialog_patch as v140
+          import v138_strategy_patch
+          import app
+          root=tk.Tk()
+          try:
+              with patch.object(app.App,'worker',lambda self: None):
+                  ui=app.App(root,Path(tempfile.mkdtemp(prefix='kaytrade140-')))
+                  root.update()
+                  assert '1.4' in root.title()
+                  assert ui.fields['score_threshold'].get()=='4.0'
+                  threshold=[w for w in v138_strategy_patch._widgets(root) if isinstance(w,app.RoundedEntry) and getattr(w,'variable',None) is ui.fields['score_threshold']]
+                  assert len(threshold)==1 and str(threshold[0].entry.cget('state'))=='disabled'
+                  settings=ui.settings()
+                  assert settings.score_threshold==4.0
+                  assert v140._tier(4.0)[:2]==(1,1.0)
+                  assert v140._tier(6.0)[:2]==(1,1.0)
+                  assert v140._tier(6.5)[:2]==(2,1.5)
+                  assert v140._tier(7.5)[:2]==(2,1.5)
+                  assert v140._tier(8.0)[:2]==(3,2.0)
+                  ok=v140._rounded_modal(root,'连接成功','账户连接与只读状态核对已完成。',True)
+                  root.update()
+                  buttons=[w for w in v138_strategy_patch._widgets(ok) if isinstance(w,app.RoundedButton)]
+                  assert len(buttons)==1 and buttons[0].variant=='accent' and buttons[0].text=='确认'
+                  ok.destroy(); root.update()
+                  fail=v140._rounded_modal(root,'连接失败','测试错误',False)
+                  root.update()
+                  buttons=[w for w in v138_strategy_patch._widgets(fail) if isinstance(w,app.RoundedButton)]
+                  assert len(buttons)==1 and buttons[0].variant=='danger' and buttons[0].text=='确认'
+                  fail.destroy(); root.update()
+                  ui.finished.set(); ui.lock.close()
+          finally:
+              root.destroy()
+          print('PASS: V1.4 fixed score floor, tier boundaries and rounded green/red result dialogs')
+          PY
+      - name: Create application icon
+        run: python build_icon.py
+      - name: Build Intel application
+        run: python -m PyInstaller --noconfirm OKXLocal.spec
+      - name: Verify bundle
+        run: |
+          python verify_bundle.py
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1.4'
+          codesign --verify --deep --strict dist/KAYTRADE.app
+      - name: Create installer
+        run: |
+          mkdir -p installer
+          ditto dist/KAYTRADE.app installer/KAYTRADE.app
+          cp RELEASE-1.4.md installer/RELEASE-1.4.md
+          printf 'PASS: V1.4 score-tier tests + result-dialog UI smoke + Intel build\n' > installer/BUILD-TEST.txt
+          ln -s /Applications installer/Applications
+          hdiutil create -volname KAYTRADE-1.4 -srcfolder installer -ov -format UDZO KAYTRADE-1.4-Intel-test.dmg
+          shasum -a 256 KAYTRADE-1.4-Intel-test.dmg > SHA256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-1.4-Intel-test
+          path: |
+            KAYTRADE-1.4-Intel-test.dmg
+            SHA256.txt
+          if-no-files-found: error
+          retention-days: 14
