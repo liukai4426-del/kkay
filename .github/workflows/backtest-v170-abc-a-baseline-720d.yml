@@ -71,8 +71,8 @@ jobs:
           x._patch()
           start,end=x.src.configure()
           x.verify(start,end)
-          assert x.DAYS == 360
-          assert (end-start).days == 360
+          assert x.DAYS == 720
+          assert (end-start).days == 720
           assert x.VERSION == '1.7.0' and x.BUILD == '1700'
           assert x.src.base.THRESHOLD == 6.0
           assert x.src.base.BOLL_WINDOW_MS == 900000
