@@ -7,7 +7,8 @@ Exact strategy replay promoted from the audited V1.6.8 NoEMA/BOLL0.10/PEE4 resea
 - 1H EMA9/26 +1 score removed (not a score, not a Hard Gate);
 - 15m EMA50 directional movement score retained;
 - CLOSED 5m BOLL overextension >=0.10 * Wilder ATR(14) latches +1 for current 15m opportunity;
-- A/B delta: 4H aligned +1 and 4H neutral +1 are allowed; only explicit 4H opposite is a Hard Gate block;\n- A/B delta: SHORT entry_drift_atr5 > 0.20 is a Hard Gate block;
+- A/B delta: 4H aligned +1 and 4H neutral +1 are allowed; only explicit 4H opposite is a Hard Gate block;
+- A/B delta: SHORT entry_drift_atr5 > 0.20 is a Hard Gate block;
 - 5m RSI 30..70 and Volume <1.20x are Hard Gates;
 - 5m MACD blocks only explicit adverse/opposite; improvement retains +1;
 - threshold 6.0, fixed 1x LIMIT, SL=1x1H ATR, TP=2R full, No-BE;
@@ -31,7 +32,8 @@ OUT = Path("backtest_output_v170_short_drift_window020_720d")
 LOCK_MS = 60 * 60_000
 VERSION = "1.7.0"
 BUILD = "1700"
-SHORT_ENTRY_DRIFT_MIN_ATR5 = -0.20\nSHORT_ENTRY_DRIFT_MAX_ATR5 = 0.20
+SHORT_ENTRY_DRIFT_MIN_ATR5 = -0.20
+SHORT_ENTRY_DRIFT_MAX_ATR5 = 0.20
 
 _ORIG_RESCORE = src.entry._rescore
 _ORIG_CLOSE = src._close_pee3
@@ -188,7 +190,8 @@ def _submit_lock(self, result, now_ms, mark):
         conf = row.get("confirmations") or {}
         self.pending.factors["4h_trend_state_actual"] = str(conf.get("4H_trend_state_actual") or "neutral")
         self.pending.factors["4h_gate_mode"] = "opposite_only_block_aligned_neutral_plus1"
-        self.pending.factors["short_entry_drift_hard_gate_min_atr5"] = SHORT_ENTRY_DRIFT_MIN_ATR5\n        self.pending.factors["short_entry_drift_hard_gate_max_atr5"] = SHORT_ENTRY_DRIFT_MAX_ATR5
+        self.pending.factors["short_entry_drift_hard_gate_min_atr5"] = SHORT_ENTRY_DRIFT_MIN_ATR5
+        self.pending.factors["short_entry_drift_hard_gate_max_atr5"] = SHORT_ENTRY_DRIFT_MAX_ATR5
         self.pending.factors["entry_drift_atr5"] = drift if math.isfinite(drift) else None
     return out
 
@@ -242,7 +245,8 @@ def verify(start, end):
     chk = _apply_4h_actual(sample4)
     assert chk["scores"]["做多"]["layers"]["trend4h"] == 1.0
     assert chk["scores"]["做多"]["gate"] is True
-    assert abs(SHORT_ENTRY_DRIFT_MIN_ATR5 + 0.20) < 1e-12\n    assert abs(SHORT_ENTRY_DRIFT_MAX_ATR5 - 0.20) < 1e-12
+    assert abs(SHORT_ENTRY_DRIFT_MIN_ATR5 + 0.20) < 1e-12
+    assert abs(SHORT_ENTRY_DRIFT_MAX_ATR5 - 0.20) < 1e-12
     assert chk["scores"]["做空"]["layers"]["trend4h"] == 0.0
     assert chk["scores"]["做空"]["gate"] is False
     _LAST_4H_ACTUAL = {}
