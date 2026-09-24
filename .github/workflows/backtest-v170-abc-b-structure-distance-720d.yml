@@ -137,3 +137,5 @@ jobs:
           path: backtest_output_v170_structure_distance_record_720d/
           if-no-files-found: error
           retention-days: 30
+
+# registered-trigger
