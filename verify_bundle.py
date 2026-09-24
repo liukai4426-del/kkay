@@ -3,7 +3,7 @@ import re
 import subprocess
 from pathlib import Path
 
-bundle = Path('dist/OKXLocal.app')
+bundle = Path('dist/KAYTRADE.app')
 checked = 0
 for path in bundle.rglob('*'):
     if not path.is_file() or path.is_symlink():

@@ -1,0 +1,224 @@
+name: Build KAYTRADE Intel Mac 1.6.0 Build1600
+
+on:
+  push:
+    branches: [codex/v1-6-0]
+    paths:
+      - '**.py'
+      - OKXLocal.spec
+      - RELEASE-1.6.0.md
+      - .github/workflows/build-mac-v160.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: v160-build1600-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Compile V1.6.0 Build1600
+        run: >-
+          python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py
+          v151_strategy_patch.py v152_model.py v152_strategy_patch.py v152_safety_patch.py
+          v152_ui_busy_fix.py v152_backtest_core.py v153_model.py v153_runtime_patch.py
+          v153_backtest_core.py v154_model.py v154_runtime_patch.py v154_limit_log_fix.py
+          v154_record_card_boll_fix.py v154_fixed_card_precision_fix.py v154_build1543_patch.py
+          v154_build1543_ui_cleanup.py v154_build1544_patch.py v155_update_patch.py
+          v155_build1551_patch.py v156_execution_hotfix.py v156_ui_patch.py v156_build1561_patch.py
+          v160_model.py v160_update_patch.py test_v160_update.py
+
+      - name: Run preserved strategy and safety regressions
+        run: |
+          python -m unittest -v test_engine test_candles
+          python -m unittest -v test_v135_execution test_v135_safety2 test_v135_order_state
+          python -m unittest -v test_v136_runtime test_v137_strategy test_v138_strategy
+          python -m unittest -v test_v141_exit_limit test_v143_score_arbitration
+          python -m unittest -v test_v146_ui_fix test_v147_strategy
+          python -m unittest -v test_v150_strategy
+          python -m unittest -v test_v151_strategy
+          python -m unittest -v test_v152_strategy
+          python -m unittest -v test_v152_ui_busy_fix
+          python -m unittest -v test_v153_strategy
+          python -m unittest -v test_v153_ui_scroll
+          python -m unittest -v test_v154_strategy
+          python -m unittest -v test_v154_round2_runtime
+          python -m unittest -v test_v154_ui_scroll
+          python -m unittest -v test_v154_build1543
+          python -m unittest -v test_v154_build1544
+          python -m unittest -v test_v155_update
+          python -m unittest -v test_v155_build1551
+          python -m unittest -v test_v156_ui
+          python -m unittest -v test_v156_build1561
+          python -m unittest -v test_v160_update
+
+      - name: Verify V1.6.0 production wiring
+        run: |
+          python - <<'PY'
+          import inspect
+          from pathlib import Path
+          import app, engine
+          import v137_strategy_patch as v137
+          import v138_strategy_patch as v138
+          import v152_model as formal_macd
+          import v152_strategy_patch as v152_runtime
+          import v153_runtime_patch as v153_runtime
+          import v153_backtest_core as v153_bt
+          import v154_runtime_patch as v154_runtime
+          import v154_limit_log_fix as v154_limit
+          import v154_build1544_patch as b1544
+          import v155_build1551_patch as b1551
+          import v160_model as model
+          import v160_update_patch as v160
+
+          spec = Path('OKXLocal.spec').read_text()
+          assert model.VERSION == '1.6.0' and model.THRESHOLD == 6.0
+          assert model.ENTRY_WINDOW_MS == 0 and model.TIME_WINDOW_ENABLED is False
+          assert not hasattr(model, '_macd_state')
+          src = inspect.getsource(formal_macd._macd_state)
+          assert 'c > b > a' in src and 'c < b < a' in src
+          assert 'macd_improving' in inspect.getsource(model._macd_improving)
+
+          assert v160.VERSION == '1.6.0' and v160.BUILD == '1600'
+          assert v160.OUTER_POSITION_MULTIPLIER == 2.0
+          assert v160.MIDDLE_POSITION_MULTIPLIER == 1.0
+          assert v160.PATH_C_ENABLED is False
+          assert v160.COOLDOWN_ENABLED is False
+          assert v160.CONSECUTIVE_LOSS_PAUSE_ENABLED is False
+          assert b1544.PATH_C_ENABLED is False
+          assert b1551.COOLDOWN_ENABLED is False
+
+          assert v152_runtime.model is model
+          assert v153_runtime.model is model
+          assert v153_bt.model is model
+          assert v154_runtime.model is model
+          assert v154_limit.model is model
+          assert v138._prepare_order is v160._prepare_order_v160
+          assert engine.Engine._kaytrade_v160_applied and app.App._kaytrade_v160_applied
+
+          blocked = {
+              'total': 6.5, 'gate': True, 'eligible': True, 'position_multiplier': 1.0,
+              'layers': {'macd_improving': 0.0}, 'confirmations': {'required': {}},
+              'reason': 'ok', 'level': 'ok'
+          }
+          model._apply_row_rules(blocked, 'middle_rsi')
+          assert blocked['eligible'] is False and blocked['position_multiplier'] == 0.0
+          outer = {
+              'total': 6.5, 'gate': True, 'eligible': True, 'position_multiplier': 1.0,
+              'layers': {'macd_improving': 0.0}, 'confirmations': {'required': {}},
+              'reason': 'ok', 'level': 'ok'
+          }
+          model._apply_row_rules(outer, 'upper_band')
+          assert outer['eligible'] is True and outer['position_multiplier'] == 2.0
+          assert 'middle_macd_improving' not in outer['confirmations']['required']
+
+          assert "runtime_hooks=[str(root / 'v160_update_patch.py')]" in spec
+          assert "runtime_hooks=[str(root / 'v156_build1561_patch.py')]" not in spec
+          assert "CFBundleShortVersionString': '1.6.0'" in spec
+          assert "CFBundleVersion': '1600'" in spec
+          print('PASS: V1.6.0 middle MACD hard gate + single-order 2x outer-band sizing; V1.5.6 safety stack preserved')
+          PY
+
+  build:
+    name: intel-mac-package-v160-build1600
+    needs: unit
+    runs-on: macos-15-intel
+    timeout-minutes: 60
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: x64
+
+      - name: Install packaging dependencies
+        run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0'
+
+      - name: Re-run V1.6.0 tests on Intel Mac
+        run: |
+          python -m py_compile v152_model.py v153_model.py v154_model.py v154_limit_log_fix.py v154_record_card_boll_fix.py v154_build1544_patch.py v155_update_patch.py v155_build1551_patch.py v156_execution_hotfix.py v156_ui_patch.py v156_build1561_patch.py v160_model.py v160_update_patch.py test_v160_update.py build_icon.py
+          python -m unittest -v test_v153_strategy
+          python -m unittest -v test_v154_strategy
+          python -m unittest -v test_v154_round2_runtime
+          python -m unittest -v test_v154_build1544
+          python -m unittest -v test_v155_update
+          python -m unittest -v test_v155_build1551
+          python -m unittest -v test_v156_ui
+          python -m unittest -v test_v156_build1561
+          python -m unittest -v test_v160_update
+
+      - name: Create application icon
+        run: |
+          python build_icon.py
+          test -s OKXLocal.icns
+
+      - name: Build Intel application
+        run: python -m PyInstaller --noconfirm OKXLocal.spec
+
+      - name: Launch packaged app and verify startup probe
+        run: |
+          rm -f /tmp/kaytrade-v160-startup.txt /tmp/kaytrade-v160-startup.txt.error /tmp/kaytrade-v160.log
+          KAYTRADE_STARTUP_PROBE=/tmp/kaytrade-v160-startup.txt dist/KAYTRADE.app/Contents/MacOS/KAYTRADE >/tmp/kaytrade-v160.log 2>&1 &
+          pid=$!
+          ok=0
+          for i in $(seq 1 80); do
+            if [ -s /tmp/kaytrade-v160-startup.txt ]; then ok=1; break; fi
+            if [ -s /tmp/kaytrade-v160-startup.txt.error ]; then break; fi
+            if ! kill -0 "$pid" 2>/dev/null; then break; fi
+            sleep 0.25
+          done
+          if [ "$ok" != "1" ]; then
+            echo 'Packaged startup probe failed'
+            echo '--- stdout/stderr ---'
+            cat /tmp/kaytrade-v160.log || true
+            echo '--- App init traceback ---'
+            cat /tmp/kaytrade-v160-startup.txt.error || true
+            kill "$pid" 2>/dev/null || true
+            exit 1
+          fi
+          cat /tmp/kaytrade-v160-startup.txt
+          grep '1.6.0 Build 1600' /tmp/kaytrade-v160-startup.txt
+          grep 'middle_macd=required' /tmp/kaytrade-v160-startup.txt
+          grep 'outer_band=2x_single_order' /tmp/kaytrade-v160-startup.txt
+          grep 'limit_entry=on' /tmp/kaytrade-v160-startup.txt
+          grep 'cooldown=off' /tmp/kaytrade-v160-startup.txt
+          grep 'path_c=off' /tmp/kaytrade-v160-startup.txt
+          grep 'loss_pause=off' /tmp/kaytrade-v160-startup.txt
+          kill "$pid" 2>/dev/null || true
+          wait "$pid" 2>/dev/null || true
+
+      - name: Verify bundle and V1.6.0 runtime hook
+        run: |
+          python verify_bundle.py
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1.6.0'
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1600'
+          test -s dist/KAYTRADE.app/Contents/Resources/assets/kaytrade-v142-logo.png || find dist/KAYTRADE.app -name 'kaytrade-v142-logo.png' -print -quit | grep .
+          codesign --verify --deep --strict dist/KAYTRADE.app
+
+      - name: Create V1.6.0 Build1600 installer
+        run: |
+          mkdir -p installer
+          ditto dist/KAYTRADE.app installer/KAYTRADE.app
+          cp RELEASE-1.6.0.md installer/RELEASE-1.6.0.md
+          printf 'PASS: V1.6.0 Build1600 requires the existing formal 5m macd_improving on middle_rsi and opens lower/upper-band first entries as one 2x base-position LIMIT order; V1.5.6 safety invariants are preserved.\n' > installer/BUILD-TEST.txt
+          ln -s /Applications installer/Applications
+          hdiutil create -volname KAYTRADE-1.6.0-B1600 -srcfolder installer -ov -format UDZO KAYTRADE-1.6.0-Intel-build1600.dmg
+          shasum -a 256 KAYTRADE-1.6.0-Intel-build1600.dmg > SHA256.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-1.6.0-Intel-build1600
+          path: |
+            KAYTRADE-1.6.0-Intel-build1600.dmg
+            SHA256.txt
+          if-no-files-found: error
+          retention-days: 14

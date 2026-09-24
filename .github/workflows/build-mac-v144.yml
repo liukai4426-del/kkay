@@ -1,0 +1,184 @@
+name: Build KAYTRADE Intel Mac 1.4.4 UI Polish
+on:
+  push:
+    branches: [codex/v1-4-4-ui-polish]
+    paths:
+      - candles.py
+      - engine.py
+      - exchange.py
+      - app.py
+      - strategy.py
+      - visual.py
+      - desktop.py
+      - build_icon.py
+      - OKXLocal.spec
+      - assets/kaytrade-v142-logo.png
+      - v135_patch.py
+      - v135_execution_patch.py
+      - v135_flatten_noop_hotfix.py
+      - v135_auto_entry_guard.py
+      - v136_runtime.py
+      - v136_entry_fix.py
+      - v137_strategy_patch.py
+      - v137_cancel_fix.py
+      - v138_strategy_patch.py
+      - v139_position_patch.py
+      - v140_score_dialog_patch.py
+      - v141_dialog_signal_positions_patch.py
+      - v141_history_return_chart_patch.py
+      - v141_exit_limit_patch.py
+      - v142_visual_patch.py
+      - v143_score_arbitration_patch.py
+      - v143_visual_polish_patch.py
+      - v144_ui_polish_patch.py
+      - test_v141_dialog_signal_positions.py
+      - test_v141_history_return_chart.py
+      - test_v141_exit_limit.py
+      - test_v142_visual.py
+      - test_v143_score_arbitration.py
+      - test_v143_visual_polish.py
+      - test_v144_ui_polish.py
+      - RELEASE-1.4.4.md
+      - .github/workflows/build-mac-v144.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  unit:
+    name: v144-strategy-safety-ui-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile V1.4.4 runtime
+        run: python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py v137_strategy_patch.py v137_cancel_fix.py v138_strategy_patch.py v139_position_patch.py v140_score_dialog_patch.py v141_dialog_signal_positions_patch.py v141_history_return_chart_patch.py v141_exit_limit_patch.py v142_visual_patch.py v143_score_arbitration_patch.py v143_visual_polish_patch.py v144_ui_polish_patch.py test_v142_visual.py test_v143_score_arbitration.py test_v143_visual_polish.py test_v144_ui_polish.py
+      - name: Run preserved safety and strategy tests
+        run: |
+          python -m unittest -v test_engine test_candles test_v134 test_v135 test_v135_execution test_v135_safety2
+          python -m unittest -v test_v135_order_state test_v135_ack test_v135_fills test_v135_runtime_stability
+          python -m unittest -v test_v135_auto_entry_guard
+          python -m unittest -v test_v136_runtime test_v136_entry_fix
+          python -m unittest -v test_v137_strategy test_v137_cancel_fix
+          python -m unittest -v test_v138_strategy
+          python -m unittest -v test_v139_position
+          python -m unittest -v test_v140_score_dialog
+          python -m unittest -v test_v141_dialog_signal_positions test_v141_history_return_chart test_v141_exit_limit
+      - name: Run V1.4.2 and V1.4.3 regression tests
+        run: python -m unittest -v test_v142_visual test_v143_score_arbitration test_v143_visual_polish
+      - name: Run V1.4.4 UI polish tests
+        run: python -m unittest -v test_v144_ui_polish
+      - name: Verify V1.4.4 wiring
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          spec=Path('OKXLocal.spec').read_text()
+          patch=Path('v144_ui_polish_patch.py').read_text()
+          assert 'v144_ui_polish_patch.py' in spec
+          assert "CFBundleShortVersionString': '1.4.4'" in spec
+          assert "CFBundleVersion': '144'" in spec
+          for token in ('SCROLL_WIDTH=20','AA_SCALE=4','Image.Resampling.LANCZOS','V144ConnectionLabel.TLabel','_uniform_trade_plan',"self.signal.set('')"):
+              assert token in patch, token
+          for token in ('网络自检','测试连接','账户官方域名','API Key','Passphrase'):
+              assert token in patch, token
+          print('PASS: V1.4.4 UI-only runtime wired')
+          PY
+  build:
+    name: intel-mac-package
+    needs: unit
+    runs-on: macos-15-intel
+    timeout-minutes: 35
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - name: Install packaging dependencies
+        run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0'
+      - name: Re-run V1.4.1 through V1.4.4 tests on Intel Mac
+        run: |
+          python -m py_compile v141_dialog_signal_positions_patch.py v141_history_return_chart_patch.py v141_exit_limit_patch.py v142_visual_patch.py v143_score_arbitration_patch.py v143_visual_polish_patch.py v144_ui_polish_patch.py test_v141_dialog_signal_positions.py test_v141_history_return_chart.py test_v141_exit_limit.py test_v142_visual.py test_v143_score_arbitration.py test_v143_visual_polish.py test_v144_ui_polish.py
+          python -m unittest -v test_v141_dialog_signal_positions test_v141_history_return_chart test_v141_exit_limit test_v142_visual test_v143_score_arbitration test_v143_visual_polish test_v144_ui_polish
+      - name: V1.4.4 UI source smoke test
+        run: |
+          python - <<'PY'
+          import tempfile
+          import tkinter as tk
+          from tkinter import ttk
+          from pathlib import Path
+          from unittest.mock import patch
+          import v144_ui_polish_patch as v144
+          import v138_strategy_patch as v138
+          import app
+          root=tk.Tk()
+          try:
+              with patch.object(app.App,'worker',lambda self: None):
+                  ui=app.App(root,Path(tempfile.mkdtemp(prefix='kaytrade144-')))
+                  root.update()
+                  assert '1.4.4' in root.title()
+                  assert ui.signal.get()==''
+                  assert getattr(ui,'_v144_overview_uniform',False)
+                  buttons=[w for w in v138._widgets(root) if isinstance(w,app.RoundedButton)]
+                  assert buttons
+                  assert all(w.radius >= int(v144._capsule_radius(w.button_height)) for w in buttons)
+                  assert all(getattr(w,'_v144_aa',False) for w in buttons)
+                  by_text={w.text:w for w in buttons}
+                  assert '测试连接' in by_text and '测试连接（只读）' not in by_text
+                  assert '网络自检' in by_text and '网络自检（不下单）' not in by_text
+                  scrollbars=[w for w in v138._widgets(root) if isinstance(w,app.WideScrollbar)]
+                  assert len(scrollbars)>=4
+                  assert all(w.bar_width==v144.SCROLL_WIDTH for w in scrollbars)
+                  assert all(int(float(w.cget('width')))==v144.SCROLL_WIDTH for w in scrollbars)
+                  assert all(getattr(w,'_v144_aa',False) for w in scrollbars)
+                  assert all(w.find_withtag('track') for w in scrollbars)
+                  assert all(w.find_withtag('thumb') for w in scrollbars)
+                  style=ttk.Style(root)
+                  found=set()
+                  for w in v138._widgets(root):
+                      if isinstance(w,ttk.Label):
+                          try:text=str(w.cget('text') or '')
+                          except Exception:continue
+                          if text in v144.ACCOUNT_FIELDS:
+                              found.add(text)
+                              assert w.cget('style')=='V144ConnectionLabel.TLabel'
+                              assert style.lookup(w.cget('style'),'background')==app.PANEL
+                  assert found==v144.ACCOUNT_FIELDS
+                  ui.finished.set(); ui.lock.close()
+          finally:
+              root.destroy()
+          print('PASS: V1.4.4 capsule AA, unified scrollbars, connection cleanup and overview alignment')
+          PY
+      - name: Create application icon from selected logo
+        run: |
+          python build_icon.py
+          test -s OKXLocal.icns
+      - name: Build Intel application
+        run: python -m PyInstaller --noconfirm OKXLocal.spec
+      - name: Verify bundle
+        run: |
+          python verify_bundle.py
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1.4.4'
+          test -s dist/KAYTRADE.app/Contents/Resources/assets/kaytrade-v142-logo.png || find dist/KAYTRADE.app -name 'kaytrade-v142-logo.png' -print -quit | grep .
+          codesign --verify --deep --strict dist/KAYTRADE.app
+      - name: Create installer
+        run: |
+          mkdir -p installer
+          ditto dist/KAYTRADE.app installer/KAYTRADE.app
+          cp RELEASE-1.4.4.md installer/RELEASE-1.4.4.md
+          printf 'PASS: V1.4.4 visual polish + V1.4.3 trading logic preserved\n' > installer/BUILD-TEST.txt
+          ln -s /Applications installer/Applications
+          hdiutil create -volname KAYTRADE-1.4.4 -srcfolder installer -ov -format UDZO KAYTRADE-1.4.4-Intel-test.dmg
+          shasum -a 256 KAYTRADE-1.4.4-Intel-test.dmg > SHA256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-1.4.4-Intel-test
+          path: |
+            KAYTRADE-1.4.4-Intel-test.dmg
+            SHA256.txt
+          if-no-files-found: error
+          retention-days: 14

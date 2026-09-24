@@ -7,7 +7,9 @@ import math
 import os
 import time
 import urllib.parse
+import urllib.error
 import urllib.request
+import ssl
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -19,6 +21,13 @@ class Client:
         if host not in HOSTS:
             raise ValueError('仅允许官方 OKX 域名')
         self.host, self.key, self.secret, self.phrase, self.demo = host, key, secret, phrase, demo
+        # The frozen macOS app bundles certifi's roots.  Use them explicitly
+        # instead of relying on a process environment variable being inherited.
+        try:
+            import certifi
+            self.ssl_context = ssl.create_default_context(cafile=certifi.where())
+        except Exception:
+            self.ssl_context = ssl.create_default_context()
 
     def get(self, path, params=None, private=False):
         if not path.startswith('/api/v5/'):
@@ -38,13 +47,22 @@ class Client:
         class NoRedirect(urllib.request.HTTPRedirectHandler):
             def redirect_request(self, *args, **kwargs):
                 return None
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}), NoRedirect(),
+            urllib.request.HTTPSHandler(context=self.ssl_context))
         req = urllib.request.Request('https://'+self.host+target, headers=headers, method='GET')
         try:
             with opener.open(req, timeout=15) as response:
                 result = json.load(response)
-        except Exception:
-            raise RuntimeError('连接失败：检查网络、官方账户域名、证书与系统时间；不会重试下单') from None
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(f'HTTP {exc.code}：OKX拒绝了请求；请核对账户域名和网络限制') from None
+        except urllib.error.URLError as exc:
+            reason = str(exc.reason).replace('\n', ' ')[:180]
+            raise RuntimeError('HTTPS连接失败：'+reason+'。未提交订单') from None
+        except TimeoutError:
+            raise RuntimeError('HTTPS连接超时：网络未能直连OKX；未提交订单') from None
+        except Exception as exc:
+            raise RuntimeError('HTTPS连接失败：'+type(exc).__name__+'；未提交订单') from None
         if result.get('code') != '0':
             raise RuntimeError('OKX 返回错误码 '+str(result.get('code'))+'；请核对密钥权限、IP限制和账户环境')
         return result['data']
@@ -62,14 +80,17 @@ class Client:
                     values = [float(v) for v in row[1:5]]
                     if not all(math.isfinite(v) and v > 0 for v in values):
                         raise ValueError('行情包含非法价格')
-                    rows[int(row[0])] = dict(zip(('o','h','l','c'), values))
+                    volume=float(row[5])
+                    if not math.isfinite(volume) or volume < 0:
+                        raise ValueError('行情包含非法成交量')
+                    rows[int(row[0])] = dict(zip(('o','h','l','c'), values)); rows[int(row[0])]['v']=volume
             if not batch:
                 break
             after = str(min(int(r[0]) for r in batch))
             time.sleep(.12)
         data = [dict(t=t, **rows[t]) for t in sorted(rows)]
-        step = 3600000 if bar == '1H' else 900000
-        if len(data) < 1000 or any(b['t']-a['t'] != step for a,b in zip(data, data[1:])):
+        step = 86400000 if bar == '1Dutc' else 3600000 if bar == '1H' else 900000 if bar == '15m' else 300000 if bar == '5m' else 0
+        if not step or len(data) < 1000 or any(b['t']-a['t'] != step for a,b in zip(data, data[1:])):
             raise ValueError('K线不足1000根或存在缺口，暂停策略判断')
         if time.time()*1000 - (data[-1]['t']+step) > step:
             raise ValueError('K线已过期，暂停策略判断')
@@ -105,8 +126,8 @@ def indicators(rows):
         rsv=50 if high==low else 100*(close[i]-low)/(high-low)
         pk,pd=k,d
         k=(2*k+rsv)/3; d=(2*d+k)/3
-    e20,e50=ema(close,20),ema(close,50)
-    return dict(ema20=e20[-1],ema50=e50[-1],ema200=ema(close,200)[-1],
+    e5,e10,e20,e50=ema(close,5),ema(close,10),ema(close,20),ema(close,50)
+    return dict(ema5=e5[-1],ema10=e10[-1],ema20=e20[-1],ema50=e50[-1],ema200=ema(close,200)[-1],
                 up=e20[-1]>e20[-2] and e50[-1]>e50[-2],
                 down=e20[-1]<e20[-2] and e50[-1]<e50[-2],rsi=rsi,atr=wilder(tr),
                 upper=mean+2*sd,middle=mean,lower=mean-2*sd,k=k,d=d,j=3*k-2*d,
