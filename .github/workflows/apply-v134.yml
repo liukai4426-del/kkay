@@ -1,0 +1,66 @@
+name: Apply KAYTRADE V1.3.4 Strategy Upgrade
+on:
+  push:
+    branches: [codex/v1-3-4-strategy]
+    paths:
+      - v134_upgrade.py
+      - v134_anchor_fix.py
+      - v134_prompt_fix.py
+      - v134_test_fix.py
+      - v134_version_fix.py
+      - .github/workflows/apply-v134.yml
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/v1-3-4-strategy
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Fix trigger patch anchor
+        run: python v134_anchor_fix.py
+      - name: Fix auth prompt patch anchor
+        run: python v134_prompt_fix.py
+      - name: Fix sizing-test parameters
+        run: python v134_test_fix.py
+      - name: Fix V1.3.4 window title
+        run: python v134_version_fix.py
+      - name: Apply V1.3.4 upgrade
+        run: python v134_upgrade.py
+      - name: Compile and test
+        run: |
+          python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py desktop.py
+          python -m unittest -v test_engine test_candles test_v122 test_v132 test_v133 test_v134
+      - name: Verify V1.3.4 invariants
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import strategy
+          from engine import Settings
+          assert strategy.SCORE_MAX == 10.0
+          assert strategy.NORMAL_THRESHOLD == 3.5
+          assert Settings().score_threshold == 3.5
+          assert strategy._position_multiplier(3.5) == 1.0
+          assert strategy._position_multiplier(5.0) == 1.5
+          assert strategy._position_multiplier(7.0) == 2.0
+          e=Path('engine.py').read_text(); a=Path('app.py').read_text(); c=Path('candles.py').read_text()
+          for token in ("self.x.candles('1Dutc')","position_multiplier","score_threshold:float=3.5"):
+              assert token in e, token
+          for token in ('KAYTRADE 1.3.4','3.5–4.5=1×仓位','1D EMA5/10/20'):
+              assert token in a, token
+          assert "'1Dutc':86400000" in c
+          print('V1.3.4 invariants OK')
+          PY
+      - name: Commit V1.3.4 source
+        run: |
+          git config user.name 'liukai4426-del'
+          git config user.email 'liukai4426@gmail.com'
+          git add core.py candles.py strategy.py engine.py app.py test_v132.py test_v134.py RELEASE-1.3.4.md
+          git diff --cached --quiet && exit 1
+          git commit -m 'strategy: add V1.3.4 daily EMA trend penalties and score sizing'
+          git push origin HEAD:codex/v1-3-4-strategy

@@ -1,0 +1,35 @@
+name: Apply KAYTRADE V1.3.1 Visual Patch
+on:
+  push:
+    branches:
+      - codex/v1-3-1-visual
+    paths:
+      - v131_visual_patch.py
+      - .github/workflows/apply-v131-visual.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Apply V1.3.1 visual-only source patch
+        run: python v131_visual_patch.py
+      - name: Syntax and source smoke check
+        run: |
+          python -m py_compile app.py visual.py
+          grep -q "KAYTRADE 1.3.1" app.py
+          grep -q "class AnimatedScoreBar" visual.py
+          grep -q "class ScoreTable" visual.py
+      - name: Commit UI source only
+        run: |
+          git config user.name "liukai4426-del"
+          git config user.email "liukai4426@gmail.com"
+          git checkout HEAD -- .github/workflows/build-mac.yml
+          git add app.py visual.py RELEASE-1.3.1.md
+          git commit -m "ui: KAYTRADE V1.3.1 visual polish"
+          git push origin HEAD:codex/v1-3-1-visual

@@ -1,0 +1,48 @@
+name: Apply V1.3.5 Legacy 51603 Hotfix
+on:
+  push:
+    branches: [codex/v1-3-5-fixes]
+    paths:
+      - v135_legacy51603_hotfix.py
+      - .github/workflows/apply-v135-legacy51603-hotfix.yml
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/v1-3-5-fixes
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Apply legacy 51603 lock migration
+        run: python v135_legacy51603_hotfix.py
+      - name: Compile and run full regression suite
+        run: |
+          python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py desktop.py
+          python -m unittest -v test_engine test_candles test_v122 test_v132 test_v133 test_v134 test_v135
+      - name: Verify hotfix invariants
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          e=Path('engine.py').read_text()
+          assert "def _is_legacy_51603_lock" in e
+          assert "def _migrate_legacy_51603_lock" in e
+          assert "self._migrate_legacy_51603_lock()" in e
+          assert "'核对环境、权限、地区与系统时间'" in e
+          assert "V1.3.5已安全迁移旧51603故障锁" in e
+          assert "state['active']['order_id']=order_id" in e
+          assert "s.capital*.05" not in e
+          print('V1.3.5 legacy-51603 hotfix invariants OK')
+          PY
+      - name: Commit hotfix source
+        run: |
+          git config user.name 'liukai4426-del'
+          git config user.email 'liukai4426@gmail.com'
+          git add engine.py test_v135.py
+          git diff --cached --quiet && exit 1
+          git commit -m 'fix: safely migrate legacy V1.3.4 51603 fault lock'
+          git push origin HEAD:codex/v1-3-5-fixes

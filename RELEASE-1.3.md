@@ -1,0 +1,22 @@
+# OKX Local V1.3
+
+- 分层评分：1H 环境、15m/1H 支撑阻力、15m Setup、5m Trigger；最高18分。
+- 正常市场最终评分 >=8；强逆势先扣3分且最终 >=11。
+- 硬条件：15m Setup >=2、5m Trigger >=1；前方强反向结构 <1R 禁止开仓，1.0–1.3R 扣2分。
+- 支撑阻力：1H回看120根、15m回看160根；Swing左右各3根；0.25 ATR聚类；至少2次测试，3次为强结构；0.3 ATR收盘突破判失效。
+- 开仓改为普通限价委托，最多等待1根5m K线；未成交自动撤销，不算一笔交易。
+- 限价若部分成交：先撤销剩余挂单，确认父单取消后立即市价平掉已成交部分；不把部分成交裸仓交给尚未生成的附带TP/SL。
+- 平仓继续使用市场价：程序主动平仓为market；交易所附带TP/SL使用 -1 市价执行。
+- 中国时间自然日连续3笔净亏损后，仅停止当日新开仓；已有仓位继续管理，次日自动恢复。
+- 增加交易成本过滤：理论TP空间至少覆盖预计往返成本2倍。
+- V1.2.2 的K线、网络、仓位和保护单 fail-closed 安全机制继续保留。
+
+测试版仍未完成真实资金端到端验收，不保证盈利、限价成交或止损成交价格。
+
+## KAYTRADE UI refresh
+- Product name is KAYTRADE; the existing OKXLocal Application Support folder is intentionally retained so settings, locks and history are not orphaned.
+- All visible action buttons use rounded controls; start/stop is a single green/red state button.
+- Cards and inputs use tonal depth instead of light outlines.
+- Score detail and indicator tables are left aligned.
+- Connection, risk and history pages use the same card language as the trading overview.
+- Historical profit is green, loss is red, and cumulative performance/curve follows the total sign.

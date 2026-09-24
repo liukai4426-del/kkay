@@ -1,0 +1,130 @@
+name: Build KAYTRADE Intel Mac 1.5.4 Fix
+on:
+  push:
+    branches: [codex/v1-5-4-limit-log-fix]
+    paths:
+      - '**.py'
+      - OKXLocal.spec
+      - RELEASE-1.5.4-FIX.md
+      - .github/workflows/build-mac-v154-fix.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  unit:
+    name: v154-limit-log-fix-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile repair runtime
+        run: >-
+          python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py
+          v151_strategy_patch.py v152_model.py v152_strategy_patch.py v152_safety_patch.py
+          v152_ui_busy_fix.py v152_backtest_core.py v153_model.py v153_runtime_patch.py
+          v153_backtest_core.py v154_model.py v154_runtime_patch.py v154_limit_log_fix.py
+          test_v154_strategy.py test_v154_ui_scroll.py test_v154_limit_log_fix.py test_v154_log_tk.py
+      - name: Run preserved strategy and safety regressions
+        run: |
+          python -m unittest -v test_engine test_candles
+          python -m unittest -v test_v135_execution test_v135_safety2 test_v135_order_state
+          python -m unittest -v test_v136_runtime test_v137_strategy test_v138_strategy
+          python -m unittest -v test_v141_exit_limit test_v143_score_arbitration
+          python -m unittest -v test_v146_ui_fix test_v147_strategy
+          python -m unittest -v test_v150_strategy
+          python -m unittest -v test_v151_strategy
+          python -m unittest -v test_v152_strategy
+          python -m unittest -v test_v152_ui_busy_fix
+          python -m unittest -v test_v153_strategy
+          python -m unittest -v test_v153_ui_scroll
+          python -m unittest -v test_v154_strategy
+          python -m unittest -v test_v154_ui_scroll
+      - name: Run V1.5.4 repair regressions
+        run: python -m unittest -v test_v154_limit_log_fix test_v154_log_tk
+      - name: Verify repair production wiring
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import inspect
+          import app
+          import engine
+          import v137_strategy_patch as v137
+          import v138_strategy_patch as v138
+          import v154_model as model
+          import v154_limit_log_fix as fix
+          spec=Path('OKXLocal.spec').read_text()
+          assert model.VERSION == '1.5.4'
+          assert model.THRESHOLD == 6.0
+          assert model.ENTRY_WINDOW_MS == 60000
+          assert model.FRONT_MIN_R == 1.5
+          assert model.COST_MAX_R == 0.30
+          assert engine.Engine._kaytrade_v154_limit_log_fix_applied
+          assert app.App._kaytrade_v154_log_fix_applied
+          assert v138._submit_initial is fix._submit_initial_limit
+          assert v137._v137_make_plan is fix._v154_limit_make_plan
+          submit=inspect.getsource(fix._submit_initial_limit)
+          assert '"ordType": "limit"' in submit
+          assert '"px": plan["px"]' in submit
+          assert 'market' not in inspect.getsource(fix._v154_limit_make_plan).split('entry_order_type=')[1].split(',')[0]
+          assert 'v154_limit_log_fix.py' in spec
+          assert "CFBundleShortVersionString': '1.5.4'" in spec
+          assert "CFBundleVersion': '1541'" in spec
+          print('PASS: V1.5.4 fix = first-minute LIMIT entry + persisted/live log display')
+          PY
+  build:
+    name: intel-mac-package-fix
+    needs: unit
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - name: Install packaging dependencies
+        run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0'
+      - name: Re-run repair tests on Intel Mac
+        run: |
+          python -m py_compile v152_model.py v152_strategy_patch.py v152_safety_patch.py v152_ui_busy_fix.py v153_model.py v153_runtime_patch.py v154_model.py v154_runtime_patch.py v154_limit_log_fix.py test_v154_limit_log_fix.py test_v154_log_tk.py build_icon.py
+          python -m unittest -v test_v151_strategy
+          python -m unittest -v test_v152_strategy
+          python -m unittest -v test_v153_strategy
+          python -m unittest -v test_v154_strategy
+          python -m unittest -v test_v154_limit_log_fix
+          python -m unittest -v test_v154_log_tk
+      - name: Create application icon
+        run: |
+          python build_icon.py
+          test -s OKXLocal.icns
+      - name: Build Intel application
+        run: python -m PyInstaller --noconfirm OKXLocal.spec
+      - name: Verify bundle and repair hook
+        run: |
+          python verify_bundle.py
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1.5.4'
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1541'
+          test -s dist/KAYTRADE.app/Contents/Resources/assets/kaytrade-v142-logo.png || find dist/KAYTRADE.app -name 'kaytrade-v142-logo.png' -print -quit | grep .
+          codesign --verify --deep --strict dist/KAYTRADE.app
+      - name: Create repaired installer
+        run: |
+          mkdir -p installer
+          ditto dist/KAYTRADE.app installer/KAYTRADE.app
+          cp RELEASE-1.5.4-FIX.md installer/RELEASE-1.5.4-FIX.md
+          printf 'PASS: V1.5.4 repair keeps the 60-second BOLL window, restores LIMIT entry with Maker economics and strict minute-one expiry, preserves 1H ATR stop/full 2R TP and fail-closed safety, restores persisted events.log into the run-log panel, and verifies live log display on real Intel Mac Tk.\n' > installer/BUILD-TEST.txt
+          ln -s /Applications installer/Applications
+          hdiutil create -volname KAYTRADE-1.5.4-Fix -srcfolder installer -ov -format UDZO KAYTRADE-1.5.4-Intel-fix.dmg
+          shasum -a 256 KAYTRADE-1.5.4-Intel-fix.dmg > SHA256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-1.5.4-Intel-fix
+          path: |
+            KAYTRADE-1.5.4-Intel-fix.dmg
+            SHA256.txt
+          if-no-files-found: error
+          retention-days: 14

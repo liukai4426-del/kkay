@@ -1,0 +1,146 @@
+name: Backtest V1.7.0 ABC-B Structure Distance Record 720D
+
+on:
+  push:
+    branches: [research/v170-abc-b-structure-distance-720d]
+    paths:
+      - run_v170_structure_distance_record_720d.py
+      - run_v168_boll5_overext010_pee4_365d.py
+      - run_v168_boll5_overext035_pee3_mfe06_180d.py
+      - run_v168_boll5_overext035_180d.py
+      - run_v168_180d_backtest_r2.py
+      - .github/workflows/backtest-v170-4h-neutralplus1-short-drift020-720d.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - run_v170_structure_distance_record_720d.py
+      - .github/workflows/backtest-v170-abc-b-structure-distance-720d.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      BACKTEST_MARKET_CACHE: .backtest_cache
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install runtime dependencies
+        run: python -m pip install 'certifi==2025.8.3' 'websocket-client==1.8.0'
+
+      - name: Restore audited 720D BTC market cache
+        uses: actions/cache@v4
+        with:
+          path: .backtest_cache
+          key: kaytrade-v168-okx-btc-720d-end-20260914-market-v1
+          restore-keys: |
+            kaytrade-v168-okx-btc-720d-
+            kaytrade-okx-btc-720d-
+            kaytrade-okx-btc-
+
+      - name: Materialize audited historical simulator and proven R2 path
+        run: |
+          git fetch --depth=1 origin research/v151-btc-30d-backtest
+          git show FETCH_HEAD:research_v146_backtest.py > research_v146_backtest.py
+          git fetch --depth=1 origin research/v155-outer-bands-180d
+          git show FETCH_HEAD:research_v1544_cache_patch.py > research_v1544_cache_patch.py
+          git show FETCH_HEAD:research_v1544_180d_backtest.py > research_v1544_180d_backtest.py
+          git show FETCH_HEAD:run_v1544_180d_fixed.py > run_v1544_180d_fixed.py
+          git fetch --depth=1 origin research/v166-15m-boll-macd-adverse-only-360d-fast
+          git show FETCH_HEAD:run_v160_365d_2000u.py > run_v160_365d_2000u.py
+          git show FETCH_HEAD:run_v165_1000d_2000u.py > run_v165_1000d_2000u.py
+          git show FETCH_HEAD:run_v166_entry_expansion_4way_360d.py > run_v166_entry_expansion_4way_360d.py
+          git show FETCH_HEAD:run_v166_15m_boll_macd_adverse_only_360d_fast.py > run_v166_15m_boll_macd_adverse_only_360d_fast.py
+          git show FETCH_HEAD:run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py > run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py
+          git show FETCH_HEAD:research_backtest_data_cache.py > research_backtest_data_cache.py
+
+      - name: Compile and preflight V1.7.0 720D strategy lock
+        run: |
+          python -m py_compile             research_v146_backtest.py research_v1544_cache_patch.py research_v1544_180d_backtest.py             run_v1544_180d_fixed.py run_v160_365d_2000u.py run_v165_1000d_2000u.py             run_v166_entry_expansion_4way_360d.py run_v166_15m_boll_macd_adverse_only_360d_fast.py             run_v166_15m_boll_macd_adverse_only_360d_fast_r2.py research_backtest_data_cache.py             run_v168_180d_backtest_r2.py run_v168_boll5_overext035_180d.py             run_v168_boll5_overext035_pee3_mfe06_180d.py run_v168_boll5_overext010_pee4_365d.py             run_v170_structure_distance_record_720d.py
+          python - <<'PY'
+          import run_v170_structure_distance_record_720d as x
+          x._patch()
+          start,end=x.src.configure()
+          x.verify(start,end)
+          assert x.DAYS == 720
+          assert (end-start).days == 720
+          assert x.VERSION == '1.7.0' and x.BUILD == '1700'
+          assert x.src.base.THRESHOLD == 6.0
+          assert x.src.base.BOLL_WINDOW_MS == 900000
+          assert abs(x.src.entry.OVEREXT_ATR_MULT-0.10) < 1e-12
+          assert x.src.base._four_state is x._four_state_opposite_only_block
+          assert abs(x.SHORT_ENTRY_DRIFT_MAX_ATR5-0.20) < 1e-12
+          inside=x._structure_distance_diag({'structure':{'price':100.0},'atr15':100.0,'aux_zone_low':90.0,'aux_zone_high':110.0})
+          outside=x._structure_distance_diag({'structure':{'price':135.0},'atr15':100.0,'aux_zone_low':90.0,'aux_zone_high':110.0})
+          assert abs(float(inside['structure_distance_atr15'])-0.0) < 1e-12
+          assert abs(float(outside['structure_distance_atr15'])-0.25) < 1e-12
+          print('AUDIT PASS ABC-B: baseline semantics unchanged; structure distance is record-only and formula-verified')
+          PY
+
+      - name: Run V1.7.0 ABC-B structure-distance record-only 720D backtest
+        run: time python run_v170_structure_distance_record_720d.py
+
+      - name: Verify result payload
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('backtest_output_v170_structure_distance_record_720d/result_v170_structure_distance_record_720d.json')
+          d=json.loads(p.read_text(encoding='utf-8'))
+          assert d['window']['days'] == 720
+          s=d['strategy_lock']
+          assert s['version'] == '1.7.0'
+          assert s['build'] == '1700'
+          assert s['1h_15m_primary_direction_hard_gate'] is True
+          assert s['1h_ema9_26_score_enabled'] is False
+          assert s['15m_ema50_directional_score_retained'] is True
+          assert float(s['5m_boll_overextension_threshold_atr14']) == 0.10
+          assert s['4h_aligned_hard_gate'] is False
+          assert s['4h_opposite_only_hard_gate'] is True
+          assert s['4h_aligned_allowed'] is True and float(s['4h_aligned_score']) == 1.0
+          assert s['4h_neutral_allowed'] is True and float(s['4h_neutral_score']) == 1.0
+          assert s['short_entry_drift_hard_gate'] is True
+          assert float(s['short_entry_drift_max_atr5']) == 0.20
+          assert s['structure_distance_record_only'] is True
+          assert s['structure_distance_unit'] == 'ATR15'
+          assert s['4h_opposite_allowed'] is False
+          assert float(s['score_threshold']) == 6.0
+          assert s['break_even'] is False
+          assert s['pee_version'] == '4.0-tiered-boolean'
+          assert int(s['pee4_post_exit_entry_lock_minutes']) == 60
+          assert int(d['metrics']['trades'] or 0) > 0, 'ANOMALY: zero trades; reject output'
+          import csv, math
+          cp=Path('backtest_output_v170_structure_distance_record_720d/trades_v170_structure_distance_record_720d.csv')
+          with cp.open(encoding='utf-8', newline='') as fh:
+              rr=csv.DictReader(fh); rows=list(rr)
+              assert 'structure_distance_atr15' in (rr.fieldnames or []), 'missing structure distance column'
+              vals=[]
+              for row in rows:
+                  raw=row.get('structure_distance_atr15')
+                  try:
+                      v=float(raw)
+                  except (TypeError, ValueError):
+                      continue
+                  if math.isfinite(v):
+                      vals.append(v)
+              assert vals, 'no finite structure-distance observations recorded'
+          print(json.dumps(d,ensure_ascii=False,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-V1.7.0-ABC-B-STRUCTURE-DISTANCE-720D-2000U
+          path: backtest_output_v170_structure_distance_record_720d/
+          if-no-files-found: error
+          retention-days: 30
+
+# registered-trigger

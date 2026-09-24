@@ -1,0 +1,205 @@
+name: Build KAYTRADE Intel Mac 1.4.6 UI Fix
+on:
+  push:
+    branches: [codex/v1-4-6-ui-fix]
+    paths:
+      - candles.py
+      - engine.py
+      - exchange.py
+      - app.py
+      - strategy.py
+      - visual.py
+      - desktop.py
+      - build_icon.py
+      - OKXLocal.spec
+      - assets/kaytrade-v142-logo.png
+      - v135_patch.py
+      - v135_execution_patch.py
+      - v135_flatten_noop_hotfix.py
+      - v135_auto_entry_guard.py
+      - v136_runtime.py
+      - v136_entry_fix.py
+      - v137_strategy_patch.py
+      - v137_cancel_fix.py
+      - v138_strategy_patch.py
+      - v139_position_patch.py
+      - v140_score_dialog_patch.py
+      - v141_dialog_signal_positions_patch.py
+      - v141_history_return_chart_patch.py
+      - v141_exit_limit_patch.py
+      - v142_visual_patch.py
+      - v143_score_arbitration_patch.py
+      - v143_visual_polish_patch.py
+      - v144_ui_polish_patch.py
+      - v145_layout_fix_patch.py
+      - v146_ui_log_polish_patch.py
+      - v146_ui_fix_patch.py
+      - test_v141_dialog_signal_positions.py
+      - test_v141_history_return_chart.py
+      - test_v141_exit_limit.py
+      - test_v142_visual.py
+      - test_v143_score_arbitration.py
+      - test_v143_visual_polish.py
+      - test_v144_ui_polish.py
+      - test_v145_layout_fix.py
+      - test_v146_ui_log_polish.py
+      - test_v146_ui_fix.py
+      - RELEASE-1.4.6.md
+      - .github/workflows/build-mac-v146.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  unit:
+    name: v146-strategy-safety-ui-fix-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile V1.4.6 repaired runtime
+        run: python -m py_compile strategy.py engine.py exchange.py candles.py core.py app.py visual.py v137_strategy_patch.py v137_cancel_fix.py v138_strategy_patch.py v139_position_patch.py v140_score_dialog_patch.py v141_dialog_signal_positions_patch.py v141_history_return_chart_patch.py v141_exit_limit_patch.py v142_visual_patch.py v143_score_arbitration_patch.py v143_visual_polish_patch.py v144_ui_polish_patch.py v145_layout_fix_patch.py v146_ui_log_polish_patch.py v146_ui_fix_patch.py test_v146_ui_log_polish.py test_v146_ui_fix.py build_icon.py
+      - name: Run preserved safety and strategy tests
+        run: |
+          python -m unittest -v test_engine test_candles test_v134 test_v135 test_v135_execution test_v135_safety2
+          python -m unittest -v test_v135_order_state test_v135_ack test_v135_fills test_v135_runtime_stability
+          python -m unittest -v test_v135_auto_entry_guard
+          python -m unittest -v test_v136_runtime test_v136_entry_fix
+          python -m unittest -v test_v137_strategy test_v137_cancel_fix
+          python -m unittest -v test_v138_strategy
+          python -m unittest -v test_v139_position
+          python -m unittest -v test_v140_score_dialog
+          python -m unittest -v test_v141_dialog_signal_positions test_v141_history_return_chart test_v141_exit_limit
+      - name: Run V1.4.2 through V1.4.5 regression tests
+        run: python -m unittest -v test_v142_visual test_v143_score_arbitration test_v143_visual_polish test_v144_ui_polish test_v145_layout_fix
+      - name: Run V1.4.6 UI and repair tests
+        run: python -m unittest -v test_v146_ui_log_polish test_v146_ui_fix
+      - name: Verify V1.4.6 repair wiring
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          spec=Path('OKXLocal.spec').read_text()
+          patch=Path('v146_ui_fix_patch.py').read_text()
+          assert 'v146_ui_log_polish_patch.py' in spec
+          assert 'v146_ui_fix_patch.py' in spec
+          assert "CFBundleShortVersionString': '1.4.6'" in spec
+          assert "CFBundleVersion': '146'" in spec
+          for token in ('LOG_CARD_HEIGHT=130','STATUS_LEFT_PAD','_hide_connection_result_box','_rebuild_risk_page','_rebuild_execution_page','_build_compact_log_card','app.WideScrollbar','app.ScrollablePage'):
+              assert token in patch, token
+          print('PASS: V1.4.6 interface repair wired')
+          PY
+  build:
+    name: intel-mac-package
+    needs: unit
+    runs-on: macos-15-intel
+    timeout-minutes: 35
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - name: Install packaging dependencies
+        run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0'
+      - name: Re-run V1.4.1 through V1.4.6 tests on Intel Mac
+        run: |
+          python -m py_compile v141_dialog_signal_positions_patch.py v141_history_return_chart_patch.py v141_exit_limit_patch.py v142_visual_patch.py v143_score_arbitration_patch.py v143_visual_polish_patch.py v144_ui_polish_patch.py v145_layout_fix_patch.py v146_ui_log_polish_patch.py v146_ui_fix_patch.py test_v141_dialog_signal_positions.py test_v141_history_return_chart.py test_v141_exit_limit.py test_v142_visual.py test_v143_score_arbitration.py test_v143_visual_polish.py test_v144_ui_polish.py test_v145_layout_fix.py test_v146_ui_log_polish.py test_v146_ui_fix.py build_icon.py
+          python -m unittest -v test_v141_dialog_signal_positions test_v141_history_return_chart test_v141_exit_limit test_v142_visual test_v143_score_arbitration test_v143_visual_polish test_v144_ui_polish test_v145_layout_fix test_v146_ui_log_polish test_v146_ui_fix
+      - name: V1.4.6 repaired UI smoke test
+        run: |
+          python - <<'PY'
+          import tempfile
+          import tkinter as tk
+          from pathlib import Path
+          from unittest.mock import patch
+          import v146_ui_fix_patch as fix
+          import app
+          root=tk.Tk(); root.geometry('1400x900')
+          try:
+              with patch.object(app.App,'worker',lambda self: None):
+                  ui=app.App(root,Path(tempfile.mkdtemp(prefix='kaytrade146fix-')))
+                  root.geometry('1400x900'); root.update_idletasks(); root.update()
+                  assert '1.4.6' in root.title()
+                  assert getattr(ui,'_v146_ui_fix_ready',False)
+
+                  # Connection page: keep callback target alive, remove the empty long rectangle.
+                  ui.book.select(0); root.update_idletasks(); root.update()
+                  assert getattr(ui,'_v146_fix_connection_box_removed',False)
+                  assert not ui.account_view.winfo_ismapped()
+                  assert ui.account_view.winfo_exists()
+
+                  # Account/network start exactly at the visible circular-logo image edge.
+                  assert getattr(ui,'_v146_fix_status_logo_aligned',False)
+                  logo=ui._v146_logo_widget
+                  expected=logo.winfo_rootx()+(fix.v146.HEADER_LOGO_CANVAS-fix.v146.HEADER_LOGO_IMAGE)//2
+                  actual=ui._v146_account_label.winfo_rootx()
+                  print('status/logo x:',actual,expected)
+                  assert abs(actual-expected)<=2, (actual,expected)
+                  assert ui._v146_account_label.master is ui._v146_network_label.master
+
+                  # Risk and execution pages use the same rounded WideScrollbar as the rest of the UI.
+                  assert isinstance(ui._v146_fix_risk_scroll,app.ScrollablePage)
+                  assert isinstance(ui._v146_fix_execution_scroll,app.ScrollablePage)
+                  assert isinstance(ui._v146_fix_risk_scrollbar,app.WideScrollbar)
+                  assert isinstance(ui._v146_fix_execution_scrollbar,app.WideScrollbar)
+                  assert int(float(ui._v146_fix_risk_scrollbar.cget('width'))) >= 20
+                  assert int(float(ui._v146_fix_execution_scrollbar.cget('width'))) >= 20
+                  ui.book.select(1); root.update_idletasks(); root.update()
+                  assert ui._v146_fix_risk_scrollbar.winfo_ismapped()
+                  ui.book.select(2); root.update_idletasks(); root.update()
+                  assert ui._v146_fix_execution_scrollbar.winfo_ismapped()
+
+                  # Run record is about half the former 250 px card and scrolls internally.
+                  assert getattr(ui,'_v146_fix_log_compact',False)
+                  assert isinstance(ui._v146_fix_log_scrollbar,app.WideScrollbar)
+                  assert int(float(ui._v146_fix_log_surface.cget('height'))) == fix.LOG_CARD_HEIGHT
+                  assert int(float(ui._v146_fix_log_scrollbar.cget('width'))) >= 20
+                  ui.log_lines=[('log',f'2026-09-12 04:{i:02d}:00 等待测试记录 {i}') for i in range(12)]
+                  ui.render_logs(); root.update_idletasks(); root.update()
+                  region=ui._v146_fix_log_canvas.bbox('all')
+                  assert region and region[3] > ui._v146_fix_log_canvas.winfo_height(), (region,ui._v146_fix_log_canvas.winfo_height())
+                  assert ui._v146_fix_log_scrollbar.winfo_ismapped()
+
+                  # Existing V1.4.6 visual contracts stay intact.
+                  assert len(ui.score_bars)==2
+                  for bar in ui.score_bars.values():
+                      assert int(float(bar.cget('height'))) == fix.v146.ENERGY_BAR_HEIGHT
+                      assert getattr(bar,'_v146_thickness_scale',0)==1.6
+                  ui.finished.set(); ui.lock.close()
+          finally:
+              root.destroy()
+          print('PASS: V1.4.6 compact log, page scrollbars, connection cleanup and logo-edge alignment')
+          PY
+      - name: Create application icon from selected logo
+        run: |
+          python build_icon.py
+          test -s OKXLocal.icns
+      - name: Build Intel application
+        run: python -m PyInstaller --noconfirm OKXLocal.spec
+      - name: Verify bundle
+        run: |
+          python verify_bundle.py
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1.4.6'
+          test -s dist/KAYTRADE.app/Contents/Resources/assets/kaytrade-v142-logo.png || find dist/KAYTRADE.app -name 'kaytrade-v142-logo.png' -print -quit | grep .
+          codesign --verify --deep --strict dist/KAYTRADE.app
+      - name: Create installer
+        run: |
+          mkdir -p installer
+          ditto dist/KAYTRADE.app installer/KAYTRADE.app
+          cp RELEASE-1.4.6.md installer/RELEASE-1.4.6.md
+          printf 'PASS: V1.4.6 interface repair + V1.4.6 UI polish + existing trading logic preserved\n' > installer/BUILD-TEST.txt
+          ln -s /Applications installer/Applications
+          hdiutil create -volname KAYTRADE-1.4.6 -srcfolder installer -ov -format UDZO KAYTRADE-1.4.6-Intel-test.dmg
+          shasum -a 256 KAYTRADE-1.4.6-Intel-test.dmg > SHA256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-1.4.6-Intel-test
+          path: |
+            KAYTRADE-1.4.6-Intel-test.dmg
+            SHA256.txt
+          if-no-files-found: error
+          retention-days: 14
