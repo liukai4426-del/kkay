@@ -10,6 +10,11 @@ on:
       - run_v168_boll5_overext035_180d.py
       - run_v168_180d_backtest_r2.py
       - .github/workflows/backtest-v170-4h-neutralplus1-short-drift020-720d.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - run_v170_4h_neutralplus1_short_drift020_720d.py
+      - .github/workflows/backtest-v170-abc-a-baseline-720d.yml
   workflow_dispatch:
 
 permissions:
