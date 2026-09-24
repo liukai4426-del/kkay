@@ -7,7 +7,9 @@ Exact strategy replay promoted from the audited V1.6.8 NoEMA/BOLL0.10/PEE4 resea
 - 1H EMA9/26 +1 score removed (not a score, not a Hard Gate);
 - 15m EMA50 directional movement score retained;
 - CLOSED 5m BOLL overextension >=0.10 * Wilder ATR(14) latches +1 for current 15m opportunity;
-- A/B delta: 4H aligned +1 and 4H neutral +1 are allowed; only explicit 4H opposite is a Hard Gate block;\n- A/B delta: SHORT entry_drift_atr5 > 0.20 is a Hard Gate block;\n- RECORD-ONLY: structure distance from confirmed horizontal structure to the 15m EMA20/EMA50 pullback zone, normalized by ATR15; this never changes gates, scores, sizing or exits;
+- A/B delta: 4H aligned +1 and 4H neutral +1 are allowed; only explicit 4H opposite is a Hard Gate block;
+- A/B delta: SHORT entry_drift_atr5 > 0.20 is a Hard Gate block;
+- RECORD-ONLY: structure distance from confirmed horizontal structure to the 15m EMA20/EMA50 pullback zone, normalized by ATR15; this never changes gates, scores, sizing or exits;
 - 5m RSI 30..70 and Volume <1.20x are Hard Gates;
 - 5m MACD blocks only explicit adverse/opposite; improvement retains +1;
 - threshold 6.0, fixed 1x LIMIT, SL=1x1H ATR, TP=2R full, No-BE;
@@ -205,14 +207,17 @@ def _submit_lock(self, result, now_ms, mark):
             self.blockers["V1.7 A/B：做空 Entry Drift > 0.20 ATR5 Hard Gate"] += 1
             return
 
-    structure_diag = _structure_distance_diag(opp)\n    before = self.pending\n    out = _ORIG_SUBMIT(self, result, now_ms, mark)
+    structure_diag = _structure_distance_diag(opp)
+    before = self.pending
+    out = _ORIG_SUBMIT(self, result, now_ms, mark)
     if self.pending is not None and self.pending is not before:
         row = (result.get("scores") or {}).get(side) or {}
         conf = row.get("confirmations") or {}
         self.pending.factors["4h_trend_state_actual"] = str(conf.get("4H_trend_state_actual") or "neutral")
         self.pending.factors["4h_gate_mode"] = "opposite_only_block_aligned_neutral_plus1"
         self.pending.factors["short_entry_drift_hard_gate_max_atr5"] = SHORT_ENTRY_DRIFT_MAX_ATR5
-        self.pending.factors["entry_drift_atr5"] = drift if math.isfinite(drift) else None\n        self.pending.factors.update(structure_diag)
+        self.pending.factors["entry_drift_atr5"] = drift if math.isfinite(drift) else None
+        self.pending.factors.update(structure_diag)
     return out
 
 def _patch():
@@ -340,7 +345,10 @@ def main():
         "4h_neutral_allowed": True,
         "4h_neutral_score": 1.0,
         "short_entry_drift_hard_gate": True,
-        "short_entry_drift_max_atr5": SHORT_ENTRY_DRIFT_MAX_ATR5,\n        "structure_distance_record_only": True,\n        "structure_distance_unit": "ATR15",\n        "structure_distance_reference": "nearest confirmed horizontal structure to 15m EMA20/EMA50 pullback zone",
+        "short_entry_drift_max_atr5": SHORT_ENTRY_DRIFT_MAX_ATR5,
+        "structure_distance_record_only": True,
+        "structure_distance_unit": "ATR15",
+        "structure_distance_reference": "nearest confirmed horizontal structure to 15m EMA20/EMA50 pullback zone",
         "4h_opposite_allowed": False,
         "5m_rsi_hard_gate": "30<=RSI<=70",
         "5m_volume_hard_gate": "ratio<1.20x prior20",
@@ -366,7 +374,8 @@ def main():
         "V1.7.0 Build1700 label",
         "720D exact historical window",
         "A/B DELTA: 4H aligned +1 allowed; 4H neutral +1 allowed; explicit 4H opposite Hard Gate blocked",
-        "A/B DELTA: SHORT Entry Drift >0.20 ATR5 Hard Gate blocked",\n        "RECORD ONLY: structure_distance_atr15; no gate/score/exit behavior changed",
+        "A/B DELTA: SHORT Entry Drift >0.20 ATR5 Hard Gate blocked",
+        "RECORD ONLY: structure_distance_atr15; no gate/score/exit behavior changed",
         "remove 1H EMA9/26 +1",
         "BOLL5 overextension 0.10 ATR14 +1 latched",
         "PEE4 tiered Boolean",
