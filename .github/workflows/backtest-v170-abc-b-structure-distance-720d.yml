@@ -96,7 +96,7 @@ jobs:
           from pathlib import Path
           p=Path('backtest_output_v170_structure_distance_record_720d/result_v170_structure_distance_record_720d.json')
           d=json.loads(p.read_text(encoding='utf-8'))
-          assert d['window']['days'] == 360
+          assert d['window']['days'] == 720
           s=d['strategy_lock']
           assert s['version'] == '1.7.0'
           assert s['build'] == '1700'
