@@ -119,3 +119,5 @@ jobs:
           path: backtest_output_v170_short_drift_window020_720d/
           if-no-files-found: error
           retention-days: 30
+
+# registered-trigger
