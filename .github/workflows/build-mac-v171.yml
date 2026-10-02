@@ -105,15 +105,16 @@ jobs:
           assert getattr(engine.Engine,'_kaytrade_v170_applied',False)
           assert getattr(exchange.Exchange,'_kaytrade_v170_applied',False)
           assert getattr(app.App,'_kaytrade_v170_applied',False)
-          assert "CFBundleShortVersionString': '1.7.0'" in spec
-          assert "CFBundleVersion': '1701'" in spec
-          assert 'v170_update_patch' in desktop and 'v170_build1701_patch' in desktop
-          text=v1701._rewrite_runtime_text_v1701('自动交易启动；V1.6.8 Build1681：1H EMA9/26趋势+1')
-          print('V170_RUNTIME_TEXT',repr(text))
-          assert text.startswith('自动交易启动；V1.7.1 Build1710') and 'PEE4' in text and '15m机会源锁' in text
+          assert "CFBundleShortVersionString': '1.7.1'" in spec
+          assert "CFBundleVersion': '1710'" in spec
+          assert 'v170_update_patch' in desktop and 'v170_build1701_patch' in desktop and 'v171_update_patch' in desktop
+          text=v171._rewrite_runtime_text_v171('自动交易启动；V1.7.0 Build1701：15m机会源锁：只有最新已收盘15m外轨真实触发才可创建开仓机会')
+          print('V171_RUNTIME_TEXT',repr(text))
+          assert text.startswith('自动交易启动；V1.7.1 Build1710') and '15m机会源锁' in text and '历史收益兼容' in text
           assert getattr(model,'_kaytrade_v170_build1701_applied',False)
-          assert v1701._with_direction('V1.7.0未开仓 15m BOLL信号有效期','做多').startswith('方向：做多')
-          print('PASS V1.7.1 Build1710: strict closed-15m opportunity source + direction logs + preserved V1.7 strategy')
+          assert getattr(model,'_kaytrade_v171_applied',False)
+          assert v1701._with_direction('V1.7.1未开仓 15m BOLL信号有效期','做多').startswith('方向：做多')
+          print('PASS V1.7.1 Build1710: strict closed-15m source lock + versioned history sync + preserved V1.7 strategy')
           PY
 
 
@@ -174,7 +175,7 @@ jobs:
           mkdir -p installer
           ditto dist/KAYTRADE.app installer/KAYTRADE.app
           cp RELEASE-1.7.1.md installer/RELEASE-1.7.1.md
-          printf 'KAYTRADE V1.7.1 Build1710\nStrict closed-15m BOLL opportunity source + long/short direction logs, with the V1.7.0 NoEMA1H/BOLL5/PEE4/Lock1H strategy preserved and inherited Build1681 fail-closed safety.\n' > installer/RELEASE-1.7.0-B1701.txt
+          printf 'KAYTRADE V1.7.1 Build1710\nStrict closed-15m BOLL opportunity source + versioned closed-round history sync, with the V1.7 strategy and inherited fail-closed safety preserved.\n' > installer/RELEASE-1.7.1.txt
           hdiutil create -volname 'KAYTRADE 1.7.1' -srcfolder installer -ov -format UDZO KAYTRADE-1.7.1-Intel-build1710.dmg
       - uses: actions/upload-artifact@v4
         with:
