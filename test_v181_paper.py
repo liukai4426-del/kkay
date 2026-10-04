@@ -172,7 +172,8 @@ class V181PaperTests(unittest.TestCase):
         x.last = 101000
         e.cycle()
         self.assertEqual(e._position_remaining(tier), 1.0)
-        self.assertEqual(result["status"], "filled")
+        close_order = e.store.data["paper_execution"]["close_orders"][-1]
+        self.assertEqual(close_order["status"], "filled")
 
     def test_cancel_entry_command(self):
         e, _x = self.make_engine()
