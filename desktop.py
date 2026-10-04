@@ -65,38 +65,31 @@ from v181_paper_patch import apply as apply_v181_paper_patch
 apply_v181_paper_patch()
 from v182_ui_patch import apply as apply_v182_ui_patch
 apply_v182_ui_patch()
+from v183_okx_demo_patch import apply as apply_v183_okx_demo_patch
+apply_v183_okx_demo_patch()
 
 
 def smoke_test():
-    """Exercise the packaged V1.8.2 Paper UI without credentials or exchange writes."""
+    """Exercise packaged V1.8.3 OKX Demo UI without credentials or writes."""
     import ssl
     import tkinter as tk
     from unittest.mock import patch
     import app
     import v165_model as model
     import v172_ai_only_patch as v172
-    import v181_paper_patch as v181
-    import v182_ui_patch as v182
-    import visual
+    import v183_okx_demo_patch as v183
 
     assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
-    assert v182.VERSION == '1.8.2' and v182.BUILD == '1820'
-    assert v181.VERSION == '1.8.2' and v181.BUILD == '1820'
-    assert v181.AI_ONLY is True and v181.PAPER_ONLY is True
-    assert v182.LIMIT_ONLY is True
-    assert model.VERSION == '1.8.2' and model.BUILD == '1820'
+    assert v183.VERSION == '1.8.3' and v183.BUILD == '1830'
+    assert v183.DEMO_EXECUTION is True
+    assert v183.LIMIT_ONLY is True
+    assert model.VERSION == '1.8.3' and model.BUILD == '1830'
     assert model.STRATEGY_ENABLED is False
-    assert getattr(model, '_kaytrade_v181_paper_applied', False)
-    assert getattr(model, '_kaytrade_v182_ui_applied', False)
-    assert getattr(app.App, '_kaytrade_v181_paper_applied', False)
-    assert getattr(app.App, '_kaytrade_v182_ui_applied', False)
-    assert app.Engine is v181.PaperEngineV181
-    assert str(v181.AI_MAX_LEVERAGE) == '20'
-    assert str(v181.AI_MAX_NOTIONAL_USDT) == '3500'
-    assert str(v181.AI_MAX_ESTIMATED_STOP_LOSS_USDT) == '100'
-    assert v181.PAPER_ENTRY_TTL_SEC == 3600
+    assert getattr(model, '_kaytrade_v183_okx_demo_applied', False)
+    assert getattr(app.App, '_kaytrade_v183_okx_demo_applied', False)
+    assert app.Engine is v183.OKXDemoEngineV183
 
-    with tempfile.TemporaryDirectory(prefix='kaytrade-v181-ui-check-') as folder:
+    with tempfile.TemporaryDirectory(prefix='kaytrade-v183-ui-check-') as folder:
         root = tk.Tk()
         try:
             with (
@@ -108,33 +101,30 @@ def smoke_test():
                 ui = app.App(root, Path(folder))
                 root.update()
                 assert 'KAYTRADE' in root.title()
-                assert '1.8.2' in root.title()
-                assert 'PAPER AI' in root.title()
-                assert '1820' in root.title()
+                assert '1.8.3' in root.title()
+                assert 'OKX DEMO' in root.title()
+                assert '1830' in root.title()
                 assert ui.mode.get() == 'OKX模拟盘'
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
-                assert getattr(ui, '_v181_paper_ready', False)
-                assert 'V1.8.2 PAPER' in ui.signal.get()
+                assert getattr(ui, '_v183_okx_demo_ready', False)
+                assert 'V1.8.3 OKX DEMO' in ui.signal.get()
+                assert getattr(ui, '_v181_auto_exec_card', None) is not None
                 assert getattr(ui, '_v180_plan_card', None) is not None
                 assert getattr(ui, '_v180_execution_card', None) is not None
-                assert getattr(ui, '_v181_direction_label', None) is not None
-                assert getattr(ui, '_v181_tier1_label', None) is not None
-                assert getattr(ui, '_v181_tier2_label', None) is not None
-                assert getattr(ui, '_v181_position_badge_label', None) is not None
-                assert getattr(ui, '_v181_auto_exec_card', None) is not None
-                assert getattr(ui, '_v181_auto_exec_button', None) is not None
-                assert getattr(ui, '_v182_entry_value_label', None) is not None
-                assert getattr(ui, '_v182_plan_card', None) is not None
-                assert getattr(ui, '_v182_execution_card', None) is not None
-                assert 'AI方案自动执行' in v172._widget_text(ui._v181_auto_exec_card)
-                assert 'TP / SL' in v172._widget_text(ui._v181_auto_exec_card)
-                # BTC quote panel is packed before the AI plan panel.
+                plan_text = v172._widget_text(ui._v180_plan_card)
+                execution_text = v172._widget_text(ui._v180_execution_card)
+                assert 'LIMIT ONLY' in plan_text
+                assert 'OKX模拟盘' in execution_text or 'OKX' in execution_text
+                assert 'Paper' not in plan_text and 'PAPER' not in plan_text
+                assert 'Paper' not in execution_text and 'PAPER' not in execution_text
+                assert 'Paper' not in ui._v181_auto_exec_note_var.get()
+                assert 'PAPER' not in ui._v180_mode_var.get()
+                assert 'Paper' not in ui._v180_position_badge_var.get()
                 packed = ui.book.pages[3].body.pack_slaves()
-                assert ui.quote in packed and ui._v180_plan_card in packed
-                assert packed.index(ui.quote) < packed.index(ui._v180_plan_card)
-                # Direction colors are explicitly available for V1.8.2 updates.
-                assert visual.GREEN and visual.RED
+                assert packed.index(ui.quote) < packed.index(ui._v181_auto_exec_card)
+                assert packed.index(ui._v181_auto_exec_card) < packed.index(ui._v180_plan_card)
+                assert packed.index(ui._v180_plan_card) < packed.index(ui._v180_execution_card)
                 ui.finished.set()
                 ui.thread.join(timeout=2)
                 ui.lock.close()
@@ -142,10 +132,9 @@ def smoke_test():
             root.destroy()
 
     Path(sys.argv[2]).write_text(
-        'PASS: KAYTRADE V1.8.2 Build1820 PAPER LIMIT ONLY; '
-        'Trading Overview order is BTC -> auto execution -> AI plan -> execution, '
-        'entry price follows LONG green / SHORT red, AI nested panels are rounded, '
-        'legacy position wording is hidden, and Paper LIMIT-only execution remains active.\n'
+        'PASS: KAYTRADE V1.8.3 Build1830 OKX DEMO LIMIT ONLY; '
+        'AI plans submit exchange limit orders immediately, no local Paper matching is active, '
+        'Trading Overview shows OKX Demo execution state, and live-account writes remain blocked.\n'
     )
 
 

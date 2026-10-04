@@ -1,4 +1,4 @@
-"""Codex MCP adapter for KAYTRADE V1.8.2 AI Only.
+"""Codex MCP adapter for KAYTRADE V1.8.3 OKX Demo Execution.
 
 The adapter never receives OKX credentials. It reads the short-lived local
 bridge descriptor created by the KAYTRADE app and talks only to 127.0.0.1.
@@ -15,13 +15,13 @@ from mcp.server.fastmcp import FastMCP
 BRIDGE_FILE = Path.home() / "Library" / "Application Support" / "OKXLocal" / "ai_bridge.json"
 
 mcp = FastMCP(
-    "kaytrade-v182-paper",
+    "kaytrade-v183-okx-demo",
     instructions=(
-        "KAYTRADE V1.8.2 is PAPER and LIMIT ONLY. Entry, partial close, take-profit and stop-loss exits must all use limit orders. "
+        "KAYTRADE V1.8.3 executes LIMIT orders directly on OKX Demo Trading. Entry, reductions, take-profit and stop-loss exits are LIMIT only. "
         "Inspect get_kaytrade_state before proposing a trade. "
-        "All trade-management tools mutate local paper state only; no tool sends OKX write requests. "
-        "KAYTRADE must be connected to OKX Demo for read-only market data and the user must enable the Paper AI channel. "
-        "Use publish_trade_plan for tier-1/tier-2 recommendations. If the user has enabled AI-plan auto execution in KAYTRADE, an executable entry plan is immediately converted into a local Paper order. "
+        "Trade-management tools submit writes to OKX Demo Trading only; live-account writes remain disabled. "
+        "KAYTRADE must be connected to OKX Demo and the user must enable the OKX Demo AI channel. "
+        "Use publish_trade_plan for tier-1/tier-2 recommendations. With auto execution enabled, each complete entry plan is immediately submitted as an OKX Demo LIMIT order; do not wait for market price to reach the entry. "
         "Always provide direction, size, leverage, limit entry price, take-profit and stop-loss. Protection exits are limit-only. Never propose a market order. "
         "Never ask for, read, or expose OKX API credentials."
     ),
@@ -32,9 +32,11 @@ def _descriptor():
     if not BRIDGE_FILE.exists():
         raise RuntimeError("KAYTRADE AI Bridge is not running")
     data = json.loads(BRIDGE_FILE.read_text())
-    if data.get("version") != "1.8.2":
-        raise RuntimeError("KAYTRADE bridge is not V1.8.2 Paper Execution")
-    if data.get("live_ai_writes") is not False:
+    if data.get("version") != "1.8.3":
+        raise RuntimeError("KAYTRADE bridge is not V1.8.3 OKX Demo Execution")
+    if data.get("mode") != "OKX_DEMO_EXECUTION":
+        raise RuntimeError("KAYTRADE bridge is not in OKX Demo execution mode")
+    if data.get("demo_exchange_writes") is not True or data.get("live_ai_writes") is not False:
         raise RuntimeError("Unexpected bridge safety state")
     return data
 
@@ -97,9 +99,9 @@ def publish_trade_plan(
 ) -> dict:
     """Publish an AI recommendation.
 
-    If the user-controlled auto-execution setting is ON, a complete open plan
-    is immediately converted into a local Paper LIMIT order. TP and SL are mandatory and use LIMIT exits.
-    No OKX write request is sent.
+    If auto execution is ON, a complete open plan is immediately submitted
+    to OKX Demo Trading as a LIMIT order. TP and SL are mandatory and use LIMIT exits.
+    The adapter never submits to a live OKX account.
     """
     if order_type.lower() != "limit":
         raise RuntimeError("KAYTRADE LIMIT ONLY: order_type must be limit")
@@ -152,7 +154,7 @@ def submit_trade_proposal(
     sl_exit_type: str = "limit",
     sl_limit_price: float | None = None,
 ) -> dict:
-    """Submit a structured AI trade request to KAYTRADE V1.8.2.
+    """Submit a structured AI trade request to KAYTRADE V1.8.3 OKX Demo.
 
     action: open or close.
     direction: long or short.
@@ -200,28 +202,28 @@ def submit_trade_proposal(
 
 
 @mcp.tool()
-def cancel_paper_entry(tier: int) -> dict:
-    """Cancel the unfilled remainder of a Tier 1/2 paper entry order."""
-    return _request("POST", "/v1/paper/cancel-entry", {"tier": tier})
+def cancel_demo_entry(tier: int) -> dict:
+    """Cancel the unfilled remainder of a Tier 1/2 OKX Demo entry order."""
+    return _request("POST", "/v1/demo/cancel-entry", {"tier": tier})
 
 
 @mcp.tool()
-def amend_paper_entry(
+def amend_demo_entry(
     tier: int,
     new_price: float | None = None,
     new_size: float | None = None,
 ) -> dict:
-    """Amend a live paper limit entry. Its original 60-minute deadline is preserved."""
+    """Amend a live OKX Demo limit entry."""
     payload = {"tier": tier}
     if new_price is not None:
         payload["new_price"] = new_price
     if new_size is not None:
         payload["new_size"] = new_size
-    return _request("POST", "/v1/paper/amend-entry", payload)
+    return _request("POST", "/v1/demo/amend-entry", payload)
 
 
 @mcp.tool()
-def amend_paper_protection(
+def amend_demo_protection(
     tier: int,
     take_profit: float | None = None,
     stop_loss: float | None = None,
@@ -246,18 +248,18 @@ def amend_paper_protection(
     }.items():
         if value is not None:
             payload[key] = value
-    return _request("POST", "/v1/paper/amend-protection", payload)
+    return _request("POST", "/v1/demo/amend-protection", payload)
 
 
 @mcp.tool()
-def close_paper_position(
+def close_demo_position(
     size: float,
     order_type: str = "limit",
     limit_price: float | None = None,
     tier: int | None = None,
     reason: str = "AI指定减仓",
 ) -> dict:
-    """Reduce a specified paper position size with a LIMIT close order."""
+    """Reduce a specified OKX Demo position size with a LIMIT close order."""
     if order_type.lower() != "limit":
         raise RuntimeError("KAYTRADE LIMIT ONLY: close order_type must be limit")
     if limit_price is None:
@@ -270,7 +272,7 @@ def close_paper_position(
     }
     if tier is not None:
         payload["tier"] = tier
-    return _request("POST", "/v1/paper/close", payload)
+    return _request("POST", "/v1/demo/close", payload)
 
 
 if __name__ == "__main__":
