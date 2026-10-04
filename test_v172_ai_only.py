@@ -99,7 +99,7 @@ class V172AIOnlyTests(unittest.TestCase):
 
     def test_identity_and_strategy_disabled(self):
         self.assertEqual(v172.VERSION, "1.7.2")
-        self.assertEqual(v172.BUILD, "1721")
+        self.assertEqual(v172.BUILD, "1722")
         self.assertTrue(v172.AI_ONLY)
         self.assertFalse(v172.model.STRATEGY_ENABLED)
         self.assertIs(v172.app.Engine, v172.AIOnlyEngine)
@@ -130,7 +130,7 @@ class V172AIOnlyTests(unittest.TestCase):
         self.assertIn("_start_ai_enable(self)", source)
         self.assertNotIn('self.submit("arm"', source)
         runner = inspect.getsource(v172._run_ai_enable)
-        self.assertIn("isinstance(e, AIOnlyEngine)", runner)
+        self.assertIn("_ensure_ai_only_engine(owner)", runner)
 
     def test_ai_open_is_only_new_order_path(self):
         e, x = self.make_engine()
