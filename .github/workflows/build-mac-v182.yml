@@ -1,0 +1,113 @@
+name: Build KAYTRADE Intel Mac 1.8.2 Paper Build1820
+
+on:
+  push:
+    branches: [feature/v182-ui-finalize]
+  pull_request:
+    branches: [release/v1.8.2-paper]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install runtime test dependencies
+        run: python -m pip install 'websocket-client==1.8.0' 'certifi==2025.8.3'
+      - name: Compile V1.8.2
+        run: |
+          python -m py_compile \
+            desktop.py exchange.py engine.py app.py history.py visual.py \
+            v172_ai_only_patch.py v180_ai_only_patch.py v181_paper_patch.py v182_ui_patch.py \
+            kaytrade_mcp.py test_v181_paper.py test_v182_ui.py
+      - name: V1.7.1 maintenance regression
+        run: python -m unittest -v test_v171_update
+      - name: V1.8.1 execution regression
+        run: python -m unittest -v test_v181_paper
+      - name: V1.8.2 UI contract
+        run: python -m unittest -v test_v182_ui
+      - name: Verify V1.8.2 runtime identity
+        run: |
+          python - <<'PY'
+          import inspect
+          import app
+          import v165_model as model
+          import v181_paper_patch as v181
+          import v182_ui_patch as v182
+
+          assert v182.VERSION == '1.8.2'
+          assert v182.BUILD == '1820'
+          assert v182.PAPER_ONLY is True
+          assert v182.LIMIT_ONLY is True
+          assert model.VERSION == '1.8.2'
+          assert model.BUILD == '1820'
+          assert model.STRATEGY_ENABLED is False
+          assert app.Engine is v181.PaperEngineV181
+          assert getattr(model, '_kaytrade_v182_ui_applied', False)
+          source = inspect.getsource(v181.PaperEngineV181)
+          assert '.post(' not in source
+          assert '"supported_entry_order_types": ["limit"]' in source
+          assert '"supported_close_order_types": ["limit"]' in source
+          assert '"supported_protection_exit_order_types": ["limit"]' in source
+          ui_source = inspect.getsource(v182._install_v182_overview)
+          assert ui_source.index('quote.pack') < ui_source.index('_install_auto_card')
+          assert ui_source.index('_install_auto_card') < ui_source.index('_install_plan_card')
+          assert ui_source.index('_install_plan_card') < ui_source.index('_install_execution_card')
+          print('PASS V1.8.2 Build1820 UI + LIMIT-only Paper runtime')
+          PY
+
+  build:
+    needs: unit
+    runs-on: macos-15-intel
+    timeout-minutes: 70
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - name: Install build dependencies
+        run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0' 'websocket-client==1.8.0'
+      - name: V1.8.2 UI contract
+        run: python -m unittest -v test_v182_ui
+      - run: python build_icon.py
+      - run: python -m PyInstaller --noconfirm OKXLocal.spec
+      - name: Verify Intel bundle and metadata
+        run: |
+          python verify_bundle.py
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1.8.2'
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1820'
+          codesign --verify --deep --strict dist/KAYTRADE.app
+      - name: Packaged V1.8.2 smoke test
+        run: |
+          TMPDIR_CHECK="$(mktemp -d)"
+          dist/KAYTRADE.app/Contents/MacOS/KAYTRADE --smoke-test "$TMPDIR_CHECK/smoke.txt"
+          cat "$TMPDIR_CHECK/smoke.txt"
+          grep 'V1.8.2 Build1820 PAPER LIMIT ONLY' "$TMPDIR_CHECK/smoke.txt"
+          grep 'BTC -> auto execution -> AI plan -> execution' "$TMPDIR_CHECK/smoke.txt"
+          grep 'entry price follows LONG green / SHORT red' "$TMPDIR_CHECK/smoke.txt"
+          grep 'AI nested panels are rounded' "$TMPDIR_CHECK/smoke.txt"
+      - name: Create installer
+        run: |
+          mkdir -p installer
+          ditto dist/KAYTRADE.app installer/KAYTRADE.app
+          cp RELEASE-1.8.2-PAPER.md installer/RELEASE-1.8.2-PAPER.md
+          printf 'KAYTRADE V1.8.2 PAPER LIMIT ONLY Build1820\nFinalized Trading Overview · rounded AI cards · aligned entry · LONG green / SHORT red.\n' > installer/RELEASE-1.8.2-PAPER.txt
+          hdiutil create -volname 'KAYTRADE 1.8.2 PAPER' -srcfolder installer -ov -format UDZO KAYTRADE-1.8.2-PAPER-Intel-build1820.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-1.8.2-PAPER-Intel-build1820
+          path: |
+            KAYTRADE-1.8.2-PAPER-Intel-build1820.dmg
+            installer/RELEASE-1.8.2-PAPER.md
+            installer/RELEASE-1.8.2-PAPER.txt
+          if-no-files-found: error

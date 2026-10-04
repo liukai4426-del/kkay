@@ -62,6 +62,65 @@ class Card(tk.Canvas):
 
 
 
+class RoundedPanel(tk.Canvas):
+    """Reusable rounded content surface for nested dashboard panels."""
+    def __init__(
+        self,
+        parent,
+        height=90,
+        fill=PANEL_ALT,
+        radius=14,
+        pad_x=14,
+        pad_y=10,
+        **kwargs,
+    ):
+        try:
+            parent_bg=parent.cget('bg')
+        except Exception:
+            parent_bg=BG
+        super().__init__(
+            parent,
+            height=height,
+            bg=parent_bg,
+            highlightthickness=0,
+            borderwidth=0,
+            **kwargs,
+        )
+        self.fill=fill
+        self.radius=radius
+        self.pad_x=pad_x
+        self.pad_y=pad_y
+        self.body=tk.Frame(self,bg=fill,bd=0,highlightthickness=0)
+        self.window=self.create_window(pad_x,pad_y,anchor='nw',window=self.body)
+        self.bind('<Configure>',self.resize)
+
+    def _round_rect(self,w,h):
+        r=min(self.radius,max(6,h//2-1))
+        points=[
+            r,1,w-r,1,w-1,1,w-1,r,w-1,h-r,w-1,h-1,w-r,h-1,
+            r,h-1,1,h-1,1,h-r,1,r,1,1,
+        ]
+        self.create_polygon(
+            points,
+            smooth=True,
+            splinesteps=24,
+            fill=self.fill,
+            outline='',
+            tags='surface',
+        )
+
+    def resize(self,event):
+        w=max(2,event.width); h=max(2,event.height)
+        self.delete('surface')
+        self._round_rect(w,h)
+        self.tag_lower('surface')
+        self.itemconfigure(
+            self.window,
+            width=max(1,w-self.pad_x*2),
+            height=max(1,h-self.pad_y*2),
+        )
+
+
 class ScrollablePage(tk.Frame):
     """Whole-page vertical scrolling for compact Mac windows; nested tables keep their own wheel events."""
     def __init__(self,parent,**kwargs):
