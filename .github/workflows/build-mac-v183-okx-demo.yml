@@ -69,10 +69,9 @@ jobs:
           assert '"supported_close_order_types": ["limit"]' in src
 
           transport = inspect.getsource(exchange._assert_limit_only_write)
-          assert 'tpOrdPx' in transport
-          assert 'slOrdPx' in transport
-          assert 'newTpOrdPx' in transport
-          assert 'newSlOrdPx' in transport
+          assert exchange._LIMIT_ONLY_SENTINEL_FIELDS == {
+              'tpOrdPx', 'slOrdPx', 'newTpOrdPx', 'newSlOrdPx'
+          }
           assert 'ordType' in transport
 
           ui = inspect.getsource(v184._install_refined_plan)
