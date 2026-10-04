@@ -1,6 +1,14 @@
-# KAYTRADE V1.7.2 AI ONLY · Build1720
+# KAYTRADE V1.7.2 AI ONLY · Build1721
 
 V1.7.2 changes the execution model completely.
+
+## Build1721 hotfix
+
+Build1721 fixes the Build1720 activation error `'dict' object has no attribute 'stop_atr'`.
+The AI-channel button now uses a dedicated background activation path and never enters the
+legacy `arm(Settings)` queue. The known Build1720 stop_atr fault lock is migrated safely
+without touching positions or orders. The overview also hides retired score/indicator,
+ATR-plan and PEE4 strategy surfaces.
 
 ## Runtime model
 
@@ -96,6 +104,6 @@ is flat. It will never create another legacy-strategy order.
 ## Package identity
 
 - Version: 1.7.2
-- Build: 1720
+- Build: 1721
 - Product mode: AI ONLY
 - Intel macOS target: macOS 14+
