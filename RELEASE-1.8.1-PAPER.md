@@ -31,7 +31,7 @@ Trading Overview now includes a user-controlled **AI方案自动执行** switch.
 
 When enabled:
 - every complete AI **open** recommendation is immediately converted into a local Paper order;
-- market recommendations fill at the current simulated market price;
+- every executable recommendation is a LIMIT order; non-limit recommendations are rejected;
 - limit recommendations are placed at `limit_price`, or `suggested_entry` when the limit price is omitted;
 - `take_profit` and `stop_loss` are both mandatory;
 - direction, size, leverage and order type are also required;
