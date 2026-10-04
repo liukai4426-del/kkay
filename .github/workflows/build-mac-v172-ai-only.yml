@@ -3,6 +3,8 @@ name: Build KAYTRADE Intel Mac 1.7.2 AI Only Build1720
 on:
   push:
     branches: [feature/v172-ai-only]
+  pull_request:
+    branches: [release/v1.7.1]
   workflow_dispatch:
 
 permissions:
