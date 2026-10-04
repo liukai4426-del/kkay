@@ -1,4 +1,5 @@
 """Single-position, fail-closed automatic engine. Demo by default in GUI."""
+import copy
 import hashlib
 import json
 import math
@@ -147,8 +148,26 @@ class Store:
                 self.data['halt']=clean
                 self.save()
 
+    def _snapshot_unlocked(self):
+        last_error=None
+        for _ in range(50):
+            try:
+                return copy.deepcopy(self.data)
+            except RuntimeError as exc:
+                message=str(exc)
+                if 'dictionary changed size during iteration' not in message and 'dictionary keys changed during iteration' not in message:
+                    raise
+                last_error=exc
+                time.sleep(0.001)
+        raise last_error
+
+    def snapshot(self):
+        with self._write_lock:
+            return self._snapshot_unlocked()
+
     def save(self):
         with self._write_lock:
+            snapshot=self._snapshot_unlocked()
             self.path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
             temp=self.path.with_name(f'.{self.path.name}.{os.getpid()}.{threading.get_ident()}.{uuid.uuid4().hex}.tmp')
             fd=None
@@ -156,7 +175,7 @@ class Store:
                 fd=os.open(temp,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
                 with os.fdopen(fd,'w') as f:
                     fd=None
-                    json.dump(self.data,f,ensure_ascii=False,indent=2)
+                    json.dump(snapshot,f,ensure_ascii=False,indent=2)
                     f.flush(); os.fsync(f.fileno())
                 os.replace(temp,self.path)
                 dir_flags=os.O_RDONLY
