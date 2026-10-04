@@ -196,9 +196,9 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
         if missing:
             raise legacy_engine.Halt("自动执行方案缺少/无效字段：" + ", ".join(missing))
 
-        proposal_id = str(
-            plan.get("proposal_id")
-            or f"autoplan-{item.get('plan_id') or uuid.uuid4().hex}"
+        explicit_proposal_id = str(plan.get("proposal_id") or "").strip()
+        proposal_id = explicit_proposal_id or (
+            f"autoplan-{item.get('plan_id') or 'plan'}-{uuid.uuid4().hex[:10]}"
         )
         proposal = {
             "proposal_id": proposal_id,
