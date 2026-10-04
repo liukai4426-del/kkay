@@ -57,7 +57,7 @@ class V191LiveExecutionTests(unittest.TestCase):
 
     def test_version_and_modes(self):
         self.assertEqual(v191.VERSION, "1.9.1")
-        self.assertEqual(v191.BUILD, "1910")
+        self.assertEqual(v191.BUILD, "1911")
         self.assertEqual(v191.ENV_META["demo"]["mode"], "OKX_DEMO_EXECUTION")
         self.assertEqual(v191.ENV_META["live"]["mode"], "OKX_LIVE_EXECUTION")
         self.assertFalse(v191.LIMIT_ONLY)
