@@ -4,7 +4,7 @@ on:
   push:
     branches: [feature/v181-auto-plan-paper]
   pull_request:
-    branches: [release/v1.8.0-ai-only]
+    branches: [release/v1.8.1-paper]
   workflow_dispatch:
 
 permissions:
