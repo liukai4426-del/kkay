@@ -1,7 +1,10 @@
+import json
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
+from engine import Store
 from test_v183_okx_demo import DemoExchange
 import v190_dual_env_patch as v190
 
@@ -29,6 +32,35 @@ class V190DualEnvironmentTests(unittest.TestCase):
             "reason": "v190 unit test",
             "operation_advice": "program submits exchange LIMIT order",
         }
+
+    def test_store_save_is_atomic_under_eight_concurrent_writers(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "concurrent-state.json"
+            store = Store(path)
+            workers = 8
+            rounds = 50
+            barrier = threading.Barrier(workers)
+            errors = []
+
+            def writer():
+                for _ in range(rounds):
+                    barrier.wait()
+                    try:
+                        store.save()
+                    except Exception as exc:
+                        errors.append(exc)
+
+            threads = [threading.Thread(target=writer) for _ in range(workers)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            self.assertEqual(errors, [])
+            self.assertTrue(path.exists())
+            self.assertIsInstance(json.loads(path.read_text()), dict)
+            leftovers = [item for item in Path(folder).iterdir() if item.name.endswith(".tmp")]
+            self.assertEqual(leftovers, [])
 
     def test_demo_and_live_use_different_store_files(self):
         with tempfile.TemporaryDirectory() as folder:
