@@ -117,6 +117,9 @@ def smoke_test():
                 assert 'Paper' not in ui._v183_auto_exec_note_var.get()
                 assert 'PAPER' not in ui._v180_mode_var.get()
                 assert 'Paper' not in ui._v180_position_badge_var.get()
+                assert 'v181_paper_patch' not in sys.modules
+                assert 'v182_ui_patch' not in sys.modules
+                assert ui._v183_paper_runtime_present is False
                 packed = ui.book.pages[3].body.pack_slaves()
                 assert packed.index(ui.quote) < packed.index(ui._v183_auto_exec_card)
                 assert packed.index(ui._v183_auto_exec_card) < packed.index(ui._v180_plan_card)
