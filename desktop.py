@@ -128,7 +128,7 @@ def smoke_test():
                 assert getattr(ui, '_v182_plan_card', None) is not None
                 assert getattr(ui, '_v182_execution_card', None) is not None
                 assert 'AI方案自动执行' in v172._widget_text(ui._v181_auto_exec_card)
-                assert 'TP + SL' in v172._widget_text(ui._v181_auto_exec_card)
+                assert 'TP / SL' in v172._widget_text(ui._v181_auto_exec_card)
                 # BTC quote panel is packed before the AI plan panel.
                 packed = ui.book.pages[3].body.pack_slaves()
                 assert ui.quote in packed and ui._v180_plan_card in packed
