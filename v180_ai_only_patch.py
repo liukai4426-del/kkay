@@ -614,7 +614,7 @@ def _install_v180_dashboard(owner):
     visual.label(exec_title, text="订单 / 持仓执行", size=19, bold=True, color=visual.TEXT, bg=visual.PANEL).pack(anchor="w")
     visual.label(
         exec_title,
-        text="委托状态与持仓保护统一展示 · 市价 / 限价订单均实时同步",
+        text="委托状态与持仓保护统一展示 · LIMIT ONLY",
         size=9,
         color=visual.MUTED,
         bg=visual.PANEL,
@@ -728,8 +728,8 @@ def _refresh_v180_dashboard(owner):
         for item in history[-5:][::-1]:
             stamp = time.strftime("%H:%M:%S", time.localtime(float(item.get("time") or time.time())))
             direction = str(item.get("direction") or "WAIT").upper()
-            kind = "LMT" if str(item.get("order_type")).lower() == "limit" else "MKT"
-            entry = item.get("limit_price") if kind == "LMT" else item.get("suggested_entry")
+            kind = "LMT" if str(item.get("order_type")).lower() == "limit" else "INVALID"
+            entry = item.get("limit_price") or item.get("suggested_entry")
             rows.append(
                 f"{stamp}  T{item.get('tier') or 1}  {direction:<5} {kind}  "
                 f"{_fmt_px(entry):>10}  {str(item.get('status') or '')[:12]}"
@@ -777,7 +777,7 @@ def _app_init_v180(self, *args, **kwargs):
     _PREVIOUS_APP_INIT(self, *args, **kwargs)
     self.root.title("KAYTRADE 1.8.0 · AI ONLY · Build 1801")
     try:
-        self.signal.set("V1.8 AI ONLY｜支持市价 / 限价委托｜等待 Codex / AI 交易方案")
+        self.signal.set("V1.8 AI ONLY｜LIMIT ONLY｜等待 Codex / AI 交易方案")
     except Exception:
         pass
     label = getattr(self, "_v170_version_label", None)
@@ -806,8 +806,8 @@ def _app_arm_v180(self):
     typed = app.simpledialog.askstring(
         "启用AI交易通道",
         "KAYTRADE V1.8 AI ONLY\n\n"
-        "AI开仓支持：市价委托 / 限价委托。\n"
-        "限价委托可持续挂单等待成交，不使用市价单15秒超时规则。\n"
+        "AI开仓仅支持：限价委托。\n"
+        "所有入场与保护退出均禁止市价委托。\n"
         f"硬上限：杠杆≤{AI_MAX_LEVERAGE}x；名义仓位≤{AI_MAX_NOTIONAL_USDT} USDT；"
         f"估算止损≤{AI_MAX_ESTIMATED_STOP_LOSS_USDT} USDT。\n"
         "本地BOLL / EMA / RSI / 评分 / Gate不参与开仓。\n\n"
