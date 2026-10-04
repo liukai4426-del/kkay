@@ -37,11 +37,13 @@ import v168_build1681_patch as b1681
 import v170_update_patch as v170
 import v170_build1701_patch as v1701
 import v171_update_patch as v171
+import v165_keepawake_patch as keepawake
+import visual
 from core import INSTRUMENT
 from exchange import APIError
 
 VERSION = "1.7.2"
-BUILD = "1720"
+BUILD = "1721"
 AI_ONLY = True
 
 AI_BRIDGE_HOST = "127.0.0.1"
@@ -126,8 +128,22 @@ class AIOnlyEngine(legacy_engine.Engine):
             raise legacy_engine.Halt("API必须有交易权限且不得有提币权限")
         return account
 
+    def _clear_known_v172_activation_lock(self):
+        """Migrate only the known Build1720 dict/stop_atr startup bug lock."""
+        if not self.store:
+            return
+        reason = str(self.store.data.get("halt") or "")
+        if "stop_atr" in reason and "dict" in reason:
+            self.store.data["halt"] = ""
+            self.store.save()
+            self.emit(
+                "log",
+                "V1.7.2 Build1721：已清理Build1720启用AI通道时产生的 stop_atr 兼容故障锁；未改变任何仓位/订单。",
+            )
+
     def arm(self, _settings=None):
         with self._ai_lock:
+            self._clear_known_v172_activation_lock()
             self._preflight_account()
             if not self.store.data.get("active") and (self.x.positions() or self.x.orders() or self.x.algos()):
                 raise legacy_engine.Halt("BTC存在非KAYTRADE管理的仓位或挂单；AI执行通道拒绝启动")
@@ -137,7 +153,7 @@ class AIOnlyEngine(legacy_engine.Engine):
             self.poll_at = time.monotonic()
             self.emit(
                 "log",
-                "AI执行通道已启用：无BOLL/EMA/RSI/评分/Gate；新仓唯一入口=submit_ai_trade；OKX模拟盘自动执行",
+                "AI执行通道已启用：无BOLL/EMA/RSI/MACD/评分/Gate/PEE4；新仓唯一入口=submit_ai_trade；OKX模拟盘自动执行",
             )
 
     def stop(self):
@@ -763,12 +779,29 @@ def _app_emit_v172(self, kind, data):
     return _PREVIOUS_APP_EMIT(self, kind, _rewrite_ui_text(data))
 
 
+def _widget_text(widget):
+    parts = []
+    try:
+        value = widget.cget("text")
+        if value:
+            parts.append(str(value))
+    except Exception:
+        pass
+    value = getattr(widget, "text", None)
+    if value:
+        parts.append(str(value))
+    try:
+        for child in widget.winfo_children():
+            parts.append(_widget_text(child))
+    except Exception:
+        pass
+    return " ".join(parts)
+
+
 def _hide_legacy_strategy_tabs(owner):
     book = getattr(owner, "book", None)
     if book is not None:
-        # visual.Tabs is a custom flat navigation component, not ttk.Notebook.
-        # App creates pages in this stable order:
-        # 0 connection, 1 risk, 2 execution, 3 overview, 4 history.
+        # visual.Tabs order: connection, risk, execution, overview, history.
         for index in (1, 2):
             try:
                 book.buttons[index].pack_forget()
@@ -783,16 +816,135 @@ def _hide_legacy_strategy_tabs(owner):
                 book.select(0)
         except Exception:
             pass
+
+
+def _install_ai_only_dashboard(owner):
+    """Remove V1.7.1 strategy surfaces and add an execution-only AI status card."""
+    book = getattr(owner, "book", None)
     try:
-        detail = owner.score_table.master.master
-        detail.pack_forget()
+        dash = book.pages[3].body
     except Exception:
-        pass
+        return
+
+    # Hide the old LONG/SHORT score cards, ATR plan, score/indicator tabs and PEE4.
+    for child in list(dash.winfo_children()):
+        text = _widget_text(child)
+        if any(token in text for token in (
+            "做多 / LONG",
+            "交易计划",
+            "评分明细",
+            "规则策略 · 未调用GPT/Gemini",
+        )):
+            try:
+                child.pack_forget()
+            except Exception:
+                pass
+
+    pee4 = getattr(owner, "_v170_pee4_card", None)
+    if pee4 is not None:
+        try:
+            pee4.pack_forget()
+        except Exception:
+            pass
+
+    if getattr(owner, "_v172_ai_card", None) is not None:
+        return
+
+    card = visual.Card(dash, height=220)
+    actions = getattr(getattr(owner, "trade_button", None), "master", None)
+    kwargs = dict(fill="x", pady=(0, 12))
+    if actions is not None:
+        kwargs["before"] = actions
+    card.pack(**kwargs)
+
+    visual.label(
+        card.body,
+        text="AI ONLY 执行状态",
+        size=18,
+        bold=True,
+        color=visual.TEXT,
+        bg=visual.PANEL,
+    ).pack(anchor="w")
+    visual.label(
+        card.body,
+        text="V1.7.2 Build1721 · 本地技术指标策略已断开，新仓只接受 Codex / AI 结构化交易请求",
+        size=10,
+        color=visual.MUTED,
+        bg=visual.PANEL,
+    ).pack(anchor="w", pady=(3, 12))
+
+    owner._v172_ai_channel_var = app.tk.StringVar(value="AI交易通道：未启用")
+    owner._v172_ai_bridge_var = app.tk.StringVar(value="AI Bridge：本机 127.0.0.1 · READY")
+    owner._v172_ai_env_var = app.tk.StringVar(value="执行环境：仅 OKX 模拟盘")
+    owner._v172_ai_limits_var = app.tk.StringVar(
+        value=f"硬风控：≤{AI_MAX_LEVERAGE}× · 名义仓位≤{AI_MAX_NOTIONAL_USDT} USDT · 估算止损≤{AI_MAX_ESTIMATED_STOP_LOSS_USDT} USDT"
+    )
+
+    for var, color in (
+        (owner._v172_ai_channel_var, visual.GREEN),
+        (owner._v172_ai_bridge_var, visual.TEXT),
+        (owner._v172_ai_env_var, visual.TEXT),
+        (owner._v172_ai_limits_var, visual.MUTED),
+    ):
+        visual.label(card.body, variable=var, size=11, color=color, bg=visual.PANEL).pack(
+            anchor="w", pady=2
+        )
+    owner._v172_ai_card = card
+
+
+def _set_ai_channel_ui(owner, enabled):
+    var = getattr(owner, "_v172_ai_channel_var", None)
+    if var is not None:
+        var.set("AI交易通道：已启用 · 等待AI请求" if enabled else "AI交易通道：未启用")
+
+
+def _run_ai_enable(owner):
+    """Dedicated AI-only enable path; never enters legacy worker kind='arm'."""
+    try:
+        e = getattr(owner, "engine", None)
+        if not isinstance(e, AIOnlyEngine):
+            raise legacy_engine.Halt(
+                "AI Only Runtime不一致：拒绝进入旧版策略arm链；请重新启动KAYTRADE 1.7.2"
+            )
+        e.arm(None)
+        try:
+            keepawake._start_keepawake(owner)
+        except Exception:
+            pass
+        _set_ai_channel_ui(owner, True)
+        owner.emit("status", "AI Only运行 / OKX模拟盘")
+        owner.emit(
+            "log",
+            "V1.7.2 Build1721 AI交易通道已启用：启动流程未调用旧Settings/stop_atr/技术指标策略。",
+        )
+    except Exception as exc:
+        e = getattr(owner, "engine", None)
+        if e is not None:
+            e.enabled = False
+        _set_ai_channel_ui(owner, False)
+        owner.emit("alarm", "启用AI交易通道失败：" + str(exc))
+    finally:
+        owner.emit("done", None)
+
+
+def _start_ai_enable(owner):
+    if getattr(owner, "busy", False):
+        app.messagebox.showinfo("处理中", "请等待当前操作完成")
+        return
+    owner.busy = True
+    thread = threading.Thread(
+        target=_run_ai_enable,
+        args=(owner,),
+        name="kaytrade-ai-enable",
+        daemon=True,
+    )
+    owner._v172_ai_enable_thread = thread
+    thread.start()
 
 
 def _app_init_v172(self, *args, **kwargs):
     _PREVIOUS_APP_INIT(self, *args, **kwargs)
-    self.root.title("KAYTRADE 1.7.2 · AI ONLY · Build 1720")
+    self.root.title("KAYTRADE 1.7.2 · AI ONLY · Build 1721")
     try:
         self.signal.set("V1.7.2 AI ONLY｜无本地交易策略｜等待 Codex / AI 提交结构化交易请求")
     except Exception:
@@ -804,6 +956,7 @@ def _app_init_v172(self, *args, **kwargs):
         except Exception:
             pass
     _hide_legacy_strategy_tabs(self)
+    _install_ai_only_dashboard(self)
     self._v172_ai_only_ready = True
     self.ai_bridge = AIBridgeServer(self)
     self.ai_bridge.start()
@@ -838,7 +991,7 @@ def _app_arm_v172(self):
         parent=self.root,
     )
     if typed and typed.strip().upper() == "AI":
-        self.submit("arm", {"mode": "AI_ONLY"})
+        _start_ai_enable(self)
 
 
 def _update_trade_button_v172(self):
@@ -846,6 +999,7 @@ def _update_trade_button_v172(self):
     if not button:
         return
     running = bool(self.engine and self.engine.enabled)
+    _set_ai_channel_ui(self, running)
     button.configure(
         text="■  停止AI交易通道" if running else "▶  启用AI交易通道",
         variant="danger" if running else "accent",
@@ -868,7 +1022,7 @@ def apply():
         module.VERSION = VERSION
         module.BUILD = BUILD
     ui166.BUILD = BUILD
-    ui166.WINDOW_TITLE = "KAYTRADE 1.7.2 · AI ONLY · Build 1720"
+    ui166.WINDOW_TITLE = "KAYTRADE 1.7.2 · AI ONLY · Build 1721"
 
     model.STRATEGY_ENABLED = False
     model.AI_ONLY = True
