@@ -127,6 +127,23 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
                 "1": paper["tiers"].get("1"),
                 "2": paper["tiers"].get("2"),
             }
+
+        # Build1813 migration: old Paper states may have stored market-style
+        # TP/SL exits. Keep the historical entry record, but normalize every
+        # still-managed tier to LIMIT protection so an old cache can never
+        # reactivate a market exit.
+        for item in paper["tiers"].values():
+            if not isinstance(item, dict):
+                continue
+            if item.get("status") not in ("live", "filled", "partially_filled", "exit_live"):
+                continue
+            item["tp_exit_type"] = "limit"
+            item["sl_exit_type"] = "limit"
+            if item.get("tp_limit_price") in (None, "") and item.get("take_profit") not in (None, ""):
+                item["tp_limit_price"] = item.get("take_profit")
+            if item.get("sl_limit_price") in (None, "") and item.get("stop_loss") not in (None, ""):
+                item["sl_limit_price"] = item.get("stop_loss")
+
         self.store.save()
         return paper
 
