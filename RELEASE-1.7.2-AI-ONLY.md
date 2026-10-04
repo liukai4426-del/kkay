@@ -1,14 +1,24 @@
-# KAYTRADE V1.7.2 AI ONLY · Build1721
+# KAYTRADE V1.7.2 AI ONLY · Build1723
 
 V1.7.2 changes the execution model completely.
 
-## Build1721 hotfix
+## Build1723 hotfix
 
-Build1721 fixes the Build1720 activation error `'dict' object has no attribute 'stop_atr'`.
+Build1723 fixes the Build1720 activation error `'dict' object has no attribute 'stop_atr'`.
 The AI-channel button now uses a dedicated background activation path and never enters the
 legacy `arm(Settings)` queue. The known Build1720 stop_atr fault lock is migrated safely
 without touching positions or orders. The overview also hides retired score/indicator,
 ATR-plan and PEE4 strategy surfaces.
+
+## Build1723 dashboard + risk-cap update
+
+- AI recommendation board is shown above the live price card.
+- The board keeps recent AI recommendations, tier, direction, suggested entry, TP/SL, reason, proposal id, execution status, and operation advice.
+- The order/position area now has separate First Tier / Second Tier panels.
+- When a managed position exists, the UI shows order state, actual/reference entry price, take-profit and stop-loss.
+- The AI bridge now accepts `publish_trade_plan` updates so Codex can publish tier-1/tier-2 recommendations without placing an order.
+- Hard execution caps are now: perpetual leverage <=20x, notional <=3500 USDT, estimated maximum stop-loss <=100 USDT.
+- Demo-only autonomous AI execution, duplicate-proposal protection, mandatory TP/SL, and account/position consistency checks remain enabled.
 
 ## Runtime model
 
@@ -67,15 +77,15 @@ V1.7.2 supports:
 - long/short account mode;
 - market entry;
 - mandatory TP and SL on every open request;
-- AI-requested leverage from 1x to 5x;
+- AI-requested leverage from 1x to 20x;
 - one KAYTRADE-managed position at a time;
 - idempotent \`proposal_id\`.
 
 Default hard execution limits:
 
-- maximum leverage: 5x;
-- maximum notional: 100 USDT;
-- maximum estimated stop-loss loss: 5 USDT;
+- maximum leverage: 20x;
+- maximum notional: 3500 USDT;
+- maximum estimated stop-loss loss: 100 USDT;
 - minimum interval between distinct AI requests: 5 seconds.
 
 The limits can be lowered/adjusted with local environment variables without
@@ -104,6 +114,6 @@ is flat. It will never create another legacy-strategy order.
 ## Package identity
 
 - Version: 1.7.2
-- Build: 1721
+- Build: 1723
 - Product mode: AI ONLY
 - Intel macOS target: macOS 14+
