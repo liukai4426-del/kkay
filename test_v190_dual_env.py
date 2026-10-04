@@ -1,4 +1,5 @@
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -95,6 +96,38 @@ class V190DualEnvironmentTests(unittest.TestCase):
         self.assertFalse(state["live_ai_writes"])
         self.assertTrue(state["manual_execution_required"])
         self.assertTrue(state["review_state"]["channel_enabled"])
+
+    def test_live_state_poll_and_cycle_can_persist_concurrently(self):
+        e, _raw, _ = self.make_live()
+        e.set_review_enabled(True)
+        errors=[]
+        barrier=threading.Barrier(2)
+
+        def poll_state():
+            try:
+                barrier.wait()
+                for _ in range(40):
+                    e.ai_state()
+            except Exception as exc:
+                errors.append(exc)
+
+        def run_cycle():
+            try:
+                barrier.wait()
+                for _ in range(40):
+                    e.cycle()
+            except Exception as exc:
+                errors.append(exc)
+
+        threads=[threading.Thread(target=poll_state),threading.Thread(target=run_cycle)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(errors,[])
+        self.assertTrue(e.store.path.exists())
+        self.assertEqual(list(e.store.path.parent.glob('.*.tmp')),[])
 
     def test_live_submit_trade_is_blocked(self):
         e, raw, _ = self.make_live()
