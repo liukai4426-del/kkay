@@ -39,7 +39,7 @@ import v180_ai_only_patch as v180
 import visual
 
 VERSION = "1.8.1"
-BUILD = "1811"
+BUILD = "1812"
 AI_ONLY = True
 PAPER_ONLY = True
 
@@ -232,6 +232,90 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
             proposal["limit_price"] = limit_price
         return proposal
 
+    def _pending_matches_proposal(self, current, proposal):
+        if not isinstance(current, dict) or current.get("status") != "live":
+            return False
+        if float(current.get("filled_size") or 0) > 0:
+            return False
+
+        def same_number(a, b):
+            try:
+                return abs(float(a) - float(b)) <= 1e-9
+            except Exception:
+                return a == b
+
+        if str(current.get("direction") or "") != str(proposal.get("direction") or ""):
+            return False
+        if str(current.get("order_type") or "") != str(proposal.get("order_type") or ""):
+            return False
+        if not same_number(current.get("size"), proposal.get("size")):
+            return False
+        if not same_number(current.get("leverage"), proposal.get("leverage")):
+            return False
+        if not same_number(current.get("take_profit"), proposal.get("take_profit")):
+            return False
+        if not same_number(current.get("stop_loss"), proposal.get("stop_loss")):
+            return False
+        if str(proposal.get("order_type")) == "limit" and not same_number(
+            current.get("limit_price"), proposal.get("limit_price")
+        ):
+            return False
+        if str(current.get("tp_exit_type") or "market") != str(proposal.get("tp_exit_type") or "market"):
+            return False
+        if str(current.get("sl_exit_type") or "market") != str(proposal.get("sl_exit_type") or "market"):
+            return False
+        if str(proposal.get("tp_exit_type") or "market") == "limit" and not same_number(
+            current.get("tp_limit_price"), proposal.get("tp_limit_price")
+        ):
+            return False
+        if str(proposal.get("sl_exit_type") or "market") == "limit" and not same_number(
+            current.get("sl_limit_price"), proposal.get("sl_limit_price")
+        ):
+            return False
+        return True
+
+    def _prepare_auto_plan_slot(self, proposal):
+        """Keep an identical pending order or replace a changed, still-unfilled plan."""
+        key, current = self._tier(proposal.get("tier") or 1)
+        if not isinstance(current, dict) or not _active_status(current):
+            return {"action": "empty", "tier": int(key)}
+
+        # Never overwrite a filled/partially-filled position with a new entry recommendation.
+        if (
+            current.get("status") != "live"
+            or float(current.get("filled_size") or 0) > 0
+        ):
+            raise legacy_engine.Halt(
+                f"第{key}档已有成交Paper仓位/退出委托；新的AI入场方案不会覆盖现有仓位"
+            )
+
+        if self._pending_matches_proposal(current, proposal):
+            return {
+                "action": "keep",
+                "tier": int(key),
+                "paper_order_id": current.get("paper_order_id"),
+                "current": current,
+            }
+
+        # Validate the replacement while excluding the old pending slot. If the
+        # new plan is invalid, the currently-live order remains untouched.
+        self._validate_paper_open(proposal, replace_tier=key)
+
+        current["remaining_entry_size"] = 0.0
+        current["status"] = "replaced"
+        current["order_state"] = "replaced_by_ai_plan"
+        current["replaced_at"] = _now()
+        current["replaced_by_proposal_id"] = proposal.get("proposal_id")
+        self.store.save()
+        self._event(
+            "AUTO_PLAN_REPLACED",
+            {
+                "tier": int(key),
+                "detail": f"第{key}档旧Paper挂单已被最新AI入场方案替换",
+            },
+        )
+        return {"action": "replace", "tier": int(key), "previous": current}
+
     def publish_ai_plan(self, plan):
         """Publish recommendation; optionally convert it into a Paper entry immediately."""
         with self._ai_lock:
@@ -273,6 +357,32 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
 
             try:
                 proposal = self._auto_proposal_from_plan(plan, item)
+                slot = self._prepare_auto_plan_slot(proposal)
+                if slot.get("action") == "keep":
+                    current = slot["current"]
+                    self._set_plan_status(item, "AUTO_ALREADY_ACTIVE", "相同Paper挂单已存在，不重复提交")
+                    self._event(
+                        "AUTO_PLAN_ALREADY_ACTIVE",
+                        {
+                            "tier": item["tier"],
+                            "detail": f"第{item['tier']}档AI方案与当前挂单相同，保持原挂单",
+                        },
+                    )
+                    return dict(
+                        base,
+                        status="AUTO_ALREADY_ACTIVE",
+                        auto_execution="ALREADY_ACTIVE",
+                        plan=item,
+                        execution={
+                            "tier": item["tier"],
+                            "paper_order_id": current.get("paper_order_id"),
+                            "status": current.get("status"),
+                            "order_type": current.get("order_type"),
+                            "limit_price": current.get("limit_price"),
+                            "take_profit": current.get("take_profit"),
+                            "stop_loss": current.get("stop_loss"),
+                        },
+                    )
                 execution = self.submit_ai_trade(proposal)
             except legacy_engine.Halt as exc:
                 message = str(exc)
@@ -1196,7 +1306,7 @@ _PREVIOUS_BRIDGE_POST = v172._BridgeHandler.do_POST
 
 def _app_init_v181(self, *args, **kwargs):
     _PREVIOUS_APP_INIT(self, *args, **kwargs)
-    self.root.title("KAYTRADE 1.8.1 · PAPER AI · Build 1811")
+    self.root.title("KAYTRADE 1.8.1 · PAPER AI · Build 1812")
     try:
         self.signal.set("V1.8.1 PAPER｜BTC行情只读｜AI方案可自动执行｜TP/SL强制｜双档 / 改单 / 撤单 / 60分钟自动撤单")
     except Exception:
@@ -1285,7 +1395,7 @@ def apply():
         module.VERSION = VERSION
         module.BUILD = BUILD
     ui166.BUILD = BUILD
-    ui166.WINDOW_TITLE = "KAYTRADE 1.8.1 · PAPER AI · Build 1811"
+    ui166.WINDOW_TITLE = "KAYTRADE 1.8.1 · PAPER AI · Build 1812"
 
     model.STRATEGY_ENABLED = False
     model.AI_ONLY = True
