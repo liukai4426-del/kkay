@@ -76,7 +76,7 @@ def smoke_test():
     import v183_okx_demo_patch as v183
 
     assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
-    assert v183.VERSION == '1.8.3' and v183.BUILD == '1830'
+    assert v183.VERSION == '1.8.3' and v183.BUILD == '1831'
     assert v183.DEMO_EXECUTION is True
     assert v183.LIMIT_ONLY is True
     assert model.VERSION == '1.8.3' and model.BUILD == '1831'
