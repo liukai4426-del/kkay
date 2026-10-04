@@ -104,7 +104,8 @@ def smoke_test():
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
                 assert getattr(ui, '_v183_okx_demo_ready', False)
-                assert 'V1.8.3 OKX DEMO' in ui.signal.get()
+                assert 'V1.8.3 Build1831 CLEAN' in ui.signal.get()
+                assert 'OKX DEMO ONLY' in ui.signal.get()
                 assert getattr(ui, '_v183_auto_exec_card', None) is not None
                 assert getattr(ui, '_v180_plan_card', None) is not None
                 assert getattr(ui, '_v180_execution_card', None) is not None
