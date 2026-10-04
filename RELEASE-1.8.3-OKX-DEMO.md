@@ -1,6 +1,6 @@
-# KAYTRADE V1.8.3 OKX DEMO EXECUTION · Build1830
+# KAYTRADE V1.8.3 OKX DEMO EXECUTION · Build1831
 
-V1.8.3 removes local Paper matching from the active execution path.
+Build1831 removes the local Paper runtime from the packaged program entirely; only OKX Demo exchange execution remains.
 
 ## Core behavior
 
@@ -108,6 +108,6 @@ Order/fill status shown in the execution panel comes from the OKX Demo state.
 ## Package
 
 - Version: 1.8.3
-- Build: 1830
+- Build: 1831
 - Mode: OKX DEMO EXECUTION · LIMIT ONLY
 - Intel macOS 14+
