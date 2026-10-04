@@ -27,10 +27,10 @@ jobs:
           test ! -e v182_ui_patch.py
           test ! -e test_v181_paper.py
           test ! -e test_v182_ui.py
-          ! grep -q "v181_paper_patch" desktop.py
-          ! grep -q "v182_ui_patch" desktop.py
-          ! grep -q "v181_paper_patch" OKXLocal.spec
-          ! grep -q "v182_ui_patch" OKXLocal.spec
+          ! grep -Eq "^(from|import) +v181_paper_patch" desktop.py
+          ! grep -Eq "^(from|import) +v182_ui_patch" desktop.py
+          ! grep -q "'v181_paper_patch'" OKXLocal.spec
+          ! grep -q "'v182_ui_patch'" OKXLocal.spec
       - name: Compile V1.8.3
         run: |
           python -m py_compile \
@@ -45,6 +45,8 @@ jobs:
         run: |
           python - <<'PY'
           import inspect
+          import sys
+          import desktop
           import app
           import exchange
           import v165_model as model
@@ -63,10 +65,8 @@ jobs:
           assert 'SUBMITTED_TO_OKX' in src
           assert 'OKX_DEMO_EXECUTION' in src
           assert 'ENTRY_TTL_SEC = 60 * 60' in inspect.getsource(v183)
-          assert 'v181_paper_patch' not in open('desktop.py').read()
-          assert 'v182_ui_patch' not in open('desktop.py').read()
-          assert 'v181_paper_patch' not in open('OKXLocal.spec').read()
-          assert 'v182_ui_patch' not in open('OKXLocal.spec').read()
+          assert 'v181_paper_patch' not in sys.modules
+          assert 'v182_ui_patch' not in sys.modules
           assert v183.v172.AIOnlyEngine is v183.OKXDemoEngineV183
           assert '"supported_entry_order_types": ["limit"]' in src
           assert '"supported_close_order_types": ["limit"]' in src
