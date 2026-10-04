@@ -112,11 +112,15 @@ def smoke_test():
                 assert getattr(ui, '_v181_auto_exec_card', None) is not None
                 assert getattr(ui, '_v180_plan_card', None) is not None
                 assert getattr(ui, '_v180_execution_card', None) is not None
-                body_text = v172._widget_text(ui.book.pages[3].body)
-                assert 'OKX模拟盘' in body_text or 'OKX DEMO' in body_text
-                assert 'Paper' not in body_text
-                assert 'PAPER' not in body_text
-                assert 'LIMIT ONLY' in body_text
+                plan_text = v172._widget_text(ui._v180_plan_card)
+                execution_text = v172._widget_text(ui._v180_execution_card)
+                assert 'LIMIT ONLY' in plan_text
+                assert 'OKX模拟盘' in execution_text or 'OKX' in execution_text
+                assert 'Paper' not in plan_text and 'PAPER' not in plan_text
+                assert 'Paper' not in execution_text and 'PAPER' not in execution_text
+                assert 'Paper' not in ui._v181_auto_exec_note_var.get()
+                assert 'PAPER' not in ui._v180_mode_var.get()
+                assert 'Paper' not in ui._v180_position_badge_var.get()
                 packed = ui.book.pages[3].body.pack_slaves()
                 assert packed.index(ui.quote) < packed.index(ui._v181_auto_exec_card)
                 assert packed.index(ui._v181_auto_exec_card) < packed.index(ui._v180_plan_card)
