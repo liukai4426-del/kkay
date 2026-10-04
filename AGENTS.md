@@ -1,12 +1,12 @@
-# KAYTRADE V1.8.3 Build1831 · OKX DEMO ONLY
+# KAYTRADE V1.8.4 Build1840 · OKX DEMO ONLY
 
-KAYTRADE Build1831 has no local Paper execution runtime.
+KAYTRADE Build1840 has no local Paper execution runtime.
 
 ## Runtime contract
 
 Before publishing any executable plan:
 1. call get_kaytrade_state;
-2. confirm version=1.8.3 and build=1831;
+2. confirm version=1.8.4 and build=1840;
 3. confirm mode=OKX_DEMO_EXECUTION;
 4. confirm demo_exchange_writes=true;
 5. confirm live_ai_writes=false;
@@ -41,5 +41,13 @@ Never propose or retry a market order.
 
 ## Removed behavior
 
-The old local Paper matching engine, Paper API routes, Paper UI patch and Paper state are removed from Build1831.
+The old local Paper matching engine, Paper API routes, Paper UI patch and Paper state are removed from Build1840.
 Do not reference or call /v1/paper/* endpoints.
+
+
+## V1.8.4 protection-price rule
+
+OKX uses -1 in tpOrdPx/slOrdPx (and newTpOrdPx/newSlOrdPx) as a market-execution sentinel.
+KAYTRADE V1.8.4 must never emit that sentinel.
+If an AI tool supplies a missing, zero or negative TP/SL limit price, normalize it to the corresponding positive trigger price before submission.
+The exchange transport layer must reject any outbound TP/SL protection payload that still contains -1.
