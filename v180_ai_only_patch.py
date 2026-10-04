@@ -3,8 +3,8 @@
 V1.8 keeps the AI-only execution architecture from V1.7.2 and adds:
 - market and limit entry orders;
 - persistent pending-limit reconciliation;
-- an OKX-inspired AI plan board;
-- a compact order/position execution board.
+- a hierarchy-first KAYTRADE AI plan board;
+- a KAYTRADE card-style order/position execution board.
 
 Autonomous AI writes remain restricted to OKX Demo Trading.
 """
@@ -32,7 +32,7 @@ from core import INSTRUMENT
 from exchange import APIError
 
 VERSION = "1.8.0"
-BUILD = "1800"
+BUILD = "1801"
 AI_ONLY = True
 
 AI_MAX_LEVERAGE = 20
@@ -394,8 +394,8 @@ def _rewrite_v180_text(data):
         return data
     return (
         data.replace("V1.7.2", "V1.8.0")
-        .replace("Build1723", "Build1800")
-        .replace("Build1722", "Build1800")
+        .replace("Build1723", "Build1801")
+        .replace("Build1722", "Build1801")
     )
 
 
@@ -403,7 +403,7 @@ def _app_emit_v180(self, kind, data):
     return _PREVIOUS_APP_EMIT(self, kind, _rewrite_v180_text(data))
 
 
-def _chip(parent, variable, fg=visual.TEXT, bg="#172027", width=120):
+def _mini_badge(parent, variable, fg=visual.TEXT, bg=visual.PANEL_ALT, width=118):
     frame = app.tk.Frame(parent, bg=bg, height=30, width=width, bd=0, highlightthickness=0)
     frame.pack_propagate(False)
     app.tk.Label(
@@ -418,15 +418,25 @@ def _chip(parent, variable, fg=visual.TEXT, bg="#172027", width=120):
     return frame
 
 
-def _metric(parent, title, variable, accent=visual.TEXT):
-    frame = app.tk.Frame(parent, bg="#11191e", bd=0, highlightthickness=0)
-    visual.label(frame, text=title, color=visual.MUTED, size=9, bg="#11191e").pack(
-        anchor="w", padx=12, pady=(9, 0)
-    )
-    visual.label(frame, variable=variable, color=accent, size=15, bold=True, bg="#11191e").pack(
-        anchor="w", padx=12, pady=(4, 9)
-    )
-    return frame
+def _plan_tile(parent, title, variable, accent=visual.TEXT, height=78):
+    tile = app.tk.Frame(parent, bg=visual.PANEL_ALT, bd=0, highlightthickness=0, height=height)
+    tile.pack_propagate(False)
+    visual.label(
+        tile,
+        text=title,
+        color=visual.MUTED,
+        size=9,
+        bg=visual.PANEL_ALT,
+    ).pack(anchor="w", padx=14, pady=(11, 0))
+    visual.label(
+        tile,
+        variable=variable,
+        color=accent,
+        size=16,
+        bold=True,
+        bg=visual.PANEL_ALT,
+    ).pack(anchor="w", padx=14, pady=(5, 8))
+    return tile
 
 
 def _hide_v172_cards(owner):
@@ -449,140 +459,173 @@ def _install_v180_dashboard(owner):
     if getattr(owner, "_v180_plan_card", None) is not None:
         return
 
-    # --- OKX-inspired AI trading plan board: compact header, metrics, advice/history.
-    plan = visual.Card(dash, height=360, fill="#0d1418")
     quote = getattr(owner, "quote", None)
-    kwargs = dict(fill="x", pady=(0, 10))
-    if quote is not None:
-        kwargs["before"] = quote
-    plan.pack(**kwargs)
+    actions = getattr(getattr(owner, "trade_button", None), "master", None)
 
-    header = app.tk.Frame(plan.body, bg="#0d1418")
+    # ------------------------------------------------------------------
+    # AI plan board: asymmetric hierarchy, not a wall of identical tiles.
+    # ------------------------------------------------------------------
+    plan = visual.Card(dash, height=455)
+    plan_kwargs = dict(fill="x", pady=(0, 12))
+    if quote is not None:
+        plan_kwargs["before"] = quote
+    plan.pack(**plan_kwargs)
+
+    header = app.tk.Frame(plan.body, bg=visual.PANEL)
     header.pack(fill="x")
+    title_wrap = app.tk.Frame(header, bg=visual.PANEL)
+    title_wrap.pack(side="left", fill="x", expand=True)
     visual.label(
-        header,
-        text="AI 交易方案",
-        size=18,
+        title_wrap,
+        text="AI 交易方案看板",
+        size=19,
         bold=True,
         color=visual.TEXT,
-        bg="#0d1418",
-    ).pack(side="left")
-    owner._v180_mode_var = app.tk.StringVar(value="AI ONLY · DEMO")
+        bg=visual.PANEL,
+    ).pack(anchor="w")
+    visual.label(
+        title_wrap,
+        text="主方案突出方向与入场 · AI推荐理由 / 操作建议 / 最近方案分层展示",
+        size=9,
+        color=visual.MUTED,
+        bg=visual.PANEL,
+    ).pack(anchor="w", pady=(3, 0))
+
     owner._v180_status_chip_var = app.tk.StringVar(value="WAITING")
-    _chip(header, owner._v180_status_chip_var, fg="#a8b4bb", bg="#172027", width=100).pack(
+    owner._v180_mode_var = app.tk.StringVar(value="AI ONLY · DEMO")
+    _mini_badge(header, owner._v180_status_chip_var, fg=visual.TEXT, bg=visual.PANEL_ALT, width=108).pack(
         side="right", padx=(8, 0)
     )
-    _chip(header, owner._v180_mode_var, fg=visual.GREEN, bg="#123027", width=118).pack(
+    _mini_badge(header, owner._v180_mode_var, fg=visual.GREEN, bg="#143229", width=126).pack(
         side="right"
     )
 
-    owner._v180_side_var = app.tk.StringVar(value="等待方向")
+    hero = app.tk.Frame(plan.body, bg=visual.PANEL)
+    hero.pack(fill="x", pady=(12, 10))
+
+    # Main recommendation hero: large direction and entry, visually dominant.
+    main = app.tk.Frame(hero, bg=visual.PANEL_ALT, height=150, bd=0, highlightthickness=0)
+    main.pack(side="left", fill="both", expand=True, padx=(0, 7))
+    main.pack_propagate(False)
+    owner._v180_side_var = app.tk.StringVar(value="等待 AI 方向")
+    owner._v180_entry_var = app.tk.StringVar(value="—")
     owner._v180_type_var = app.tk.StringVar(value="委托：—")
     owner._v180_tier_var = app.tk.StringVar(value="档位：—")
     owner._v180_leverage_var = app.tk.StringVar(value="杠杆：—")
-    chips = app.tk.Frame(plan.body, bg="#0d1418")
-    chips.pack(fill="x", pady=(10, 8))
-    for var in (
-        owner._v180_side_var,
-        owner._v180_type_var,
-        owner._v180_tier_var,
-        owner._v180_leverage_var,
-    ):
-        _chip(chips, var, bg="#151e24", width=138).pack(side="left", padx=(0, 7))
+    visual.label(main, text="当前主方案", size=9, color=visual.MUTED, bg=visual.PANEL_ALT).pack(
+        anchor="w", padx=16, pady=(14, 0)
+    )
+    visual.label(main, variable=owner._v180_side_var, size=23, bold=True, color=visual.TEXT, bg=visual.PANEL_ALT).pack(
+        anchor="w", padx=16, pady=(6, 0)
+    )
+    price_row = app.tk.Frame(main, bg=visual.PANEL_ALT)
+    price_row.pack(fill="x", padx=16, pady=(5, 0))
+    visual.label(price_row, text="建议 / 委托入场", size=9, color=visual.MUTED, bg=visual.PANEL_ALT).pack(
+        side="left", anchor="s"
+    )
+    visual.label(price_row, variable=owner._v180_entry_var, size=28, bold=True, color=visual.TEXT, bg=visual.PANEL_ALT).pack(
+        side="left", padx=(12, 0), anchor="s"
+    )
+    meta = app.tk.Frame(main, bg=visual.PANEL_ALT)
+    meta.pack(fill="x", padx=16, pady=(7, 0))
+    for var in (owner._v180_type_var, owner._v180_tier_var, owner._v180_leverage_var):
+        _mini_badge(meta, var, bg="#1b2a32", width=124).pack(side="left", padx=(0, 6))
 
-    owner._v180_entry_var = app.tk.StringVar(value="—")
+    # TP/SL use two tall, different-purpose blocks.
+    risk = app.tk.Frame(hero, bg=visual.PANEL, width=400)
+    risk.pack(side="right", fill="y")
     owner._v180_tp_var = app.tk.StringVar(value="—")
     owner._v180_sl_var = app.tk.StringVar(value="—")
-    metrics = app.tk.Frame(plan.body, bg="#0d1418")
-    metrics.pack(fill="x", pady=(0, 8))
-    for idx, (title, var, accent) in enumerate(
-        (
-            ("建议 / 委托入场", owner._v180_entry_var, visual.TEXT),
-            ("止盈 TP", owner._v180_tp_var, visual.GREEN),
-            ("止损 SL", owner._v180_sl_var, visual.RED),
-        )
-    ):
-        tile = _metric(metrics, title, var, accent)
-        tile.grid(row=0, column=idx, sticky="ew", padx=(0 if idx == 0 else 4, 0 if idx == 2 else 4))
-        metrics.columnconfigure(idx, weight=1, uniform="v180plan")
+    tp_box = app.tk.Frame(risk, bg="#123028", height=70, bd=0, highlightthickness=0)
+    tp_box.pack(fill="x", pady=(0, 6))
+    tp_box.pack_propagate(False)
+    visual.label(tp_box, text="止盈 TP", size=9, color="#8fbcae", bg="#123028").pack(anchor="w", padx=14, pady=(10, 0))
+    visual.label(tp_box, variable=owner._v180_tp_var, size=20, bold=True, color=visual.GREEN, bg="#123028").pack(anchor="w", padx=14, pady=(3, 6))
+    sl_box = app.tk.Frame(risk, bg="#321a22", height=70, bd=0, highlightthickness=0)
+    sl_box.pack(fill="x")
+    sl_box.pack_propagate(False)
+    visual.label(sl_box, text="止损 SL", size=9, color="#c39aa5", bg="#321a22").pack(anchor="w", padx=14, pady=(10, 0))
+    visual.label(sl_box, variable=owner._v180_sl_var, size=20, bold=True, color=visual.RED, bg="#321a22").pack(anchor="w", padx=14, pady=(3, 6))
 
-    lower = app.tk.Frame(plan.body, bg="#0d1418")
-    lower.pack(fill="both", expand=True)
-    left = app.tk.Frame(lower, bg="#11191e")
-    right = app.tk.Frame(lower, bg="#11191e")
-    left.pack(side="left", fill="both", expand=True, padx=(0, 5))
-    right.pack(side="left", fill="both", expand=True, padx=(5, 0))
+    # Reason and action advice intentionally use different visual weights.
     owner._v180_reason_var = app.tk.StringVar(value="等待 AI 推荐理由…")
     owner._v180_advice_var = app.tk.StringVar(value="等待 AI 运行操作建议…")
-    owner._v180_history_var = app.tk.StringVar(value="暂无 AI 方案记录")
-    visual.label(left, text="AI 推荐理由", size=10, bold=True, color=visual.MUTED, bg="#11191e").pack(
-        anchor="w", padx=12, pady=(10, 4)
+    text_row = app.tk.Frame(plan.body, bg=visual.PANEL)
+    text_row.pack(fill="x", pady=(0, 9))
+
+    reason_box = app.tk.Frame(text_row, bg=visual.PANEL_ALT)
+    reason_box.pack(side="left", fill="both", expand=True, padx=(0, 6))
+    visual.label(reason_box, text="AI 推荐理由", size=10, bold=True, color=visual.MUTED, bg=visual.PANEL_ALT).pack(
+        anchor="w", padx=14, pady=(10, 4)
     )
     app.tk.Label(
-        left,
+        reason_box,
         textvariable=owner._v180_reason_var,
-        bg="#11191e",
+        bg=visual.PANEL_ALT,
         fg=visual.TEXT,
         font=("Helvetica", 10),
         justify="left",
         anchor="nw",
-        wraplength=600,
-    ).pack(fill="x", padx=12)
-    visual.label(left, text="运行操作建议", size=10, bold=True, color=visual.GREEN, bg="#11191e").pack(
-        anchor="w", padx=12, pady=(9, 4)
+        wraplength=720,
+    ).pack(fill="x", padx=14, pady=(0, 10))
+
+    advice_box = app.tk.Frame(text_row, bg="#10271f", width=480)
+    advice_box.pack(side="right", fill="both", padx=(6, 0))
+    visual.label(advice_box, text="运行操作建议", size=10, bold=True, color=visual.GREEN, bg="#10271f").pack(
+        anchor="w", padx=14, pady=(10, 4)
     )
     app.tk.Label(
-        left,
+        advice_box,
         textvariable=owner._v180_advice_var,
-        bg="#11191e",
+        bg="#10271f",
         fg=visual.TEXT,
         font=("Helvetica", 10, "bold"),
         justify="left",
         anchor="nw",
-        wraplength=600,
-    ).pack(fill="x", padx=12, pady=(0, 10))
+        wraplength=440,
+    ).pack(fill="x", padx=14, pady=(0, 10))
 
-    visual.label(right, text="最近 AI 方案", size=10, bold=True, color=visual.MUTED, bg="#11191e").pack(
-        anchor="w", padx=12, pady=(10, 4)
+    owner._v180_history_var = app.tk.StringVar(value="暂无 AI 方案记录")
+    history = app.tk.Frame(plan.body, bg=visual.PANEL_ALT)
+    history.pack(fill="x")
+    visual.label(history, text="最近方案", size=9, bold=True, color=visual.MUTED, bg=visual.PANEL_ALT).pack(
+        anchor="w", padx=14, pady=(8, 2)
     )
     app.tk.Label(
-        right,
+        history,
         textvariable=owner._v180_history_var,
-        bg="#11191e",
+        bg=visual.PANEL_ALT,
         fg="#c9d3d8",
         font=("Menlo", 9),
         justify="left",
         anchor="nw",
-        wraplength=650,
-    ).pack(fill="both", expand=True, padx=12, pady=(0, 10))
+        wraplength=1400,
+    ).pack(fill="x", padx=14, pady=(0, 8))
     owner._v180_plan_card = plan
 
-    # --- OKX-inspired position/order execution board.
-    execution = visual.Card(dash, height=365, fill="#0d1418")
-    actions = getattr(getattr(owner, "trade_button", None), "master", None)
+    # ------------------------------------------------------------------
+    # Order / position execution: KAYTRADE's previous "交易计划" card language.
+    # ------------------------------------------------------------------
+    execution = visual.Card(dash, height=470)
     exec_kwargs = dict(fill="x", pady=(0, 12))
     if actions is not None:
         exec_kwargs["before"] = actions
     execution.pack(**exec_kwargs)
 
-    exec_header = app.tk.Frame(execution.body, bg="#0d1418")
+    exec_header = app.tk.Frame(execution.body, bg=visual.PANEL)
     exec_header.pack(fill="x")
+    exec_title = app.tk.Frame(exec_header, bg=visual.PANEL)
+    exec_title.pack(side="left", fill="x", expand=True)
+    visual.label(exec_title, text="订单 / 持仓执行", size=19, bold=True, color=visual.TEXT, bg=visual.PANEL).pack(anchor="w")
     visual.label(
-        exec_header,
-        text="订单 / 持仓",
-        size=18,
-        bold=True,
-        color=visual.TEXT,
-        bg="#0d1418",
-    ).pack(side="left")
+        exec_title,
+        text="委托状态与持仓保护统一展示 · 市价 / 限价订单均实时同步",
+        size=9,
+        color=visual.MUTED,
+        bg=visual.PANEL,
+    ).pack(anchor="w", pady=(3, 0))
     owner._v180_position_badge_var = app.tk.StringVar(value="无持仓")
-    _chip(
-        exec_header,
-        owner._v180_position_badge_var,
-        fg="#a8b4bb",
-        bg="#172027",
-        width=120,
-    ).pack(side="right")
+    _mini_badge(exec_header, owner._v180_position_badge_var, fg=visual.TEXT, bg=visual.PANEL_ALT, width=120).pack(side="right")
 
     owner._v180_order_state_var = app.tk.StringVar(value="等待委托")
     owner._v180_order_type_var = app.tk.StringVar(value="—")
@@ -593,60 +636,55 @@ def _install_v180_dashboard(owner):
     owner._v180_position_sl_var = app.tk.StringVar(value="—")
     owner._v180_proposal_var = app.tk.StringVar(value="—")
 
-    first = app.tk.Frame(execution.body, bg="#0d1418")
-    first.pack(fill="x", pady=(10, 8))
-    exec_metrics = (
-        ("订单状态", owner._v180_order_state_var, visual.TEXT),
-        ("委托方式", owner._v180_order_type_var, visual.TEXT),
-        ("委托价格", owner._v180_order_px_var, visual.TEXT),
-        ("成交均价", owner._v180_fill_px_var, visual.TEXT),
-    )
-    for idx, (title, var, accent) in enumerate(exec_metrics):
-        tile = _metric(first, title, var, accent)
-        tile.grid(row=0, column=idx, sticky="ew", padx=(0 if idx == 0 else 3, 0 if idx == 3 else 3))
-        first.columnconfigure(idx, weight=1, uniform="v180order")
+    summary = app.tk.Frame(execution.body, bg=visual.PANEL)
+    summary.pack(fill="x", pady=(12, 8))
+    state_tile = _plan_tile(summary, "订单状态", owner._v180_order_state_var, height=82)
+    state_tile.pack(side="left", fill="x", expand=True, padx=(0, 5))
+    type_tile = _plan_tile(summary, "委托方式", owner._v180_order_type_var, height=82)
+    type_tile.pack(side="left", fill="x", expand=True, padx=(5, 0))
 
-    second = app.tk.Frame(execution.body, bg="#0d1418")
-    second.pack(fill="x", pady=(0, 10))
-    position_metrics = (
-        ("持仓 / 委托数量", owner._v180_size_var, visual.TEXT),
+    grid = app.tk.Frame(execution.body, bg=visual.PANEL)
+    grid.pack(fill="x", pady=(0, 10))
+    items = (
+        ("委托入场", owner._v180_order_px_var, visual.TEXT),
+        ("成交均价", owner._v180_fill_px_var, visual.TEXT),
         ("止盈 TP", owner._v180_position_tp_var, visual.GREEN),
         ("止损 SL", owner._v180_position_sl_var, visual.RED),
+        ("持仓 / 委托数量", owner._v180_size_var, visual.TEXT),
         ("Proposal ID", owner._v180_proposal_var, visual.MUTED),
     )
-    for idx, (title, var, accent) in enumerate(position_metrics):
-        tile = _metric(second, title, var, accent)
-        tile.grid(row=0, column=idx, sticky="ew", padx=(0 if idx == 0 else 3, 0 if idx == 3 else 3))
-        second.columnconfigure(idx, weight=1, uniform="v180position")
+    for idx, (title, var, accent) in enumerate(items):
+        tile = _plan_tile(grid, title, var, accent=accent, height=78)
+        tile.grid(row=idx // 3, column=idx % 3, sticky="ew", padx=4, pady=4)
+    for col in range(3):
+        grid.columnconfigure(col, weight=1, uniform="v180execution")
 
-    tier_wrap = app.tk.Frame(execution.body, bg="#0d1418")
-    tier_wrap.pack(fill="both", expand=True)
     owner._v180_tier1_var = app.tk.StringVar(value="等待第一档 AI 计划")
     owner._v180_tier2_var = app.tk.StringVar(value="等待第二档 AI 计划")
-    for idx, (title, var) in enumerate(
-        (("第一档 / TIER 1", owner._v180_tier1_var), ("第二档 / TIER 2", owner._v180_tier2_var))
+    tiers = app.tk.Frame(execution.body, bg=visual.PANEL)
+    tiers.pack(fill="both", expand=True)
+    for idx, (title, var, accent) in enumerate(
+        (
+            ("第一档执行方案", owner._v180_tier1_var, visual.GREEN),
+            ("第二档执行方案", owner._v180_tier2_var, visual.TEXT),
+        )
     ):
-        box = app.tk.Frame(tier_wrap, bg="#11191e")
-        box.grid(row=0, column=idx, sticky="nsew", padx=(0, 5) if idx == 0 else (5, 0))
-        visual.label(
-            box,
-            text=title,
-            size=10,
-            bold=True,
-            color=visual.GREEN if idx == 0 else visual.TEXT,
-            bg="#11191e",
-        ).pack(anchor="w", padx=12, pady=(10, 4))
+        box = app.tk.Frame(tiers, bg=visual.PANEL_ALT, bd=0, highlightthickness=0)
+        box.grid(row=0, column=idx, sticky="nsew", padx=(0, 6) if idx == 0 else (6, 0))
+        visual.label(box, text=title, size=11, bold=True, color=accent, bg=visual.PANEL_ALT).pack(
+            anchor="w", padx=14, pady=(10, 5)
+        )
         app.tk.Label(
             box,
             textvariable=var,
-            bg="#11191e",
+            bg=visual.PANEL_ALT,
             fg=visual.TEXT,
             font=("Helvetica", 10),
             justify="left",
             anchor="nw",
             wraplength=650,
-        ).pack(fill="both", expand=True, padx=12, pady=(0, 10))
-        tier_wrap.columnconfigure(idx, weight=1, uniform="v180tiers")
+        ).pack(fill="both", expand=True, padx=14, pady=(0, 10))
+        tiers.columnconfigure(idx, weight=1, uniform="v180tiers")
     owner._v180_execution_card = execution
 
     owner.root.after(350, lambda: _refresh_v180_dashboard(owner))
@@ -742,7 +780,7 @@ def _refresh_v180_dashboard(owner):
 
 def _app_init_v180(self, *args, **kwargs):
     _PREVIOUS_APP_INIT(self, *args, **kwargs)
-    self.root.title("KAYTRADE 1.8.0 · AI ONLY · Build 1800")
+    self.root.title("KAYTRADE 1.8.0 · AI ONLY · Build 1801")
     try:
         self.signal.set("V1.8 AI ONLY｜支持市价 / 限价委托｜等待 Codex / AI 交易方案")
     except Exception:
@@ -800,7 +838,7 @@ def apply():
         module.VERSION = VERSION
         module.BUILD = BUILD
     ui166.BUILD = BUILD
-    ui166.WINDOW_TITLE = "KAYTRADE 1.8.0 · AI ONLY · Build 1800"
+    ui166.WINDOW_TITLE = "KAYTRADE 1.8.0 · AI ONLY · Build 1801"
 
     model.STRATEGY_ENABLED = False
     model.AI_ONLY = True
