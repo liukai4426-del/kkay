@@ -408,6 +408,24 @@ class V181PaperTests(unittest.TestCase):
         self.assertEqual(x.posts, [])
 
 
+    def test_legacy_protection_state_is_migrated_to_limit(self):
+        e, _x = self.make_engine()
+        self.limit_open(e, 1, 99000)
+        tier = e.store.data["paper_execution"]["tiers"]["1"]
+        tier["tp_exit_type"] = "market"
+        tier["sl_exit_type"] = "market"
+        tier["tp_limit_price"] = None
+        tier["sl_limit_price"] = None
+        e.store.save()
+
+        e._ensure_paper_state()
+        tier = e.store.data["paper_execution"]["tiers"]["1"]
+        self.assertEqual(tier["tp_exit_type"], "limit")
+        self.assertEqual(tier["sl_exit_type"], "limit")
+        self.assertEqual(tier["tp_limit_price"], tier["take_profit"])
+        self.assertEqual(tier["sl_limit_price"], tier["stop_loss"])
+
+
     def test_non_limit_protection_type_is_rejected(self):
         e, x = self.make_engine()
         self.fill_limit(e, x, tier=1, size=1, price=100000)
