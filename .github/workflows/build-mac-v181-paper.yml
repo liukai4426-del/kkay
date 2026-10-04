@@ -87,7 +87,7 @@ jobs:
         run: |
           python verify_bundle.py
           /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1.8.1'
-          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1810'
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1811'
           codesign --verify --deep --strict dist/KAYTRADE.app
       - name: Packaged V1.8.1 smoke test
         run: |
