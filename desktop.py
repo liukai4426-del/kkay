@@ -71,9 +71,9 @@ def smoke_test():
     import v172_ai_only_patch as v172
 
     assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
-    assert v172.VERSION == '1.7.2' and v172.BUILD == '1720'
+    assert v172.VERSION == '1.7.2' and v172.BUILD == '1721'
     assert v172.AI_ONLY is True
-    assert model.VERSION == '1.7.2' and model.BUILD == '1720'
+    assert model.VERSION == '1.7.2' and model.BUILD == '1721'
     assert model.STRATEGY_ENABLED is False
     assert getattr(model, '_kaytrade_v172_ai_only_applied', False)
     assert getattr(app.App, '_kaytrade_v172_ai_only_applied', False)
@@ -93,7 +93,7 @@ def smoke_test():
                 assert 'KAYTRADE' in root.title()
                 assert '1.7.2' in root.title()
                 assert 'AI ONLY' in root.title()
-                assert '1720' in root.title()
+                assert '1721' in root.title()
                 assert ui.mode.get() == 'OKX模拟盘'
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
@@ -108,6 +108,11 @@ def smoke_test():
                 ]
                 assert '风险设置' not in visible
                 assert '执行参数' not in visible
+                assert getattr(ui, '_v172_ai_card', None) is not None
+                assert 'Build1721' in v172._widget_text(ui._v172_ai_card)
+                pee4 = getattr(ui, '_v170_pee4_card', None)
+                assert pee4 is None or not pee4.winfo_manager()
+                assert 'submit("arm"' not in __import__('inspect').getsource(v172._app_arm_v172)
                 ui.finished.set()
                 ui.thread.join(timeout=2)
                 ui.lock.close()
@@ -115,7 +120,7 @@ def smoke_test():
             root.destroy()
 
     Path(sys.argv[2]).write_text(
-        'PASS: KAYTRADE V1.7.2 Build1720 AI ONLY packaged runtime; '
+        'PASS: KAYTRADE V1.7.2 Build1721 AI ONLY packaged runtime; '
         'legacy strategy entry is disabled, AI bridge is localhost-token protected, '
         'and autonomous AI writes are restricted to OKX Demo Trading.\n'
     )
