@@ -102,9 +102,9 @@ def smoke_test():
                 assert '无本地交易策略' in ui.signal.get()
                 assert '启用AI交易通道' in str(ui.trade_button.cget('text'))
                 visible = [
-                    str(ui.book.tab(tab, 'text'))
-                    for tab in ui.book.tabs()
-                    if str(ui.book.tab(tab, 'state')) != 'hidden'
+                    str(button.text)
+                    for button in ui.book.buttons
+                    if button.winfo_manager()
                 ]
                 assert '风险设置' not in visible
                 assert '执行参数' not in visible
