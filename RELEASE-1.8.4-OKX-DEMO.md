@@ -49,3 +49,5 @@ This applies to:
 - reductions: LIMIT only
 - two same-direction tiers: supported
 - 60-minute incomplete-entry cancel: supported
+
+Build1840 release validation includes packaged GUI smoke tests and transport-level rejection tests for market orders and OKX -1 TP/SL sentinels.
