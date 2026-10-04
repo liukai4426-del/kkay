@@ -1,0 +1,101 @@
+name: Build KAYTRADE Intel Mac 1.7.2 AI Only Build1720
+
+on:
+  push:
+    branches: [feature/v172-ai-only]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install runtime test dependencies
+        run: python -m pip install 'websocket-client==1.8.0' 'certifi==2025.8.3'
+      - name: Compile V1.7.2 AI Only
+        run: |
+          python -m py_compile \
+            desktop.py exchange.py engine.py app.py history.py \
+            v171_update_patch.py v172_ai_only_patch.py \
+            kaytrade_mcp.py test_v172_ai_only.py
+      - name: V1.7.1 maintenance regression
+        run: python -m unittest -v test_v171_update
+      - name: V1.7.2 AI-only unit tests
+        run: python -m unittest -v test_v172_ai_only
+      - name: Verify AI-only semantic lock
+        run: |
+          python - <<'PY'
+          import inspect
+          import app
+          import v165_model as model
+          import v172_ai_only_patch as v172
+
+          assert v172.VERSION == '1.7.2'
+          assert v172.BUILD == '1720'
+          assert v172.AI_ONLY is True
+          assert model.STRATEGY_ENABLED is False
+          assert app.Engine is v172.AIOnlyEngine
+          cycle = inspect.getsource(v172.AIOnlyEngine.cycle)
+          assert 'refresh_market' not in cycle
+          assert 'make_plan' not in cycle
+          assert 'signal(' not in cycle
+          submit = inspect.getsource(v172.AIOnlyEngine.submit_ai_trade)
+          assert '_submit_open' in submit
+          assert 'x.demo' in inspect.getsource(v172.AIOnlyEngine._preflight_account)
+          print('PASS V1.7.2: no local strategy order source; AI proposal is the only new-entry path')
+          PY
+
+  build:
+    needs: unit
+    runs-on: macos-15-intel
+    timeout-minutes: 70
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - name: Install build dependencies
+        run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0' 'websocket-client==1.8.0'
+      - name: V1.7.2 AI-only tests
+        run: python -m unittest -v test_v172_ai_only
+      - run: python build_icon.py
+      - run: python -m PyInstaller --noconfirm OKXLocal.spec
+      - name: Verify Intel bundle and V1.7.2 metadata
+        run: |
+          python verify_bundle.py
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1.7.2'
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1720'
+          codesign --verify --deep --strict dist/KAYTRADE.app
+      - name: Packaged V1.7.2 AI-only smoke test
+        run: |
+          TMPDIR_CHECK="$(mktemp -d)"
+          dist/KAYTRADE.app/Contents/MacOS/KAYTRADE --smoke-test "$TMPDIR_CHECK/smoke.txt"
+          cat "$TMPDIR_CHECK/smoke.txt"
+          grep 'V1.7.2 Build1720 AI ONLY' "$TMPDIR_CHECK/smoke.txt"
+          grep 'legacy strategy entry is disabled' "$TMPDIR_CHECK/smoke.txt"
+          grep 'autonomous AI writes are restricted to OKX Demo Trading' "$TMPDIR_CHECK/smoke.txt"
+      - name: Create installer
+        run: |
+          mkdir -p installer
+          ditto dist/KAYTRADE.app installer/KAYTRADE.app
+          cp RELEASE-1.7.2-AI-ONLY.md installer/RELEASE-1.7.2-AI-ONLY.md
+          printf 'KAYTRADE V1.7.2 AI ONLY Build1720\nCodex/AI proposal -> localhost bridge -> hard execution checks -> OKX Demo Trading.\n' > installer/RELEASE-1.7.2-AI-ONLY.txt
+          hdiutil create -volname 'KAYTRADE 1.7.2 AI ONLY' -srcfolder installer -ov -format UDZO KAYTRADE-1.7.2-AI-ONLY-Intel-build1720.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-1.7.2-AI-ONLY-Intel-build1720
+          path: |
+            KAYTRADE-1.7.2-AI-ONLY-Intel-build1720.dmg
+            installer/RELEASE-1.7.2-AI-ONLY.md
+            installer/RELEASE-1.7.2-AI-ONLY.txt
+          if-no-files-found: error
