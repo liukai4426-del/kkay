@@ -20,18 +20,23 @@ from candles import CandleCache
 AMBIGUOUS_OKX_CODES={'51054'}
 ORDER_EXPIRY_MS=8000
 
-_LIMIT_ONLY_SENTINEL_FIELDS = {"tpOrdPx", "slOrdPx", "newTpOrdPx", "newSlOrdPx"}
+_PROTECTION_ORDER_PRICE_FIELDS = {"tpOrdPx", "slOrdPx", "newTpOrdPx", "newSlOrdPx"}
 
 
 def _assert_limit_only_write(path, body):
-    """Transport-level firewall: no market order or OKX -1 TP/SL sentinel."""
+    """Transport firewall: parent/close orders stay LIMIT; TP/SL may trigger at market.
+
+    OKX documents -1 for TP/SL order-price fields as "execute at market after
+    the trigger". V1.9.1 intentionally allows that sentinel only in protection
+    price fields while still rejecting an actual market parent/reduction order.
+    """
     if not isinstance(body, dict):
         raise APIError("OKX写入结构异常", deterministic=True, method="POST", path=path)
     if path == "/api/v5/trade/order":
         ord_type = str(body.get("ordType") or "").lower()
         if ord_type and ord_type != "limit":
             raise APIError(
-                "LIMIT ONLY：禁止发送非限价委托",
+                "ENTRY/CLOSE LIMIT ONLY：禁止发送非限价主订单",
                 deterministic=True,
                 method="POST",
                 path=path,
@@ -40,13 +45,25 @@ def _assert_limit_only_write(path, body):
     def walk(value):
         if isinstance(value, dict):
             for key, child in value.items():
-                if key in _LIMIT_ONLY_SENTINEL_FIELDS and str(child).strip() == "-1":
-                    raise APIError(
-                        f"LIMIT ONLY：禁止发送 {key}=-1；OKX会将-1解释为市价",
-                        deterministic=True,
-                        method="POST",
-                        path=path,
-                    )
+                if key in _PROTECTION_ORDER_PRICE_FIELDS:
+                    text = str(child).strip()
+                    if text:
+                        try:
+                            number = float(text)
+                        except (TypeError, ValueError):
+                            raise APIError(
+                                f"TP/SL保护价格字段 {key} 非法",
+                                deterministic=True,
+                                method="POST",
+                                path=path,
+                            ) from None
+                        if number < 0 and number != -1:
+                            raise APIError(
+                                f"TP/SL保护价格字段 {key} 仅允许 -1（触发市价）或非负值",
+                                deterministic=True,
+                                method="POST",
+                                path=path,
+                            )
                 walk(child)
         elif isinstance(value, list):
             for child in value:
