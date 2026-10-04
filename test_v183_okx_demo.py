@@ -179,7 +179,7 @@ class V183OKXDemoTests(unittest.TestCase):
 
     def test_identity(self):
         self.assertEqual(v183.VERSION, "1.8.3")
-        self.assertEqual(v183.BUILD, "1831")
+        self.assertEqual(v183.BUILD, "1832")
         self.assertTrue(v183.DEMO_EXECUTION)
         self.assertTrue(v183.LIMIT_ONLY)
         self.assertIs(v183.app.Engine, v183.OKXDemoEngineV183)
@@ -233,6 +233,47 @@ class V183OKXDemoTests(unittest.TestCase):
         self.assertNotEqual(sl["slOrdPx"], "-1")
         self.assertEqual(tp["tpOrdPx"], tp["tpTriggerPx"])
         self.assertEqual(sl["slOrdPx"], sl["slTriggerPx"])
+
+    def test_minus_one_tp_sl_limit_prices_are_normalized_to_limit(self):
+        e, x = self.make_engine()
+        e.arm()
+        plan = self.plan(
+            price=95000,
+            tp_limit_price=-1,
+            sl_limit_price=-1,
+        )
+        result = e.publish_ai_plan(plan)
+        self.assertEqual(result["status"], "OKX_SUBMITTED")
+        order = [body for path, body in x.posts if path == "/api/v5/trade/order"][0]
+        attached = order["attachAlgoOrds"]
+        tp = next(row for row in attached if "tpTriggerPx" in row)
+        sl = next(row for row in attached if "slTriggerPx" in row)
+        self.assertEqual(tp["tpOrdPx"], tp["tpTriggerPx"])
+        self.assertEqual(sl["slOrdPx"], sl["slTriggerPx"])
+        self.assertNotEqual(tp["tpOrdPx"], "-1")
+        self.assertNotEqual(sl["slOrdPx"], "-1")
+
+    def test_minus_one_amend_protection_is_normalized(self):
+        e, x = self.make_engine()
+        e.arm()
+        e.publish_ai_plan(self.plan(price=95000))
+        e.amend_demo_protection(
+            {
+                "tier": 1,
+                "take_profit": 97500,
+                "stop_loss": 94000,
+                "tp_limit_price": -1,
+                "sl_limit_price": -1,
+            }
+        )
+        amend = [body for path, body in x.posts if path == "/api/v5/trade/amend-order"][-1]
+        attached = amend["attachAlgoOrds"]
+        tp = next(row for row in attached if "newTpTriggerPx" in row)
+        sl = next(row for row in attached if "newSlTriggerPx" in row)
+        self.assertEqual(tp["newTpOrdPx"], tp["newTpTriggerPx"])
+        self.assertEqual(sl["newSlOrdPx"], sl["newSlTriggerPx"])
+        self.assertNotEqual(tp["newTpOrdPx"], "-1")
+        self.assertNotEqual(sl["newSlOrdPx"], "-1")
 
     def test_two_same_direction_tiers_submit_two_okx_orders(self):
         e, x = self.make_engine()
