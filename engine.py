@@ -148,28 +148,29 @@ class Store:
                 self.save()
 
     def save(self):
-        self.path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
-        # Multiple threads (worker + AI bridge state polling) may persist the
-        # same environment store. Serialize this Store instance and use a
-        # unique temp file so one writer can never rename another writer's tmp.
+        # Multiple runtime/bridge/UI paths can persist state nearly
+        # simultaneously. Never share a fixed .tmp filename: one writer could
+        # replace it while another writer is still preparing its own replace.
         with self._save_lock:
+            self.path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
             temp=self.path.with_name(
-                f'.{self.path.name}.{os.getpid()}.{threading.get_ident()}.{uuid.uuid4().hex}.tmp'
+                self.path.name+'.'+str(os.getpid())+'.'+str(threading.get_ident())+'.'+uuid.uuid4().hex+'.tmp'
             )
-            fd=None
             try:
                 fd=os.open(temp,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
                 with os.fdopen(fd,'w') as f:
-                    fd=None
                     json.dump(self.data,f,ensure_ascii=False,indent=2)
                     f.flush(); os.fsync(f.fileno())
                 os.replace(temp,self.path)
-            finally:
-                if fd is not None:
+                try:
+                    dir_fd=os.open(self.path.parent,os.O_RDONLY)
                     try:
-                        os.close(fd)
-                    except OSError:
-                        pass
+                        os.fsync(dir_fd)
+                    finally:
+                        os.close(dir_fd)
+                except OSError:
+                    pass
+            finally:
                 try:
                     temp.unlink()
                 except FileNotFoundError:
