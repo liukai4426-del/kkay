@@ -1,6 +1,6 @@
-"""KAYTRADE V1.8.3 OKX Demo Execution overlay.
+"""KAYTRADE V1.8.4 OKX Demo Execution overlay.
 
-V1.8.3 removes local Paper matching. AI plans are sent immediately to OKX
+V1.8.4 removes local Paper matching. AI plans are sent immediately to OKX
 Demo Trading as LIMIT orders. Order/fill state is reconciled from OKX only.
 
 Execution contract:
@@ -39,8 +39,8 @@ import visual
 from core import INSTRUMENT
 from exchange import APIError
 
-VERSION = "1.8.3"
-BUILD = "1832"
+VERSION = "1.8.4"
+BUILD = "1840"
 AI_ONLY = True
 DEMO_EXECUTION = True
 LIMIT_ONLY = True
@@ -58,7 +58,7 @@ def _d(value, name="value"):
 def _limit_protection_price(value, trigger, name):
     """Normalize every OKX protection exit to a positive LIMIT price.
 
-    OKX uses -1 as the market-order sentinel for TP/SL. Build1832 never
+    OKX uses -1 as the market-order sentinel for TP/SL. Build1840 never
     forwards that sentinel: None/blank/zero/negative values fall back to the
     corresponding TP/SL trigger price.
     """
@@ -129,7 +129,7 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
         self._ensure_demo_state()
         self.emit(
             "log",
-            "V1.8.3 Build1832 Clean：仅OKX模拟盘交易所执行；本地Paper Runtime/撮合/API已从当前程序删除。",
+            "V1.8.4 Build1840 Clean：仅OKX模拟盘交易所执行；本地Paper Runtime/撮合/API已从当前程序删除。",
         )
 
     def _purge_removed_paper_state(self):
@@ -163,7 +163,7 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
                     had_paper = True
         if had_paper:
             self.store.save()
-            self.emit("log", "Build1832：已彻底清除旧Paper执行状态/档位缓存/方案历史；不会迁移为OKX订单。")
+            self.emit("log", "Build1840：已彻底清除旧Paper执行状态/档位缓存/方案历史；不会迁移为OKX订单。")
 
     def _ensure_demo_state(self):
         if not self.store:
@@ -882,7 +882,7 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
             self.poll_at = time.monotonic()
             self.emit(
                 "log",
-                "V1.8.3 OKX Demo AI执行已启用：AI方案自动执行默认开启；策略到达即提交交易所限价挂单。",
+                "V1.8.4 OKX Demo AI执行已启用：AI方案自动执行默认开启；策略到达即提交交易所限价挂单。",
             )
 
     def stop(self):
@@ -1518,7 +1518,7 @@ def _toggle_auto_execute_v183(owner):
     if engine is None or not isinstance(engine, OKXDemoEngineV183):
         app.messagebox.showerror(
             "未连接",
-            "先连接并启用 V1.8.3 Build1832 OKX Demo AI执行通道",
+            "先连接并启用 V1.8.4 Build1840 OKX Demo AI执行通道",
         )
         return
     try:
@@ -1565,7 +1565,7 @@ def _update_trade_button_v183(self):
 
 
 def _ensure_v183_runtime(owner):
-    """Build1832 strict runtime repair: the only accepted engine is OKXDemoEngineV183."""
+    """Build1840 strict runtime repair: the only accepted engine is OKXDemoEngineV183."""
     current = getattr(owner, "engine", None)
     if current is None:
         raise legacy_engine.Halt("先连接OKX模拟盘")
@@ -1585,7 +1585,7 @@ def _ensure_v183_runtime(owner):
     owner.engine = replacement
     owner.emit(
         "log",
-        "Build1832：检测到旧Runtime并已强制替换为 OKXDemoEngineV183；Paper Runtime不会被保留。",
+        "Build1840：检测到旧Runtime并已强制替换为 OKXDemoEngineV183；Paper Runtime不会被保留。",
     )
     return replacement
 
@@ -1597,12 +1597,12 @@ def _app_arm_v183(self):
     if not self.engine.x.demo:
         app.messagebox.showerror(
             "禁止实盘",
-            "V1.8.3 Build1832 只允许 OKX模拟盘自动下单；真实账户写入保持硬禁用。",
+            "V1.8.4 Build1840 只允许 OKX模拟盘自动下单；真实账户写入保持硬禁用。",
         )
         return
     typed = app.simpledialog.askstring(
         "启用 OKX Demo AI执行",
-        "KAYTRADE V1.8.3 Build1832 CLEAN\n\n"
+        "KAYTRADE V1.8.4 Build1840 CLEAN\n\n"
         "本地Paper Runtime / 本地撮合 / Paper API 已删除。\n"
         "AI完整策略到达后立即向OKX模拟盘提交LIMIT挂单，不等待行情到达入场价。\n"
         "TP和SL必须同时存在并使用限价保护。\n"
@@ -1617,10 +1617,10 @@ def _app_arm_v183(self):
 
 def _app_init_v183(self, *args, **kwargs):
     _PREVIOUS_APP_INIT(self, *args, **kwargs)
-    self.root.title("KAYTRADE 1.8.3 · OKX DEMO CLEAN · Build 1831")
+    self.root.title("KAYTRADE 1.8.3 · OKX DEMO CLEAN · Build 1840")
     try:
         self.signal.set(
-            "V1.8.3 Build1832 CLEAN｜OKX DEMO ONLY｜AI策略即刻提交LIMIT挂单｜无本地Paper Runtime"
+            "V1.8.4 Build1840 CLEAN｜OKX DEMO ONLY｜AI策略即刻提交LIMIT挂单｜无本地Paper Runtime"
         )
     except Exception:
         pass
@@ -1628,12 +1628,12 @@ def _app_init_v183(self, *args, **kwargs):
     if label is not None:
         try:
             label.configure(
-                text="BTC / USDT   ·   V1.8.3 Build1832 · OKX DEMO ONLY"
+                text="BTC / USDT   ·   V1.8.4 Build1840 · OKX DEMO ONLY"
             )
         except Exception:
             pass
     _install_auto_exec_card_v183(self)
-    # V1.8.0 inserted its AI plan before the original BTC quote. Build1832
+    # V1.8.0 inserted its AI plan before the original BTC quote. Build1840
     # restores the intended clean hierarchy: quote -> auto execution -> plan -> execution.
     try:
         self.quote.pack_forget()
@@ -1711,7 +1711,7 @@ def _bridge_post_v183(self):
         payload = json.loads(self.rfile.read(length).decode("utf-8"))
         engine = self.bridge.owner.engine
         if not isinstance(engine, OKXDemoEngineV183):
-            raise legacy_engine.Halt("当前Runtime不是 V1.8.3 OKX Demo Execution")
+            raise legacy_engine.Halt("当前Runtime不是 V1.8.4 OKX Demo Execution")
         routes = {
             "/v1/trade": engine.submit_ai_trade,
             "/v1/plan": engine.publish_ai_plan,
@@ -1762,7 +1762,7 @@ def _bridge_start_v183(self):
     self.thread.start()
     self.owner.emit(
         "log",
-        f"AI Bridge已启动：127.0.0.1:{actual_port} · V1.8.3 OKX Demo交易所执行",
+        f"AI Bridge已启动：127.0.0.1:{actual_port} · V1.8.4 OKX Demo交易所执行",
     )
 
 
@@ -1785,7 +1785,7 @@ def apply():
         module.BUILD = BUILD
 
     ui166.BUILD = BUILD
-    ui166.WINDOW_TITLE = "KAYTRADE 1.8.3 · OKX DEMO CLEAN · Build 1831"
+    ui166.WINDOW_TITLE = "KAYTRADE 1.8.3 · OKX DEMO CLEAN · Build 1840"
     model.STRATEGY_ENABLED = False
     model.AI_ONLY = True
 
