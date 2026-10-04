@@ -146,6 +146,8 @@ class DemoEngineV190(v183.OKXDemoEngineV183):
 
     def publish_ai_plan(self, plan):
         self._assert_env(plan)
+        if self.enabled:
+            self._preflight_account()
         result = super().publish_ai_plan(plan)
         if isinstance(result, dict):
             result = dict(result)
@@ -358,6 +360,8 @@ class LiveReviewEngineV190(v183.OKXDemoEngineV183):
         with self._ai_lock:
             if not self.enabled:
                 raise legacy_engine.Halt("先启用LIVE AI自动执行通道")
+            if enabled:
+                self._preflight_account()
             state = self._demo_state()
             state["auto_execute_plans"] = bool(enabled)
             state["channel_enabled"] = bool(enabled)
@@ -746,7 +750,7 @@ def _worker_v190(owner):
                     )
                 ):
                     x.account()
-                    _emit_for_env(owner, env, "log", "账户只读认证通过")
+                    _emit_for_env(owner, env, "log", "账户认证通过（未执行写入）")
 
             elif kind == "v190_connect":
                 env, profile = data
@@ -974,9 +978,9 @@ def _update_environment_card(owner):
         if engine is None:
             state = "未连接"
         elif engine.enabled:
-            state = "AI ON" if env == "demo" else "REVIEW ON"
+            state = "AI ON" if env == "demo" else "AUTO ON"
         else:
-            state = "AI OFF" if env == "demo" else "REVIEW OFF"
+            state = "AI OFF" if env == "demo" else "AUTO OFF"
         parts.append(f"{ENV_META[env]['short']} {state}")
     if getattr(owner, "_v190_env_summary", None) is not None:
         owner._v190_env_summary.set("   |   ".join(parts))
