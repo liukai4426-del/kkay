@@ -1,0 +1,6 @@
+[mcp_servers.kaytrade]
+command = "python3"
+args = ["kaytrade_mcp.py"]
+required = true
+startup_timeout_sec = 10
+tool_timeout_sec = 30
