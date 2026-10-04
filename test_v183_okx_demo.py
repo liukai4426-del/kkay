@@ -56,7 +56,7 @@ class DemoExchange:
         return []
 
     def candles(self, _bar):
-        raise AssertionError("V1.8.3 must never request strategy candles")
+        raise AssertionError("V1.8.4 must never request strategy candles")
 
     def ticker(self):
         return {
