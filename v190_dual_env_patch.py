@@ -46,7 +46,7 @@ from core import INSTRUMENT
 from exchange import Exchange, APIError
 
 VERSION = "1.9.1"
-BUILD = "1910"
+BUILD = "1911"
 LIMIT_ONLY = False
 PAPER_RUNTIME_PRESENT = False
 DEMO_BRIDGE_PORT = int(os.getenv("KAYTRADE_DEMO_BRIDGE_PORT", "17872"))
@@ -1428,10 +1428,10 @@ def _app_init_v190(owner, *args, **kwargs):
         pass
 
     owner.root.title(
-        "KAYTRADE 1.9.1 · LIVE EXECUTION · Build 1910"
+        "KAYTRADE 1.9.1 · LIVE EXECUTION · Build 1911"
     )
     owner.signal.set(
-        "V1.9.1 Build1910｜DEMO/LIVE独立自动执行｜LIMIT入场 + 触发市价TP/SL"
+        "V1.9.1 Build1911｜DEMO/LIVE独立自动执行｜LIMIT入场 + 触发市价TP/SL"
     )
     owner._v190_dual_ready = True
     _select_environment(owner, owner._v190_selected)
@@ -1475,7 +1475,7 @@ def apply():
 
     ui166.BUILD = BUILD
     ui166.WINDOW_TITLE = (
-        "KAYTRADE 1.9.1 · LIVE EXECUTION · Build 1910"
+        "KAYTRADE 1.9.1 · LIVE EXECUTION · Build 1911"
     )
 
     v172.AIBridgeServer = _DisabledLegacyBridge
