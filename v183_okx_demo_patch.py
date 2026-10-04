@@ -1514,6 +1514,13 @@ def _app_init_v183(self, *args, **kwargs):
             pass
     try:
         _replace_widget_text(self.book.pages[3].body)
+        self._v181_auto_exec_status_var.set("等待连接 · OKX模拟盘自动执行")
+        self._v181_auto_exec_note_var.set(
+            "完整AI策略会立即提交OKX模拟盘限价挂单；不等待价格触达。TP / SL 必须同时存在且均为限价保护。"
+        )
+        self._v180_mode_var.set("OKX DEMO")
+        self._v180_position_badge_var.set("OKX 空仓")
+        self._v180_order_type_var.set("OKX限价")
     except Exception:
         pass
     self._v183_okx_demo_ready = True
