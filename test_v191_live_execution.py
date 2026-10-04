@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from exchange import APIError, _assert_limit_only_write
 import v190_dual_env_patch as v191
@@ -56,7 +57,7 @@ class V191LiveExecutionTests(unittest.TestCase):
 
     def test_version_and_modes(self):
         self.assertEqual(v191.VERSION, "1.9.1")
-        self.assertEqual(v191.BUILD, "1910")
+        self.assertEqual(v191.BUILD, "1911")
         self.assertEqual(v191.ENV_META["demo"]["mode"], "OKX_DEMO_EXECUTION")
         self.assertEqual(v191.ENV_META["live"]["mode"], "OKX_LIVE_EXECUTION")
         self.assertFalse(v191.LIMIT_ONLY)
@@ -139,6 +140,52 @@ class V191LiveExecutionTests(unittest.TestCase):
         with self.assertRaisesRegex(Exception, "Environment Match Gate"):
             engine.publish_ai_plan(self.plan("demo"))
         self.assertEqual(self.order_writes(raw), [])
+
+    def test_live_activation_check_rejects_foreign_position_and_keeps_gate_closed(self):
+        engine, guarded, raw, _ = self.make_live()
+        raw._positions = [{"posSide": "long", "pos": "1", "mgnMode": "isolated"}]
+        with self.assertRaisesRegex(Exception, "非KAYTRADE管理"):
+            engine.activation_check()
+        self.assertFalse(engine.enabled)
+        self.assertFalse(guarded.writes_enabled)
+        self.assertEqual(self.order_writes(raw), [])
+
+    def test_live_toggle_surfaces_activation_error_instead_of_silent_noop(self):
+        engine, guarded, raw, _ = self.make_live()
+        raw._positions = [{"posSide": "long", "pos": "1", "mgnMode": "isolated"}]
+
+        class Owner:
+            _v190_selected = "live"
+            root = None
+
+            def __init__(self):
+                self._v190_engines = {"demo": None, "live": engine}
+                self.events = []
+
+            def emit(self, kind, data):
+                self.events.append((kind, data))
+
+            def update_trade_button(self):
+                return None
+
+        owner = Owner()
+        with (
+            patch.object(v191.app.simpledialog, "askstring", return_value="LIVE AUTO"),
+            patch.object(v191.app.messagebox, "showerror") as showerror,
+            patch.object(v191, "_update_environment_card", lambda _owner: None),
+            patch.object(v191, "_refresh_v190_dashboard", lambda _owner: None),
+        ):
+            v191._toggle_selected(owner)
+
+        showerror.assert_called_once()
+        message = "\n".join(str(x) for x in showerror.call_args.args)
+        self.assertIn("LIVE AI自动执行开启失败", message)
+        self.assertIn("非KAYTRADE管理", message)
+        self.assertFalse(engine.enabled)
+        self.assertFalse(guarded.writes_enabled)
+        self.assertTrue(
+            any(kind == "alarm" and "LIVE开启失败" in str(data) for kind, data in owner.events)
+        )
 
     def test_live_requires_trade_permission_and_rejects_withdraw(self):
         class UnsafeExchange(DemoExchange):

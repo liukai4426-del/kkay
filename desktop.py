@@ -81,8 +81,8 @@ def smoke_test():
     import v190_dual_env_patch as v190
 
     assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
-    assert v190.VERSION == '1.9.1' and v190.BUILD == '1910'
-    assert model.VERSION == '1.9.1' and model.BUILD == '1910'
+    assert v190.VERSION == '1.9.1' and v190.BUILD == '1911'
+    assert model.VERSION == '1.9.1' and model.BUILD == '1911'
     assert model.STRATEGY_ENABLED is False
     assert getattr(model, '_kaytrade_v190_applied', False)
     assert getattr(app.App, '_kaytrade_v190_applied', False)
@@ -104,7 +104,7 @@ def smoke_test():
                 assert 'KAYTRADE' in root.title()
                 assert '1.9.1' in root.title()
                 assert 'LIVE EXECUTION' in root.title()
-                assert '1910' in root.title()
+                assert '1911' in root.title()
                 assert getattr(ui, '_v190_dual_ready', False)
                 assert set(ui._v190_engines) == {'demo','live'}
                 assert set(ui._v190_bridges) == {'demo','live'}
@@ -130,7 +130,7 @@ def smoke_test():
             root.destroy()
 
     Path(sys.argv[2]).write_text(
-        'PASS: KAYTRADE V1.9.1 Build1910 LIVE EXECUTION; '
+        'PASS: KAYTRADE V1.9.1 Build1911 LIVE EXECUTION; '
         'DEMO and LIVE use isolated AI execution channels, credentials/bridges/tokens/states stay separate, '
         'parent entries/reductions remain LIMIT, TP/SL are trigger-market protections, and no Paper runtime is loaded.\n'
     )

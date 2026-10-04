@@ -46,7 +46,7 @@ from core import INSTRUMENT
 from exchange import Exchange, APIError
 
 VERSION = "1.9.1"
-BUILD = "1910"
+BUILD = "1911"
 LIMIT_ONLY = False
 PAPER_RUNTIME_PRESENT = False
 DEMO_BRIDGE_PORT = int(os.getenv("KAYTRADE_DEMO_BRIDGE_PORT", "17872"))
@@ -302,12 +302,22 @@ class LiveReviewEngineV190(v183.OKXDemoEngineV183):
             "V1.9.1 OKX实盘连接成功：默认写入锁关闭；需人工开启LIVE AI自动执行通道。",
         )
 
-    def arm(self, _settings=None):
+    def activation_check(self):
+        """Read-only LIVE preflight used by the UI before opening the write gate."""
         with self._ai_lock:
             self.x.set_writes_enabled(False)
             self._preflight_account()
             self._sync_all(cancel_expired=False)
             self._foreign_state_check()
+            return {
+                "ok": True,
+                "environment": "live",
+                "mode": ENV_META["live"]["mode"],
+            }
+
+    def arm(self, _settings=None):
+        with self._ai_lock:
+            self.activation_check()
             state = self._demo_state()
             state["auto_execute_plans"] = True
             state["channel_enabled"] = True
@@ -785,6 +795,8 @@ def _worker_v190(owner):
                         ),
                     )
                 engine.connect()
+                if env == "live":
+                    owner._v191_live_activation_error = ""
                 owner._v190_engines[env] = engine
                 if owner._v190_selected == env:
                     owner.engine = engine
@@ -855,41 +867,107 @@ def _toggle_selected(owner):
         app.messagebox.showerror("未连接", f"先连接 {_env_label(env)}")
         return
 
-    if env == "demo":
-        if engine.enabled:
-            try:
-                engine.set_auto_execute_plans(False)
-            finally:
-                engine.stop()
-        else:
-            typed = app.simpledialog.askstring(
-                "启用DEMO AI自动执行",
-                "OKX模拟盘：AI完整方案会立即提交LIMIT挂单。\n"
-                "入场/TP/SL/减仓均为LIMIT ONLY。\n\n"
-                "确认请输入 DEMO AUTO",
-                parent=owner.root,
-            )
-            if typed and typed.strip().upper() == "DEMO AUTO":
+    try:
+        if env == "demo":
+            if engine.enabled:
+                try:
+                    engine.set_auto_execute_plans(False)
+                finally:
+                    engine.stop()
+            else:
+                typed = app.simpledialog.askstring(
+                    "启用DEMO AI自动执行",
+                    "OKX模拟盘：AI完整方案会立即提交LIMIT挂单。\n"
+                    "入场为LIMIT；TP/SL触发后按市价执行。\n\n"
+                    "确认请输入 DEMO AUTO",
+                    parent=owner.root,
+                )
+                if not (typed and typed.strip().upper() == "DEMO AUTO"):
+                    return
                 engine.arm(None)
                 engine.set_auto_execute_plans(True)
-    else:
-        if engine.enabled:
-            engine.set_review_enabled(False)
         else:
-            typed = app.simpledialog.askstring(
-                "启用LIVE AI执行通道",
-                "OKX实盘：开启后完整AI方案可自动提交真实账户。\n"
-                "入场/减仓仅限LIMIT；TP/SL触发后按市价执行。\n"
-                "请确认API仅有读取+交易权限且无提币权限。\n\n"
-                "确认请输入 LIVE AUTO",
-                parent=owner.root,
-            )
-            if typed and typed.strip().upper() == "LIVE AUTO":
+            if engine.enabled:
+                engine.set_review_enabled(False)
+                _emit_for_env(owner, env, "log", "LIVE AI自动执行已由用户关闭")
+            else:
+                typed = app.simpledialog.askstring(
+                    "启用LIVE AI自动执行",
+                    "OKX实盘：开启后完整AI方案可自动提交真实账户。\n"
+                    "入场/减仓仅限LIMIT；TP/SL触发后按市价执行。\n"
+                    "请确认API仅有读取+交易权限且无提币权限。\n\n"
+                    "确认请输入 LIVE AUTO",
+                    parent=owner.root,
+                )
+                if not (typed and typed.strip().upper() == "LIVE AUTO"):
+                    return
+
+                # Read-only preflight first. If account mode/permissions, an old
+                # halt, foreign BTC positions/orders, or a REST read blocks LIVE,
+                # show the exact reason instead of failing silently inside Tk.
+                engine.activation_check()
                 engine.set_review_enabled(True)
 
-    owner.update_trade_button()
-    _update_environment_card(owner)
-    _refresh_v190_dashboard(owner)
+                state = engine._review_state()
+                write_gate = bool(
+                    getattr(engine.x, "writes_enabled", False)
+                )
+                if not (
+                    engine.enabled
+                    and bool(state.get("channel_enabled"))
+                    and write_gate
+                ):
+                    raise legacy_engine.Halt(
+                        "LIVE开关状态校验失败：Engine / State / Write Gate 未同时开启"
+                    )
+                _emit_for_env(
+                    owner,
+                    env,
+                    "log",
+                    "LIVE AI自动执行开启成功：Engine=ON / State=ON / Write Gate=ON",
+                )
+
+    except Exception as exc:
+        # Fail closed. A rejected activation must never leave the live write
+        # gate half-open, and packaged macOS builds must surface the blocker.
+        if env == "live":
+            try:
+                engine.enabled = False
+                engine.stopped = True
+                if hasattr(engine.x, "set_writes_enabled"):
+                    engine.x.set_writes_enabled(False)
+                state = engine._review_state() if engine.store else None
+                if isinstance(state, dict):
+                    state["channel_enabled"] = False
+                    state["auto_execute_plans"] = False
+                    state["updated_at"] = time.time()
+                    engine.store.save()
+            except Exception:
+                try:
+                    if hasattr(engine.x, "set_writes_enabled"):
+                        engine.x.set_writes_enabled(False)
+                except Exception:
+                    pass
+            owner._v191_live_activation_error = str(exc)
+            _emit_for_env(owner, env, "alarm", f"LIVE开启失败：{exc}")
+            app.messagebox.showerror(
+                "LIVE AI自动执行开启失败",
+                "未开启实盘写入。\n\n"
+                f"原因：{exc}\n\n"
+                "请按提示处理后再开启；当前 LIVE Write Gate 保持关闭。",
+                parent=owner.root,
+            )
+        else:
+            _emit_for_env(owner, env, "alarm", f"DEMO开启失败：{exc}")
+            app.messagebox.showerror(
+                "DEMO AI自动执行开启失败",
+                str(exc),
+                parent=owner.root,
+            )
+    finally:
+        owner.update_trade_button()
+        _update_environment_card(owner)
+        _refresh_v190_dashboard(owner)
 
 
 def _update_trade_button(owner):
@@ -1038,8 +1116,11 @@ def _refresh_v190_dashboard(owner):
                 if channel_on
                 else "已关闭 · 禁止LIVE实盘写入"
             )
+            last_error = str(getattr(owner, "_v191_live_activation_error", "") or "")
             auto_note = (
                 "LIVE：开关开启后AI方案自动提交实盘LIMIT入场；TP/SL触发后市价保护。"
+                if not last_error or channel_on
+                else f"LIVE开启失败：{last_error}"
             )
         else:
             channel_on = False
@@ -1347,10 +1428,10 @@ def _app_init_v190(owner, *args, **kwargs):
         pass
 
     owner.root.title(
-        "KAYTRADE 1.9.1 · LIVE EXECUTION · Build 1910"
+        "KAYTRADE 1.9.1 · LIVE EXECUTION · Build 1911"
     )
     owner.signal.set(
-        "V1.9.1 Build1910｜DEMO/LIVE独立自动执行｜LIMIT入场 + 触发市价TP/SL"
+        "V1.9.1 Build1911｜DEMO/LIVE独立自动执行｜LIMIT入场 + 触发市价TP/SL"
     )
     owner._v190_dual_ready = True
     _select_environment(owner, owner._v190_selected)
@@ -1394,7 +1475,7 @@ def apply():
 
     ui166.BUILD = BUILD
     ui166.WINDOW_TITLE = (
-        "KAYTRADE 1.9.1 · LIVE EXECUTION · Build 1910"
+        "KAYTRADE 1.9.1 · LIVE EXECUTION · Build 1911"
     )
 
     v172.AIBridgeServer = _DisabledLegacyBridge
