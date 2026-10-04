@@ -1,4 +1,4 @@
-# KAYTRADE V1.8.1 PAPER EXECUTION · Build1812
+# KAYTRADE V1.8.1 PAPER EXECUTION · Build1813
 
 V1.8.1 converts the V1.8 AI-only execution layer into a local paper-trading state machine.
 OKX is used only for read-side market/account context; this build does not send OKX order,
@@ -17,8 +17,8 @@ Each tier persists its own entry order, fill, TP/SL protection, exit order, time
 ## Entry
 
 Supported:
-- market paper entry;
-- limit paper entry;
+- LIMIT-only paper entry;
+- LIMIT-only paper entry;
 - Tier 1 + Tier 2 same-direction concurrent limit orders;
 - 60-minute timeout from original acceptance time;
 - automatic cancellation of the unfilled entry remainder when the deadline is reached;
@@ -36,7 +36,7 @@ When enabled:
 - `take_profit` and `stop_loss` are both mandatory;
 - direction, size, leverage and order type are also required;
 - a limit recommendation additionally requires an entry price;
-- if any mandatory field is missing or the plan violates the existing Paper limits, the recommendation remains visible but is marked rejected and no Paper order is created;
+- if any mandatory field is missing, any non-limit order type is proposed, or the plan violates the existing Paper limits, the recommendation remains visible but is marked rejected and no Paper order is created;
 - if the same Tier already has an identical unfilled recommendation, the existing Paper order is kept without duplication;
 - if that Tier has a changed but still-unfilled recommendation, the old pending Paper order is replaced with the newest plan and a new 60-minute deadline begins;
 - if the Tier already has a filled position or active exit, a new entry recommendation is rejected instead of overwriting the position.
@@ -48,9 +48,7 @@ Codex cannot turn this user setting on by itself.
 
 Each tier has independent TP and SL settings.
 
-Both TP and SL can use:
-- market exit after trigger;
-- limit exit after trigger.
+Both TP and SL use LIMIT exits after trigger. If a separate protection limit is omitted, the trigger price itself becomes the limit price.
 
 For a limit protection exit, the trigger first creates a local paper limit exit and the
 position remains open until the simulated market reaches the specified limit price.
@@ -66,8 +64,7 @@ AI can amend:
 ## Partial close / reduction
 
 Paper positions support:
-- market reduction by a specified contract quantity;
-- limit reduction by a specified contract quantity;
+- LIMIT reduction by a specified contract quantity;
 - targeting Tier 1 or Tier 2;
 - aggregate reduction across both tiers when no tier is specified.
 
@@ -103,11 +100,11 @@ Paper execution:
 - amend_paper_protection
 - close_paper_position
 
-No command in V1.8.1 sends an OKX write request.
+No command in V1.8.1 sends an OKX write request. Build1813 additionally rejects every non-limit entry, close, TP, and SL execution request.
 
 ## Package
 
 - Version: 1.8.1
-- Build: 1812
+- Build: 1813
 - Mode: PAPER AI
 - Intel macOS 14+
