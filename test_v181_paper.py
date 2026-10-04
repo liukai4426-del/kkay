@@ -67,7 +67,7 @@ class V181PaperTests(unittest.TestCase):
 
     def test_identity_and_paper_only(self):
         self.assertEqual(v181.VERSION, "1.8.1")
-        self.assertEqual(v181.BUILD, "1810")
+        self.assertEqual(v181.BUILD, "1811")
         self.assertTrue(v181.PAPER_ONLY)
         self.assertIs(v181.app.Engine, v181.PaperEngineV181)
 
@@ -182,6 +182,111 @@ class V181PaperTests(unittest.TestCase):
         self.assertEqual(result["status"], "CANCELED")
         self.assertEqual(e.store.data["paper_execution"]["tiers"]["1"]["status"], "canceled")
 
+    def test_auto_execute_setting_defaults_off(self):
+        e, _x = self.make_engine()
+        state = e.ai_state()
+        self.assertFalse(state["auto_execute_plans"])
+        self.assertTrue(state["supports_auto_execute_ai_plans"])
+        self.assertTrue(state["auto_execute_requires_tp_sl"])
+
+    def test_auto_execute_limit_plan_with_tp_sl(self):
+        e, x = self.make_engine()
+        e.set_auto_execute_plans(True)
+        result = e.publish_ai_plan(
+            {
+                "plan_id": "auto-limit-t1",
+                "tier": 1,
+                "action": "open",
+                "direction": "long",
+                "order_type": "limit",
+                "suggested_entry": 99000,
+                "size": 1,
+                "leverage": 5,
+                "take_profit": 102000,
+                "stop_loss": 98000,
+                "reason": "auto plan test",
+                "operation_advice": "实时挂单等待成交",
+            }
+        )
+        self.assertEqual(result["status"], "AUTO_EXECUTED")
+        self.assertEqual(result["auto_execution"], "EXECUTED")
+        tier = e.store.data["paper_execution"]["tiers"]["1"]
+        self.assertEqual(tier["status"], "live")
+        self.assertEqual(tier["limit_price"], 99000.0)
+        self.assertEqual(tier["take_profit"], 102000.0)
+        self.assertEqual(tier["stop_loss"], 98000.0)
+        self.assertEqual(x.posts, [])
+
+    def test_auto_execute_market_plan_with_tp_sl(self):
+        e, x = self.make_engine()
+        e.set_auto_execute_plans(True)
+        result = e.publish_ai_plan(
+            {
+                "plan_id": "auto-market-t2",
+                "tier": 2,
+                "action": "open",
+                "direction": "short",
+                "order_type": "market",
+                "size": 1,
+                "leverage": 5,
+                "take_profit": 98000,
+                "stop_loss": 102000,
+                "reason": "auto market test",
+            }
+        )
+        self.assertEqual(result["status"], "AUTO_EXECUTED")
+        tier = e.store.data["paper_execution"]["tiers"]["2"]
+        self.assertEqual(tier["status"], "filled")
+        self.assertEqual(tier["take_profit"], 98000.0)
+        self.assertEqual(tier["stop_loss"], 102000.0)
+        self.assertEqual(x.posts, [])
+
+    def test_auto_execute_rejects_missing_take_profit_or_stop_loss(self):
+        e, x = self.make_engine()
+        e.set_auto_execute_plans(True)
+        result = e.publish_ai_plan(
+            {
+                "plan_id": "missing-protection",
+                "tier": 1,
+                "action": "open",
+                "direction": "long",
+                "order_type": "limit",
+                "suggested_entry": 99000,
+                "size": 1,
+                "leverage": 5,
+                "take_profit": 102000,
+                "reason": "missing sl",
+            }
+        )
+        self.assertEqual(result["status"], "AUTO_REJECTED_NO_TP_SL")
+        self.assertEqual(result["auto_execution"], "REJECTED")
+        self.assertIsNone(e.store.data["paper_execution"]["tiers"]["1"])
+        self.assertEqual(x.posts, [])
+        self.assertIn("stop_loss", result["error"])
+
+    def test_auto_execute_off_only_records_recommendation(self):
+        e, x = self.make_engine()
+        result = e.publish_ai_plan(
+            {
+                "plan_id": "manual-only",
+                "tier": 1,
+                "action": "open",
+                "direction": "long",
+                "order_type": "limit",
+                "suggested_entry": 99000,
+                "size": 1,
+                "leverage": 5,
+                "take_profit": 102000,
+                "stop_loss": 98000,
+                "reason": "display only",
+            }
+        )
+        self.assertEqual(result["status"], "RECOMMENDED")
+        self.assertEqual(result["auto_execution"], "OFF")
+        self.assertIsNone(e.store.data["paper_execution"]["tiers"]["1"])
+        self.assertEqual(x.posts, [])
+
+
     def test_state_advertises_all_v181_capabilities(self):
         e, _x = self.make_engine()
         state = e.ai_state()
@@ -195,6 +300,8 @@ class V181PaperTests(unittest.TestCase):
         self.assertTrue(state["supports_amend_protection"])
         self.assertTrue(state["supports_two_same_direction_tiers"])
         self.assertEqual(state["entry_auto_cancel_seconds"], 3600)
+        self.assertTrue(state["supports_auto_execute_ai_plans"])
+        self.assertTrue(state["auto_execute_requires_tp_sl"])
 
 
 if __name__ == "__main__":
