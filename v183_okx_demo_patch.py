@@ -20,7 +20,7 @@ import time
 import uuid
 from decimal import Decimal
 
-from v182_ui_patch import apply as apply_previous
+from v180_ai_only_patch import apply as apply_previous
 apply_previous()
 
 import app
@@ -35,14 +35,12 @@ import v170_build1701_patch as v1701
 import v171_update_patch as v171
 import v172_ai_only_patch as v172
 import v180_ai_only_patch as v180
-import v181_paper_patch as v181
-import v182_ui_patch as v182
 import visual
 from core import INSTRUMENT
 from exchange import APIError
 
 VERSION = "1.8.3"
-BUILD = "1830"
+BUILD = "1831"
 AI_ONLY = True
 DEMO_EXECUTION = True
 LIMIT_ONLY = True
@@ -94,14 +92,40 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
     """Exchange-backed AI engine. All writes are hard-limited to OKX Demo."""
 
     def connect(self):
-        # Follow the class MRO captured when V1.8.0 was defined; do not use the
-        # mutable v172.AIOnlyEngine module alias (V1.8.1 repoints that alias).
         super().connect()
+        self._purge_removed_paper_state()
         self._ensure_demo_state()
         self.emit(
             "log",
-            "V1.8.3 OKX Demo：已切换为交易所执行；AI完整方案会立即提交OKX模拟盘限价单，不做本地撮合。",
+            "V1.8.3 Build1831 Clean：仅OKX模拟盘交易所执行；本地Paper Runtime/撮合/API已从当前程序删除。",
         )
+
+    def _purge_removed_paper_state(self):
+        """One-way migration: delete obsolete local Paper execution state."""
+        if not self.store:
+            return
+        removed = self.store.data.pop("paper_execution", None) is not None
+        history = self.store.data.get("ai_plan_history") or []
+        clean_history = [
+            item for item in history
+            if "PAPER" not in str((item or {}).get("status") or "").upper()
+            and "PAPER" not in str((item or {}).get("mode") or "").upper()
+        ]
+        if len(clean_history) != len(history):
+            self.store.data["ai_plan_history"] = clean_history[-30:]
+            removed = True
+        tiers = self.store.data.get("ai_tiers") or {}
+        for key in list(tiers):
+            item = tiers.get(key)
+            if isinstance(item, dict) and (
+                "PAPER" in str(item.get("status") or "").upper()
+                or "PAPER" in str(item.get("mode") or "").upper()
+            ):
+                tiers.pop(key, None)
+                removed = True
+        if removed:
+            self.store.save()
+            self.emit("log", "Build1831：已删除旧 paper_execution 本地模拟状态；不会迁移为OKX订单。")
 
     def _ensure_demo_state(self):
         if not self.store:
@@ -1210,6 +1234,7 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
             "ai_enabled": bool(self.enabled),
             "demo_exchange_writes": True,
             "live_ai_writes": False,
+            "paper_runtime_present": False,
             "limit_only": True,
             "supported_entry_order_types": ["limit"],
             "supported_close_order_types": ["limit"],
@@ -1253,6 +1278,63 @@ def _tier_ui_text(item):
     )
 
 
+def _install_auto_exec_card_v183(owner):
+    if getattr(owner, "_v183_auto_exec_card", None) is not None:
+        return
+    dash = owner.book.pages[3].body
+    card = visual.Card(dash, height=112)
+    kwargs = dict(fill="x", pady=(0, 12))
+    plan = getattr(owner, "_v180_plan_card", None)
+    if plan is not None:
+        kwargs["before"] = plan
+    card.pack(**kwargs)
+
+    row = app.tk.Frame(card.body, bg=visual.PANEL)
+    row.pack(fill="both", expand=True)
+    left = app.tk.Frame(row, bg=visual.PANEL)
+    left.pack(side="left", fill="both", expand=True)
+    visual.label(
+        left,
+        text="OKX Demo · AI方案自动执行",
+        size=16,
+        bold=True,
+        color=visual.TEXT,
+        bg=visual.PANEL,
+    ).pack(anchor="w")
+    owner._v183_auto_exec_status_var = app.tk.StringVar(
+        value="等待连接 · 默认自动执行"
+    )
+    owner._v183_auto_exec_note_var = app.tk.StringVar(
+        value="完整AI策略到达后立即提交OKX模拟盘LIMIT挂单；不等待价格触达。"
+    )
+    visual.label(
+        left,
+        variable=owner._v183_auto_exec_status_var,
+        size=11,
+        bold=True,
+        color=visual.GREEN,
+        bg=visual.PANEL,
+    ).pack(anchor="w", pady=(5, 1))
+    visual.label(
+        left,
+        variable=owner._v183_auto_exec_note_var,
+        size=9,
+        color=visual.MUTED,
+        bg=visual.PANEL,
+    ).pack(anchor="w")
+
+    owner._v183_auto_exec_button = visual.RoundedButton(
+        row,
+        text="关闭自动执行",
+        command=lambda: _toggle_auto_execute_v183(owner),
+        variant="danger",
+        width=160,
+        height=42,
+    )
+    owner._v183_auto_exec_button.pack(side="right", padx=(20, 0), pady=10)
+    owner._v183_auto_exec_card = card
+
+
 def _refresh_v183_dashboard(owner):
     try:
         engine = getattr(owner, "engine", None)
@@ -1264,23 +1346,26 @@ def _refresh_v183_dashboard(owner):
         latest = history[-1] if history else {}
         auto_on = bool(demo.get("auto_execute_plans", True))
 
-        owner._v181_auto_exec_status_var.set(
-            "已开启 · AI策略到达即提交OKX模拟盘"
-            if auto_on else
-            "关闭 · AI推荐仅展示"
-        )
-        owner._v181_auto_exec_note_var.set(
-            "完整策略立即发送OKX限价挂单；不等待价格触达。TP / SL 必须同时存在且均为限价保护。"
-            if auto_on else
-            "自动执行关闭：AI方案只显示，不向OKX发送新订单。"
-        )
-        owner._v181_auto_exec_button.configure(
-            text="关闭自动执行" if auto_on else "开启自动执行",
-            variant="danger" if auto_on else "accent",
-        )
-        owner._v180_mode_var.set("OKX DEMO · AUTO ON" if auto_on else "OKX DEMO · MANUAL")
+        if hasattr(owner, "_v183_auto_exec_status_var"):
+            owner._v183_auto_exec_status_var.set(
+                "已开启 · AI策略到达即提交OKX模拟盘"
+                if auto_on else
+                "已关闭 · AI推荐仅展示"
+            )
+            owner._v183_auto_exec_note_var.set(
+                "完整策略立即发送OKX限价挂单；不等待价格触达。TP / SL 必须同时存在且均为限价保护。"
+                if auto_on else
+                "自动执行关闭：AI方案只显示，不向OKX发送新订单。"
+            )
+            owner._v183_auto_exec_button.configure(
+                text="关闭自动执行" if auto_on else "开启自动执行",
+                variant="danger" if auto_on else "accent",
+            )
 
-        direction = ""
+        owner._v180_mode_var.set(
+            "OKX DEMO · AUTO ON" if auto_on else "OKX DEMO · MANUAL"
+        )
+
         if latest:
             direction = str(latest.get("direction") or "").lower()
             owner._v180_side_var.set(v180._side_cn(direction))
@@ -1293,20 +1378,16 @@ def _refresh_v183_dashboard(owner):
             owner._v180_tp_var.set(v180._fmt_px(latest.get("take_profit")))
             owner._v180_sl_var.set(v180._fmt_px(latest.get("stop_loss")))
             owner._v180_reason_var.set(str(latest.get("reason") or "—"))
-            owner._v180_advice_var.set(str(latest.get("operation_advice") or "等待AI建议"))
-            owner._v180_status_chip_var.set(str(latest.get("status") or "RECOMMENDED"))
+            owner._v180_advice_var.set(
+                str(latest.get("operation_advice") or "等待AI建议")
+            )
+            owner._v180_status_chip_var.set(
+                str(latest.get("status") or "RECOMMENDED")
+            )
         else:
             owner._v180_side_var.set("等待 AI 方向")
             owner._v180_entry_var.set("—")
             owner._v180_status_chip_var.set("WAITING")
-
-        accent = (
-            visual.GREEN if direction == "long"
-            else visual.RED if direction == "short"
-            else visual.TEXT
-        )
-        owner._v181_direction_label.configure(fg=accent)
-        owner._v182_entry_value_label.configure(fg=accent)
 
         rows = []
         for item in history[-5:][::-1]:
@@ -1320,48 +1401,44 @@ def _refresh_v183_dashboard(owner):
                 f"{stamp}  T{item.get('tier') or 1}  {side:<5} LMT  "
                 f"{v180._fmt_px(entry):>10}  {str(item.get('status') or '')[:18]}"
             )
-        owner._v180_history_var.set("\n".join(rows) if rows else "暂无 AI 方案记录")
+        owner._v180_history_var.set(
+            "\n".join(rows) if rows else "暂无 AI 方案记录"
+        )
 
         t1 = tiers.get("1")
         t2 = tiers.get("2")
         owner._v180_tier1_var.set(_tier_ui_text(t1))
         owner._v180_tier2_var.set(_tier_ui_text(t2))
-        for label, item in (
-            (owner._v181_tier1_label, t1),
-            (owner._v181_tier2_label, t2),
-        ):
-            side = str((item or {}).get("direction") or "").lower()
-            label.configure(
-                fg=visual.GREEN if side == "long"
-                else visual.RED if side == "short"
-                else visual.TEXT
-            )
 
         active_items = [x for x in (t1, t2) if _active(x)]
         if active_items:
-            item = next((x for x in active_items if float(x.get("filled_size") or 0) > 0), active_items[0])
+            item = next(
+                (x for x in active_items if float(x.get("filled_size") or 0) > 0),
+                active_items[0],
+            )
             owner._v180_order_state_var.set(
                 str(item.get("order_state") or item.get("status") or "—").upper()
             )
             owner._v180_order_type_var.set("OKX限价")
-            owner._v180_order_px_var.set(v180._fmt_px(item.get("limit_price")))
-            owner._v180_fill_px_var.set(v180._fmt_px(item.get("entry_price")))
+            owner._v180_order_px_var.set(
+                v180._fmt_px(item.get("limit_price"))
+            )
+            owner._v180_fill_px_var.set(
+                v180._fmt_px(item.get("entry_price"))
+            )
             owner._v180_size_var.set(
                 f"{sum(_position_size(x) for x in active_items):g} 张"
             )
-            owner._v180_position_tp_var.set(v180._fmt_px(item.get("take_profit")))
-            owner._v180_position_sl_var.set(v180._fmt_px(item.get("stop_loss")))
-            owner._v180_proposal_var.set(str(item.get("proposal_id") or "—")[:22])
+            owner._v180_position_tp_var.set(
+                v180._fmt_px(item.get("take_profit"))
+            )
+            owner._v180_position_sl_var.set(
+                v180._fmt_px(item.get("stop_loss"))
+            )
+            owner._v180_proposal_var.set(
+                str(item.get("proposal_id") or "—")[:22]
+            )
             owner._v180_position_badge_var.set("OKX 持仓/委托")
-            side = str(item.get("direction") or "").lower()
-            try:
-                owner._v181_position_badge_label.body.winfo_children()[0].configure(
-                    fg=visual.GREEN if side == "long"
-                    else visual.RED if side == "short"
-                    else visual.TEXT
-                )
-            except Exception:
-                pass
         else:
             owner._v180_order_state_var.set("等待OKX委托")
             owner._v180_order_type_var.set("OKX限价")
@@ -1382,45 +1459,13 @@ def _refresh_v183_dashboard(owner):
         pass
 
 
-def _replace_widget_text(widget):
-    def rewrite(value):
-        return (
-            str(value or "")
-            .replace("本地Paper", "OKX模拟盘")
-            .replace("Paper", "OKX模拟盘")
-            .replace("PAPER", "OKX DEMO")
-        )
-
-    try:
-        text = str(widget.cget("text") or "")
-        new = rewrite(text)
-        if text and new != text:
-            widget.configure(text=new)
-    except Exception:
-        pass
-
-    # visual.RoundedButton stores its caption in .text rather than Tk's
-    # text option, so normalize that too (including hidden legacy buttons).
-    try:
-        text_attr = getattr(widget, "text", None)
-        if isinstance(text_attr, str):
-            new_attr = rewrite(text_attr)
-            if new_attr != text_attr:
-                widget.configure(text=new_attr)
-    except Exception:
-        pass
-
-    try:
-        for child in widget.winfo_children():
-            _replace_widget_text(child)
-    except Exception:
-        pass
-
-
 def _toggle_auto_execute_v183(owner):
     engine = getattr(owner, "engine", None)
     if engine is None or not isinstance(engine, OKXDemoEngineV183):
-        app.messagebox.showerror("未连接", "先连接并启用 V1.8.3 OKX Demo AI执行通道")
+        app.messagebox.showerror(
+            "未连接",
+            "先连接并启用 V1.8.3 Build1831 OKX Demo AI执行通道",
+        )
         return
     try:
         current = bool(engine._demo_state().get("auto_execute_plans", True))
@@ -1432,7 +1477,6 @@ def _toggle_auto_execute_v183(owner):
 
 _PREVIOUS_APP_INIT = app.App.__init__
 _PREVIOUS_APP_EMIT = app.App.emit
-_PREVIOUS_BRIDGE_POST = v172._BridgeHandler.do_POST
 
 
 def _rewrite_v183_text(data):
@@ -1441,14 +1485,8 @@ def _rewrite_v183_text(data):
     text = (
         data.replace("V1.7.2", VERSION)
         .replace("V1.8.0", VERSION)
-        .replace("V1.8.1", VERSION)
-        .replace("V1.8.2", VERSION)
         .replace("Build1723", f"Build{BUILD}")
         .replace("Build1801", f"Build{BUILD}")
-        .replace("Build1813", f"Build{BUILD}")
-        .replace("Build1820", f"Build{BUILD}")
-        .replace("Paper运行", "OKX模拟盘执行")
-        .replace("PAPER", "OKX DEMO")
     )
     if text.startswith("全自动运行 / 模拟盘"):
         return "OKX模拟盘执行 / AI限价委托"
@@ -1472,6 +1510,32 @@ def _update_trade_button_v183(self):
     )
 
 
+def _ensure_v183_runtime(owner):
+    """Build1831 strict runtime repair: the only accepted engine is OKXDemoEngineV183."""
+    current = getattr(owner, "engine", None)
+    if current is None:
+        raise legacy_engine.Halt("先连接OKX模拟盘")
+    if isinstance(current, OKXDemoEngineV183):
+        return current
+
+    x = getattr(current, "x", None)
+    if x is None:
+        raise legacy_engine.Halt("当前连接缺少Exchange对象，无法切换到OKX Demo Runtime")
+
+    try:
+        current.enabled = False
+    except Exception:
+        pass
+    replacement = OKXDemoEngineV183(x, owner.folder, owner.emit)
+    replacement.connect()
+    owner.engine = replacement
+    owner.emit(
+        "log",
+        "Build1831：检测到旧Runtime并已强制替换为 OKXDemoEngineV183；Paper Runtime不会被保留。",
+    )
+    return replacement
+
+
 def _app_arm_v183(self):
     if not self.engine:
         app.messagebox.showerror("未连接", "先连接 OKX模拟盘")
@@ -1479,15 +1543,15 @@ def _app_arm_v183(self):
     if not self.engine.x.demo:
         app.messagebox.showerror(
             "禁止实盘",
-            "V1.8.3 只允许 OKX模拟盘自动下单；真实账户写入保持硬禁用。",
+            "V1.8.3 Build1831 只允许 OKX模拟盘自动下单；真实账户写入保持硬禁用。",
         )
         return
     typed = app.simpledialog.askstring(
         "启用 OKX Demo AI执行",
-        "KAYTRADE V1.8.3 OKX DEMO EXECUTION\n\n"
-        "AI完整策略到达后会立即向OKX模拟盘提交限价挂单，"
-        "不会等待行情到达入场价。\n"
-        "仅支持LIMIT；TP和SL必须同时存在并使用限价保护。\n"
+        "KAYTRADE V1.8.3 Build1831 CLEAN\n\n"
+        "本地Paper Runtime / 本地撮合 / Paper API 已删除。\n"
+        "AI完整策略到达后立即向OKX模拟盘提交LIMIT挂单，不等待行情到达入场价。\n"
+        "TP和SL必须同时存在并使用限价保护。\n"
         "支持同方向第一档/第二档、60分钟未完全成交撤销剩余挂单、改单/撤单/限价减仓。\n"
         "真实账户自动写入仍被硬禁用。\n\n"
         "确认启用请输入 DEMO",
@@ -1499,31 +1563,30 @@ def _app_arm_v183(self):
 
 def _app_init_v183(self, *args, **kwargs):
     _PREVIOUS_APP_INIT(self, *args, **kwargs)
-    self.root.title("KAYTRADE 1.8.3 · OKX DEMO · Build 1830")
+    self.root.title("KAYTRADE 1.8.3 · OKX DEMO CLEAN · Build 1831")
     try:
         self.signal.set(
-            "V1.8.3 OKX DEMO｜AI策略到达即提交交易所LIMIT挂单｜TP/SL限价保护｜双档 / 60分钟撤单"
+            "V1.8.3 Build1831 CLEAN｜OKX DEMO ONLY｜AI策略即刻提交LIMIT挂单｜无本地Paper Runtime"
         )
     except Exception:
         pass
     label = getattr(self, "_v170_version_label", None)
     if label is not None:
         try:
-            label.configure(text="BTC / USDT   ·   V1.8.3 OKX DEMO · LIMIT ONLY")
+            label.configure(
+                text="BTC / USDT   ·   V1.8.3 Build1831 · OKX DEMO ONLY"
+            )
         except Exception:
             pass
+    _install_auto_exec_card_v183(self)
     try:
-        _replace_widget_text(self.book.pages[3].body)
-        self._v181_auto_exec_status_var.set("等待连接 · OKX模拟盘自动执行")
-        self._v181_auto_exec_note_var.set(
-            "完整AI策略会立即提交OKX模拟盘限价挂单；不等待价格触达。TP / SL 必须同时存在且均为限价保护。"
-        )
         self._v180_mode_var.set("OKX DEMO")
         self._v180_position_badge_var.set("OKX 空仓")
         self._v180_order_type_var.set("OKX限价")
     except Exception:
         pass
     self._v183_okx_demo_ready = True
+    self._v183_paper_runtime_present = False
     self.update_trade_button()
 
 
@@ -1566,15 +1629,6 @@ def _bridge_get_v183(self):
 
 def _bridge_post_v183(self):
     if not self._require_auth():
-        return
-    old_paper = (
-        "/v1/paper/cancel-entry",
-        "/v1/paper/amend-entry",
-        "/v1/paper/amend-protection",
-        "/v1/paper/close",
-    )
-    if self.path in old_paper:
-        self._json(410, {"error": "V1.8.3 已移除本地Paper执行；请使用 /v1/demo/*"})
         return
     allowed = {
         "/v1/trade",
@@ -1662,25 +1716,21 @@ def apply():
         v171,
         v172,
         v180,
-        v181,
-        v182,
     ):
         module.VERSION = VERSION
         module.BUILD = BUILD
 
     ui166.BUILD = BUILD
-    ui166.WINDOW_TITLE = "KAYTRADE 1.8.3 · OKX DEMO · Build 1830"
+    ui166.WINDOW_TITLE = "KAYTRADE 1.8.3 · OKX DEMO CLEAN · Build 1831"
     model.STRATEGY_ENABLED = False
     model.AI_ONLY = True
 
     app.Engine = OKXDemoEngineV183
     legacy_engine.AIOnlyEngine = OKXDemoEngineV183
-
-    # The V1.8.1 auto-exec button created by V1.8.2 resolves this symbol at click time.
-    v181._toggle_auto_execute = _toggle_auto_execute_v183
-    # The refresh loop scheduled by V1.8.1 also resolves its module symbol dynamically.
-    v181._refresh_v181_dashboard = _refresh_v183_dashboard
-    v182._refresh_v182_dashboard = _refresh_v183_dashboard
+    v172.AIOnlyEngine = OKXDemoEngineV183
+    v172._ensure_ai_only_engine = _ensure_v183_runtime
+    # V1.8.0 owns the clean dashboard; redirect its scheduled refresh loop.
+    v180._refresh_v180_dashboard = _refresh_v183_dashboard
 
     app.App.__init__ = _app_init_v183
     app.App.emit = _app_emit_v183
