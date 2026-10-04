@@ -9,6 +9,10 @@ Before any paper action:
 4. keep simultaneous tiers in the same direction;
 5. respect the 20x / 3500 USDT / 100 USDT aggregate limits.
 
+When get_kaytrade_state reports auto_execute_plans=true, publish_trade_plan may immediately create a local Paper entry. For every executable open plan, always provide direction, size, leverage, order_type, take_profit and stop_loss. Limit plans also need limit_price or suggested_entry. Never omit TP or SL.
+
+The auto-execution switch is user-controlled in KAYTRADE; Codex must not enable it on the user's behalf.
+
 Supported paper actions:
 - market/limit entry via submit_trade_proposal;
 - cancel_paper_entry;
