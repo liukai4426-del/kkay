@@ -112,6 +112,9 @@ def smoke_test():
                 assert getattr(ui, '_v180_plan_card', None) is not None
                 assert getattr(ui, '_v180_execution_card', None) is not None
                 assert getattr(ui, '_v181_direction_label', None) is not None
+                assert getattr(ui, '_v181_tier1_label', None) is not None
+                assert getattr(ui, '_v181_tier2_label', None) is not None
+                assert getattr(ui, '_v181_position_badge_label', None) is not None
                 # BTC quote panel is packed before the AI plan panel.
                 packed = ui.book.pages[3].body.pack_slaves()
                 assert ui.quote in packed and ui._v180_plan_card in packed
