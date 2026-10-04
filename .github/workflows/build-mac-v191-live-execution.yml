@@ -1,4 +1,4 @@
-name: Build KAYTRADE Intel Mac 1.9.1 Live Execution Build1910
+name: Build KAYTRADE Intel Mac 1.9.1 Live Execution Build1911
 
 on:
   push:
@@ -41,9 +41,9 @@ jobs:
           import v190_dual_env_patch as v191
 
           assert v191.VERSION == '1.9.1'
-          assert v191.BUILD == '1910'
+          assert v191.BUILD == '1911'
           assert model.VERSION == '1.9.1'
-          assert model.BUILD == '1910'
+          assert model.BUILD == '1911'
           assert v191.PAPER_RUNTIME_PRESENT is False
           assert v191.LIMIT_ONLY is False
           assert v191.ENV_META['live']['mode'] == 'OKX_LIVE_EXECUTION'
@@ -82,27 +82,27 @@ jobs:
         run: |
           python verify_bundle.py
           /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1.9.1'
-          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1910'
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1911'
           codesign --verify --deep --strict dist/KAYTRADE.app
       - name: Packaged V1.9.1 smoke test
         run: |
           TMPDIR_CHECK="$(mktemp -d)"
           dist/KAYTRADE.app/Contents/MacOS/KAYTRADE --smoke-test "$TMPDIR_CHECK/smoke.txt"
           cat "$TMPDIR_CHECK/smoke.txt"
-          grep 'V1.9.1 Build1910 LIVE EXECUTION' "$TMPDIR_CHECK/smoke.txt"
+          grep 'V1.9.1 Build1911 LIVE EXECUTION' "$TMPDIR_CHECK/smoke.txt"
           grep 'trigger-market protections' "$TMPDIR_CHECK/smoke.txt"
       - name: Create installer
         run: |
           mkdir -p installer
           ditto dist/KAYTRADE.app installer/KAYTRADE.app
           cp RELEASE-1.9.1-LIVE-EXECUTION.md installer/RELEASE-1.9.1-LIVE-EXECUTION.md
-          printf 'KAYTRADE V1.9.1 Build1910\nDEMO/LIVE isolated AI execution · LIMIT parent orders · trigger-market TP/SL.\n' > installer/RELEASE-1.9.1-LIVE-EXECUTION.txt
-          hdiutil create -volname 'KAYTRADE 1.9.1 LIVE EXEC' -srcfolder installer -ov -format UDZO KAYTRADE-1.9.1-LIVE-EXEC-Intel-build1910.dmg
+          printf 'KAYTRADE V1.9.1 Build1911\nDEMO/LIVE isolated AI execution · LIMIT parent orders · trigger-market TP/SL.\n' > installer/RELEASE-1.9.1-LIVE-EXECUTION.txt
+          hdiutil create -volname 'KAYTRADE 1.9.1 LIVE EXEC' -srcfolder installer -ov -format UDZO KAYTRADE-1.9.1-LIVE-EXEC-Intel-build1911.dmg
       - uses: actions/upload-artifact@v4
         with:
-          name: KAYTRADE-1.9.1-LIVE-EXEC-Intel-build1910
+          name: KAYTRADE-1.9.1-LIVE-EXEC-Intel-build1911
           path: |
-            KAYTRADE-1.9.1-LIVE-EXEC-Intel-build1910.dmg
+            KAYTRADE-1.9.1-LIVE-EXEC-Intel-build1911.dmg
             installer/RELEASE-1.9.1-LIVE-EXECUTION.md
             installer/RELEASE-1.9.1-LIVE-EXECUTION.txt
           if-no-files-found: error
