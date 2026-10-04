@@ -1,4 +1,4 @@
-"""Codex MCP adapter for KAYTRADE V1.8.1 AI Only.
+"""Codex MCP adapter for KAYTRADE V1.8.2 AI Only.
 
 The adapter never receives OKX credentials. It reads the short-lived local
 bridge descriptor created by the KAYTRADE app and talks only to 127.0.0.1.
@@ -15,9 +15,9 @@ from mcp.server.fastmcp import FastMCP
 BRIDGE_FILE = Path.home() / "Library" / "Application Support" / "OKXLocal" / "ai_bridge.json"
 
 mcp = FastMCP(
-    "kaytrade-v181-paper",
+    "kaytrade-v182-paper",
     instructions=(
-        "KAYTRADE V1.8.1 is PAPER and LIMIT ONLY. Entry, partial close, take-profit and stop-loss exits must all use limit orders. "
+        "KAYTRADE V1.8.2 is PAPER and LIMIT ONLY. Entry, partial close, take-profit and stop-loss exits must all use limit orders. "
         "Inspect get_kaytrade_state before proposing a trade. "
         "All trade-management tools mutate local paper state only; no tool sends OKX write requests. "
         "KAYTRADE must be connected to OKX Demo for read-only market data and the user must enable the Paper AI channel. "
@@ -32,8 +32,8 @@ def _descriptor():
     if not BRIDGE_FILE.exists():
         raise RuntimeError("KAYTRADE AI Bridge is not running")
     data = json.loads(BRIDGE_FILE.read_text())
-    if data.get("version") != "1.8.1":
-        raise RuntimeError("KAYTRADE bridge is not V1.8.1 Paper Execution")
+    if data.get("version") != "1.8.2":
+        raise RuntimeError("KAYTRADE bridge is not V1.8.2 Paper Execution")
     if data.get("live_ai_writes") is not False:
         raise RuntimeError("Unexpected bridge safety state")
     return data
@@ -152,7 +152,7 @@ def submit_trade_proposal(
     sl_exit_type: str = "limit",
     sl_limit_price: float | None = None,
 ) -> dict:
-    """Submit a structured AI trade request to KAYTRADE V1.8.1.
+    """Submit a structured AI trade request to KAYTRADE V1.8.2.
 
     action: open or close.
     direction: long or short.
