@@ -18,7 +18,7 @@ class V180AIOnlyTests(unittest.TestCase):
 
     def test_identity(self):
         self.assertEqual(v180.VERSION, "1.8.0")
-        self.assertEqual(v180.BUILD, "1800")
+        self.assertEqual(v180.BUILD, "1801")
         self.assertTrue(v180.AI_ONLY)
         self.assertIs(v180.app.Engine, v180.AIOnlyEngineV180)
         self.assertEqual(v180.AI_MAX_LEVERAGE, 20)
