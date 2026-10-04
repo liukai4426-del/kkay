@@ -79,10 +79,11 @@ def smoke_test():
     import v184_ui_patch as v184
 
     assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
-    assert v183.VERSION == '1.8.4' and v183.BUILD == '1831'
+    assert v183.VERSION == '1.8.4' and v183.BUILD == '1840'
+    assert v184.VERSION == '1.8.4' and v184.BUILD == '1840'
     assert v183.DEMO_EXECUTION is True
     assert v183.LIMIT_ONLY is True
-    assert model.VERSION == '1.8.4' and model.BUILD == '1831'
+    assert model.VERSION == '1.8.4' and model.BUILD == '1840'
     assert model.STRATEGY_ENABLED is False
     assert getattr(model, '_kaytrade_v183_okx_demo_applied', False)
     assert getattr(app.App, '_kaytrade_v183_okx_demo_applied', False)
@@ -102,7 +103,7 @@ def smoke_test():
                 assert 'KAYTRADE' in root.title()
                 assert '1.8.4' in root.title()
                 assert 'OKX DEMO' in root.title()
-                assert '1831' in root.title()
+                assert '1840' in root.title()
                 assert ui.mode.get() == 'OKX模拟盘'
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
