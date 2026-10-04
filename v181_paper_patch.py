@@ -12,7 +12,8 @@ Implements:
 - market/limit partial close with explicit size;
 - persistent paper state restored after restart;
 - Trading Overview BTC quote moved to top;
-- LONG green / SHORT red UI semantics;\n- optional user-controlled auto execution of executable AI entry plans with mandatory TP/SL.
+- LONG green / SHORT red UI semantics;
+- optional user-controlled auto execution of executable AI entry plans with mandatory TP/SL.
 """
 from __future__ import annotations
 
@@ -1230,7 +1231,8 @@ def _app_arm_v181(self):
         "KAYTRADE V1.8.1 PAPER EXECUTION\n\n"
         "所有交易操作仅在本地模拟，不向OKX发送任何下单/改单/撤单请求。\n"
         "支持：市价/限价、双档同向挂单、60分钟自动撤单、修改入场、修改保护、"
-        "TP/SL触发后市价/限价退出、指定数量市价/限价减仓。\n"\n        "交易总览可开启「AI方案自动执行」；自动入场必须同时设置止盈TP和止损SL。\n\n"
+        "TP/SL触发后市价/限价退出、指定数量市价/限价减仓。\n"
+        "交易总览可开启「AI方案自动执行」；自动入场必须同时设置止盈TP和止损SL。\n\n"
         "确认启用请输入 PAPER",
         parent=self.root,
     )
