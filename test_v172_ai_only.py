@@ -99,7 +99,7 @@ class V172AIOnlyTests(unittest.TestCase):
 
     def test_identity_and_strategy_disabled(self):
         self.assertEqual(v172.VERSION, "1.7.2")
-        self.assertEqual(v172.BUILD, "1722")
+        self.assertEqual(v172.BUILD, "1723")
         self.assertTrue(v172.AI_ONLY)
         self.assertFalse(v172.model.STRATEGY_ENABLED)
         self.assertIs(v172.app.Engine, v172.AIOnlyEngine)
@@ -131,6 +131,98 @@ class V172AIOnlyTests(unittest.TestCase):
         self.assertNotIn('self.submit("arm"', source)
         runner = inspect.getsource(v172._run_ai_enable)
         self.assertIn("_ensure_ai_only_engine(owner)", runner)
+
+    def test_build1723_risk_caps(self):
+        e, _x = self.make_engine()
+        e.arm()
+
+        allowed = e._validate_open(
+            {
+                "action": "open",
+                "direction": "long",
+                "order_type": "market",
+                "size": 35,
+                "leverage": 20,
+                "take_profit": 102000,
+                "stop_loss": 98000,
+            }
+        )
+        self.assertEqual(allowed["leverage"], 20)
+        self.assertAlmostEqual(float(allowed["notional"]), 3500.0, places=6)
+        self.assertLessEqual(float(allowed["estimated_loss"]), 100.0)
+
+        with self.assertRaisesRegex(Exception, "leverage"):
+            e._validate_open(
+                {
+                    "action": "open",
+                    "direction": "long",
+                    "order_type": "market",
+                    "size": 1,
+                    "leverage": 21,
+                    "take_profit": 102000,
+                    "stop_loss": 99000,
+                }
+            )
+
+        with self.assertRaisesRegex(Exception, "名义仓位"):
+            e._validate_open(
+                {
+                    "action": "open",
+                    "direction": "long",
+                    "order_type": "market",
+                    "size": 36,
+                    "leverage": 20,
+                    "take_profit": 102000,
+                    "stop_loss": 99000,
+                }
+            )
+
+        with self.assertRaisesRegex(Exception, "估算止损"):
+            e._validate_open(
+                {
+                    "action": "open",
+                    "direction": "long",
+                    "order_type": "market",
+                    "size": 35,
+                    "leverage": 20,
+                    "take_profit": 102000,
+                    "stop_loss": 97000,
+                }
+            )
+
+    def test_publish_two_tier_ai_plans(self):
+        e, _x = self.make_engine()
+        first = e.publish_ai_plan(
+            {
+                "tier": 1,
+                "direction": "long",
+                "suggested_entry": 100000,
+                "take_profit": 102000,
+                "stop_loss": 99000,
+                "size": 5,
+                "leverage": 10,
+                "reason": "first setup",
+                "operation_advice": "等待回踩后执行",
+            }
+        )
+        second = e.publish_ai_plan(
+            {
+                "tier": 2,
+                "direction": "long",
+                "suggested_entry": 99500,
+                "take_profit": 102500,
+                "stop_loss": 98500,
+                "size": 5,
+                "leverage": 10,
+                "reason": "second setup",
+                "operation_advice": "仅在第一档成交后评估",
+            }
+        )
+        self.assertEqual(first["plan"]["tier"], 1)
+        self.assertEqual(second["plan"]["tier"], 2)
+        self.assertEqual(e.store.data["ai_tiers"]["1"]["status"], "RECOMMENDED")
+        self.assertEqual(e.store.data["ai_tiers"]["2"]["status"], "RECOMMENDED")
+        self.assertGreaterEqual(len(e.store.data["ai_plan_history"]), 2)
 
     def test_ai_open_is_only_new_order_path(self):
         e, x = self.make_engine()
