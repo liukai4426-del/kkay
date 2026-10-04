@@ -773,6 +773,22 @@ def _find_label_for_var(widget, variable):
     return None
 
 
+def _find_label_text(widget, text_value):
+    try:
+        if isinstance(widget, app.tk.Label) and str(widget.cget("text")) == str(text_value):
+            return widget
+    except Exception:
+        pass
+    try:
+        for child in widget.winfo_children():
+            found = _find_label_text(child, text_value)
+            if found is not None:
+                return found
+    except Exception:
+        pass
+    return None
+
+
 def _move_btc_quote_to_top(owner):
     quote = getattr(owner, "quote", None)
     plan = getattr(owner, "_v180_plan_card", None)
@@ -832,6 +848,17 @@ def _refresh_v181_dashboard(owner):
         t2 = tiers.get("2")
         owner._v180_tier1_var.set(_tier_ui_text(t1))
         owner._v180_tier2_var.set(_tier_ui_text(t2))
+        for label, item in (
+            (getattr(owner, "_v181_tier1_label", None), t1),
+            (getattr(owner, "_v181_tier2_label", None), t2),
+        ):
+            if label is not None:
+                direction = str((item or {}).get("direction") or "").lower()
+                label.configure(
+                    fg=visual.GREEN if direction == "long"
+                    else visual.RED if direction == "short"
+                    else visual.TEXT
+                )
 
         active_items = [
             item for item in (t1, t2)
@@ -853,6 +880,14 @@ def _refresh_v181_dashboard(owner):
             owner._v180_position_sl_var.set(v180._fmt_px(item.get("stop_loss")))
             owner._v180_proposal_var.set(str(item.get("proposal_id") or "—")[:22])
             owner._v180_position_badge_var.set("PAPER 持仓/委托")
+            badge = getattr(owner, "_v181_position_badge_label", None)
+            if badge is not None:
+                direction = str(item.get("direction") or "").lower()
+                badge.configure(
+                    fg=visual.GREEN if direction == "long"
+                    else visual.RED if direction == "short"
+                    else visual.TEXT
+                )
         else:
             owner._v180_order_state_var.set("等待委托")
             owner._v180_order_type_var.set("—")
@@ -863,6 +898,9 @@ def _refresh_v181_dashboard(owner):
             owner._v180_position_sl_var.set("—")
             owner._v180_proposal_var.set("—")
             owner._v180_position_badge_var.set("Paper 空仓")
+            badge = getattr(owner, "_v181_position_badge_label", None)
+            if badge is not None:
+                badge.configure(fg=visual.MUTED)
     except Exception:
         pass
 
@@ -888,8 +926,16 @@ def _app_init_v181(self, *args, **kwargs):
     _move_btc_quote_to_top(self)
     try:
         self._v181_direction_label = _find_label_for_var(self._v180_plan_card, self._v180_side_var)
+        self._v181_tier1_label = _find_label_text(self._v180_execution_card, "第一档执行方案")
+        self._v181_tier2_label = _find_label_text(self._v180_execution_card, "第二档执行方案")
+        self._v181_position_badge_label = _find_label_for_var(
+            self._v180_execution_card, self._v180_position_badge_var
+        )
     except Exception:
         self._v181_direction_label = None
+        self._v181_tier1_label = None
+        self._v181_tier2_label = None
+        self._v181_position_badge_label = None
     self._v181_paper_ready = True
     self.root.after(250, lambda: _refresh_v181_dashboard(self))
 
