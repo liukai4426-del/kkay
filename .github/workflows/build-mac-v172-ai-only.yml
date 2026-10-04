@@ -1,4 +1,4 @@
-name: Build KAYTRADE Intel Mac 1.7.2 AI Only Build1720
+name: Build KAYTRADE Intel Mac 1.7.2 AI Only Build1721
 
 on:
   push:
@@ -40,10 +40,12 @@ jobs:
           import v172_ai_only_patch as v172
 
           assert v172.VERSION == '1.7.2'
-          assert v172.BUILD == '1720'
+          assert v172.BUILD == '1721'
           assert v172.AI_ONLY is True
           assert model.STRATEGY_ENABLED is False
           assert app.Engine is v172.AIOnlyEngine
+          assert '_start_ai_enable(self)' in inspect.getsource(v172._app_arm_v172)
+          assert 'self.submit("arm"' not in inspect.getsource(v172._app_arm_v172)
           cycle = inspect.getsource(v172.AIOnlyEngine.cycle)
           assert 'refresh_market' not in cycle
           assert 'make_plan' not in cycle
@@ -76,14 +78,14 @@ jobs:
         run: |
           python verify_bundle.py
           /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1.7.2'
-          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1720'
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1721'
           codesign --verify --deep --strict dist/KAYTRADE.app
       - name: Packaged V1.7.2 AI-only smoke test
         run: |
           TMPDIR_CHECK="$(mktemp -d)"
           dist/KAYTRADE.app/Contents/MacOS/KAYTRADE --smoke-test "$TMPDIR_CHECK/smoke.txt"
           cat "$TMPDIR_CHECK/smoke.txt"
-          grep 'V1.7.2 Build1720 AI ONLY' "$TMPDIR_CHECK/smoke.txt"
+          grep 'V1.7.2 Build1721 AI ONLY' "$TMPDIR_CHECK/smoke.txt"
           grep 'legacy strategy entry is disabled' "$TMPDIR_CHECK/smoke.txt"
           grep 'autonomous AI writes are restricted to OKX Demo Trading' "$TMPDIR_CHECK/smoke.txt"
       - name: Create installer
@@ -91,13 +93,13 @@ jobs:
           mkdir -p installer
           ditto dist/KAYTRADE.app installer/KAYTRADE.app
           cp RELEASE-1.7.2-AI-ONLY.md installer/RELEASE-1.7.2-AI-ONLY.md
-          printf 'KAYTRADE V1.7.2 AI ONLY Build1720\nCodex/AI proposal -> localhost bridge -> hard execution checks -> OKX Demo Trading.\n' > installer/RELEASE-1.7.2-AI-ONLY.txt
-          hdiutil create -volname 'KAYTRADE 1.7.2 AI ONLY' -srcfolder installer -ov -format UDZO KAYTRADE-1.7.2-AI-ONLY-Intel-build1720.dmg
+          printf 'KAYTRADE V1.7.2 AI ONLY Build1721\nCodex/AI proposal -> localhost bridge -> hard execution checks -> OKX Demo Trading.\n' > installer/RELEASE-1.7.2-AI-ONLY.txt
+          hdiutil create -volname 'KAYTRADE 1.7.2 AI ONLY' -srcfolder installer -ov -format UDZO KAYTRADE-1.7.2-AI-ONLY-Intel-build1721.dmg
       - uses: actions/upload-artifact@v4
         with:
-          name: KAYTRADE-1.7.2-AI-ONLY-Intel-build1720
+          name: KAYTRADE-1.7.2-AI-ONLY-Intel-build1721
           path: |
-            KAYTRADE-1.7.2-AI-ONLY-Intel-build1720.dmg
+            KAYTRADE-1.7.2-AI-ONLY-Intel-build1721.dmg
             installer/RELEASE-1.7.2-AI-ONLY.md
             installer/RELEASE-1.7.2-AI-ONLY.txt
           if-no-files-found: error
