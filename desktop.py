@@ -63,10 +63,12 @@ from v180_ai_only_patch import apply as apply_v180_ai_only_patch
 apply_v180_ai_only_patch()
 from v183_okx_demo_patch import apply as apply_v183_okx_demo_patch
 apply_v183_okx_demo_patch()
+from v184_ui_patch import apply as apply_v184_ui_patch
+apply_v184_ui_patch()
 
 
 def smoke_test():
-    """Exercise packaged Build1831 clean OKX Demo runtime without credentials or writes."""
+    """Exercise packaged Build1840 clean OKX Demo runtime without credentials or writes."""
     import ssl
     import tkinter as tk
     from unittest.mock import patch
@@ -74,12 +76,14 @@ def smoke_test():
     import v165_model as model
     import v172_ai_only_patch as v172
     import v183_okx_demo_patch as v183
+    import v184_ui_patch as v184
 
     assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
-    assert v183.VERSION == '1.8.3' and v183.BUILD == '1831'
+    assert v183.VERSION == '1.8.4' and v183.BUILD == '1840'
+    assert v184.VERSION == '1.8.4' and v184.BUILD == '1840'
     assert v183.DEMO_EXECUTION is True
     assert v183.LIMIT_ONLY is True
-    assert model.VERSION == '1.8.3' and model.BUILD == '1831'
+    assert model.VERSION == '1.8.4' and model.BUILD == '1840'
     assert model.STRATEGY_ENABLED is False
     assert getattr(model, '_kaytrade_v183_okx_demo_applied', False)
     assert getattr(app.App, '_kaytrade_v183_okx_demo_applied', False)
@@ -97,20 +101,27 @@ def smoke_test():
                 ui = app.App(root, Path(folder))
                 root.update()
                 assert 'KAYTRADE' in root.title()
-                assert '1.8.3' in root.title()
+                assert '1.8.4' in root.title()
                 assert 'OKX DEMO' in root.title()
-                assert '1831' in root.title()
+                assert '1840' in root.title()
                 assert ui.mode.get() == 'OKX模拟盘'
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
                 assert getattr(ui, '_v183_okx_demo_ready', False)
-                assert 'V1.8.3 Build1831 CLEAN' in ui.signal.get()
+                assert 'V1.8.4 Build1840 CLEAN' in ui.signal.get()
                 assert 'OKX DEMO ONLY' in ui.signal.get()
                 assert getattr(ui, '_v183_auto_exec_card', None) is not None
+                assert getattr(ui, '_v184_plan_card', None) is not None
+                assert getattr(ui, '_v184_direction_label', None) is not None
+                assert getattr(ui, '_v184_entry_value_label', None) is not None
                 assert getattr(ui, '_v180_plan_card', None) is not None
                 assert getattr(ui, '_v180_execution_card', None) is not None
                 plan_text = v172._widget_text(ui._v180_plan_card)
                 execution_text = v172._widget_text(ui._v180_execution_card)
+                assert 'LIMIT ONLY' in plan_text
+                assert '止盈 TP · 限价' in plan_text
+                assert '止损 SL · 限价' in plan_text
+                assert '建议 / 委托入场' in plan_text
                 assert 'LIMIT ONLY' in execution_text
                 assert 'OKX模拟盘' in execution_text or 'OKX' in execution_text
                 assert 'Paper' not in plan_text and 'PAPER' not in plan_text
@@ -132,9 +143,9 @@ def smoke_test():
             root.destroy()
 
     Path(sys.argv[2]).write_text(
-        'PASS: KAYTRADE V1.8.3 Build1831 OKX DEMO CLEAN LIMIT ONLY; '
-        'Paper runtime modules are not imported or packaged; AI plans submit exchange limit orders immediately, '
-        'fills come from OKX Demo only, and live-account writes remain blocked.\n'
+        'PASS: KAYTRADE V1.8.4 Build1840 OKX DEMO CLEAN LIMIT ONLY; '
+        'refined AI plan UI is restored without Paper runtime; TP/SL use positive limit prices only; '
+        'AI plans submit exchange limit orders immediately and fills come from OKX Demo only.\n'
     )
 
 

@@ -20,6 +20,41 @@ from candles import CandleCache
 AMBIGUOUS_OKX_CODES={'51054'}
 ORDER_EXPIRY_MS=8000
 
+_LIMIT_ONLY_SENTINEL_FIELDS = {"tpOrdPx", "slOrdPx", "newTpOrdPx", "newSlOrdPx"}
+
+
+def _assert_limit_only_write(path, body):
+    """Transport-level firewall: no market order or OKX -1 TP/SL sentinel."""
+    if not isinstance(body, dict):
+        raise APIError("OKX写入结构异常", deterministic=True, method="POST", path=path)
+    if path == "/api/v5/trade/order":
+        ord_type = str(body.get("ordType") or "").lower()
+        if ord_type and ord_type != "limit":
+            raise APIError(
+                "LIMIT ONLY：禁止发送非限价委托",
+                deterministic=True,
+                method="POST",
+                path=path,
+            )
+
+    def walk(value):
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key in _LIMIT_ONLY_SENTINEL_FIELDS and str(child).strip() == "-1":
+                    raise APIError(
+                        f"LIMIT ONLY：禁止发送 {key}=-1；OKX会将-1解释为市价",
+                        deterministic=True,
+                        method="POST",
+                        path=path,
+                    )
+                walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    walk(body)
+
+
 class APIError(RuntimeError):
     def __init__(self,message,code='',deterministic=False,http_status=None,method='',path=''):
         super().__init__(message)
@@ -163,6 +198,7 @@ class Exchange(Client):
         return self.request('GET',path,params,private)
 
     def post(self,path,body):
+        _assert_limit_only_write(path, body)
         return self.request('POST',path,body,True)
 
     def sync_time(self):
