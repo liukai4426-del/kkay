@@ -100,7 +100,7 @@ def smoke_test():
                 assert getattr(ui, '_v172_ai_only_ready', False)
                 assert 'AI ONLY' in ui.signal.get()
                 assert '无本地交易策略' in ui.signal.get()
-                assert '启用AI交易通道' in str(ui.trade_button.cget('text'))
+                assert '启用AI交易通道' in str(getattr(ui.trade_button, 'text', ''))
                 visible = [
                     str(button.text)
                     for button in ui.book.buttons
