@@ -3,13 +3,13 @@
 Paper-only execution simulator. It never sends OKX write requests.
 
 Implements:
-- market/limit paper entries;
+- LIMIT-ONLY paper entries;
 - same-direction Tier 1 + Tier 2 concurrent entries;
 - 60-minute auto-cancel for unfilled entry remainder;
 - cancel/amend pending entry;
 - amend TP/SL protection;
-- TP/SL trigger -> market or limit exit;
-- market/limit partial close with explicit size;
+- TP/SL trigger -> LIMIT exit only;
+- LIMIT-ONLY partial close with explicit size;
 - persistent paper state restored after restart;
 - Trading Overview BTC quote moved to top;
 - LONG green / SHORT red UI semantics;
@@ -39,7 +39,7 @@ import v180_ai_only_patch as v180
 import visual
 
 VERSION = "1.8.1"
-BUILD = "1811"
+BUILD = "1813"
 AI_ONLY = True
 PAPER_ONLY = True
 
@@ -110,7 +110,7 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
                 )
             self.emit(
                 "log",
-                "Paper AI通道已启用：双档并行 / 市价限价 / 部分减仓 / 改单撤单 / 60分钟自动撤单。",
+                "Paper AI通道已启用：LIMIT ONLY / 双档并行 / 限价减仓 / 限价TP/SL / 改单撤单 / 60分钟自动撤单。",
             )
 
     def _ensure_paper_state(self):
@@ -127,6 +127,23 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
                 "1": paper["tiers"].get("1"),
                 "2": paper["tiers"].get("2"),
             }
+
+        # Build1813 migration: old Paper states may have stored market-style
+        # TP/SL exits. Keep the historical entry record, but normalize every
+        # still-managed tier to LIMIT protection so an old cache can never
+        # reactivate a market exit.
+        for item in paper["tiers"].values():
+            if not isinstance(item, dict):
+                continue
+            if item.get("status") not in ("live", "filled", "partially_filled", "exit_live"):
+                continue
+            item["tp_exit_type"] = "limit"
+            item["sl_exit_type"] = "limit"
+            if item.get("tp_limit_price") in (None, "") and item.get("take_profit") not in (None, ""):
+                item["tp_limit_price"] = item.get("take_profit")
+            if item.get("sl_limit_price") in (None, "") and item.get("stop_loss") not in (None, ""):
+                item["sl_limit_price"] = item.get("stop_loss")
+
         self.store.save()
         return paper
 
@@ -174,7 +191,7 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
     def _auto_proposal_from_plan(self, plan, item):
         """Convert a recommendation into an executable paper proposal."""
         direction = str(plan.get("direction") or "").lower()
-        order_type = str(plan.get("order_type") or "market").lower()
+        order_type = str(plan.get("order_type") or "limit").lower()
         tier = int(plan.get("tier") or 1)
 
         tp = plan.get("take_profit")
@@ -191,14 +208,14 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
             missing.append("size")
         if leverage in (None, ""):
             missing.append("leverage")
-        if order_type not in ("market", "limit"):
-            missing.append("order_type")
+        if order_type != "limit":
+            raise legacy_engine.Halt("Limit Only：order_type 只允许 limit")
         if missing:
             raise legacy_engine.Halt("自动执行方案缺少/无效字段：" + ", ".join(missing))
 
-        proposal_id = str(
-            plan.get("proposal_id")
-            or f"autoplan-{item.get('plan_id') or uuid.uuid4().hex}"
+        explicit_proposal_id = str(plan.get("proposal_id") or "").strip()
+        proposal_id = explicit_proposal_id or (
+            f"autoplan-{item.get('plan_id') or 'plan'}-{uuid.uuid4().hex[:10]}"
         )
         proposal = {
             "proposal_id": proposal_id,
@@ -215,13 +232,17 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
             "operation_advice": str(
                 plan.get("operation_advice") or plan.get("advice") or ""
             )[:1000],
-            "tp_exit_type": str(plan.get("tp_exit_type") or "market").lower(),
-            "sl_exit_type": str(plan.get("sl_exit_type") or "market").lower(),
+            "tp_exit_type": str(plan.get("tp_exit_type") or "limit").lower(),
+            "sl_exit_type": str(plan.get("sl_exit_type") or "limit").lower(),
         }
-        if proposal["tp_exit_type"] == "limit":
-            proposal["tp_limit_price"] = plan.get("tp_limit_price")
-        if proposal["sl_exit_type"] == "limit":
-            proposal["sl_limit_price"] = plan.get("sl_limit_price")
+        if proposal["tp_exit_type"] != "limit" or proposal["sl_exit_type"] != "limit":
+            raise legacy_engine.Halt("Limit Only：TP/SL 保护退出只允许 limit")
+        proposal["tp_limit_price"] = plan.get("tp_limit_price", tp)
+        if proposal["tp_limit_price"] in (None, ""):
+            proposal["tp_limit_price"] = tp
+        proposal["sl_limit_price"] = plan.get("sl_limit_price", sl)
+        if proposal["sl_limit_price"] in (None, ""):
+            proposal["sl_limit_price"] = sl
 
         if order_type == "limit":
             limit_price = plan.get("limit_price")
@@ -231,6 +252,90 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
                 raise legacy_engine.Halt("限价AI方案自动执行必须包含 limit_price 或 suggested_entry")
             proposal["limit_price"] = limit_price
         return proposal
+
+    def _pending_matches_proposal(self, current, proposal):
+        if not isinstance(current, dict) or current.get("status") != "live":
+            return False
+        if float(current.get("filled_size") or 0) > 0:
+            return False
+
+        def same_number(a, b):
+            try:
+                return abs(float(a) - float(b)) <= 1e-9
+            except Exception:
+                return a == b
+
+        if str(current.get("direction") or "") != str(proposal.get("direction") or ""):
+            return False
+        if str(current.get("order_type") or "") != str(proposal.get("order_type") or ""):
+            return False
+        if not same_number(current.get("size"), proposal.get("size")):
+            return False
+        if not same_number(current.get("leverage"), proposal.get("leverage")):
+            return False
+        if not same_number(current.get("take_profit"), proposal.get("take_profit")):
+            return False
+        if not same_number(current.get("stop_loss"), proposal.get("stop_loss")):
+            return False
+        if str(proposal.get("order_type")) == "limit" and not same_number(
+            current.get("limit_price"), proposal.get("limit_price")
+        ):
+            return False
+        if str(current.get("tp_exit_type") or "limit") != str(proposal.get("tp_exit_type") or "limit"):
+            return False
+        if str(current.get("sl_exit_type") or "limit") != str(proposal.get("sl_exit_type") or "limit"):
+            return False
+        if str(proposal.get("tp_exit_type") or "limit") == "limit" and not same_number(
+            current.get("tp_limit_price"), proposal.get("tp_limit_price")
+        ):
+            return False
+        if str(proposal.get("sl_exit_type") or "limit") == "limit" and not same_number(
+            current.get("sl_limit_price"), proposal.get("sl_limit_price")
+        ):
+            return False
+        return True
+
+    def _prepare_auto_plan_slot(self, proposal):
+        """Keep an identical pending order or replace a changed, still-unfilled plan."""
+        key, current = self._tier(proposal.get("tier") or 1)
+        if not isinstance(current, dict) or not _active_status(current):
+            return {"action": "empty", "tier": int(key)}
+
+        # Never overwrite a filled/partially-filled position with a new entry recommendation.
+        if (
+            current.get("status") != "live"
+            or float(current.get("filled_size") or 0) > 0
+        ):
+            raise legacy_engine.Halt(
+                f"第{key}档已有成交Paper仓位/退出委托；新的AI入场方案不会覆盖现有仓位"
+            )
+
+        if self._pending_matches_proposal(current, proposal):
+            return {
+                "action": "keep",
+                "tier": int(key),
+                "paper_order_id": current.get("paper_order_id"),
+                "current": current,
+            }
+
+        # Validate the replacement while excluding the old pending slot. If the
+        # new plan is invalid, the currently-live order remains untouched.
+        self._validate_paper_open(proposal, replace_tier=key)
+
+        current["remaining_entry_size"] = 0.0
+        current["status"] = "replaced"
+        current["order_state"] = "replaced_by_ai_plan"
+        current["replaced_at"] = _now()
+        current["replaced_by_proposal_id"] = proposal.get("proposal_id")
+        self.store.save()
+        self._event(
+            "AUTO_PLAN_REPLACED",
+            {
+                "tier": int(key),
+                "detail": f"第{key}档旧Paper挂单已被最新AI入场方案替换",
+            },
+        )
+        return {"action": "replace", "tier": int(key), "previous": current}
 
     def publish_ai_plan(self, plan):
         """Publish recommendation; optionally convert it into a Paper entry immediately."""
@@ -273,6 +378,32 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
 
             try:
                 proposal = self._auto_proposal_from_plan(plan, item)
+                slot = self._prepare_auto_plan_slot(proposal)
+                if slot.get("action") == "keep":
+                    current = slot["current"]
+                    self._set_plan_status(item, "AUTO_ALREADY_ACTIVE", "相同Paper挂单已存在，不重复提交")
+                    self._event(
+                        "AUTO_PLAN_ALREADY_ACTIVE",
+                        {
+                            "tier": item["tier"],
+                            "detail": f"第{item['tier']}档AI方案与当前挂单相同，保持原挂单",
+                        },
+                    )
+                    return dict(
+                        base,
+                        status="AUTO_ALREADY_ACTIVE",
+                        auto_execution="ALREADY_ACTIVE",
+                        plan=item,
+                        execution={
+                            "tier": item["tier"],
+                            "paper_order_id": current.get("paper_order_id"),
+                            "status": current.get("status"),
+                            "order_type": current.get("order_type"),
+                            "limit_price": current.get("limit_price"),
+                            "take_profit": current.get("take_profit"),
+                            "stop_loss": current.get("stop_loss"),
+                        },
+                    )
                 execution = self.submit_ai_trade(proposal)
             except legacy_engine.Halt as exc:
                 message = str(exc)
@@ -376,9 +507,9 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
             raise legacy_engine.Halt("direction 必须为 long 或 short")
         self._same_direction_guard(direction, exclude_tier=replace_tier)
 
-        order_type = str(proposal.get("order_type") or "market").lower()
-        if order_type not in ("market", "limit"):
-            raise legacy_engine.Halt("order_type 必须为 market 或 limit")
+        order_type = str(proposal.get("order_type") or "limit").lower()
+        if order_type != "limit":
+            raise legacy_engine.Halt("Limit Only：order_type 只允许 limit")
 
         qty = _d(proposal.get("size"), "size")
         leverage = _d(proposal.get("leverage", 1), "leverage")
@@ -393,14 +524,10 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
             raise legacy_engine.Halt(f"size 必须≥{minimum} 且按 lotSz={lot} 递增")
 
         last = self._ticker_price()
-        limit_price = None
-        if order_type == "limit":
-            limit_price = _d(proposal.get("limit_price"), "limit_price")
-            if limit_price % tick != 0:
-                raise legacy_engine.Halt(f"limit_price 必须按 tickSz={tick} 递增")
-            entry_ref = limit_price
-        else:
-            entry_ref = last
+        limit_price = _d(proposal.get("limit_price"), "limit_price")
+        if limit_price % tick != 0:
+            raise legacy_engine.Halt(f"limit_price 必须按 tickSz={tick} 递增")
+        entry_ref = limit_price
 
         tp = _d(proposal.get("take_profit"), "take_profit")
         sl = _d(proposal.get("stop_loss"), "stop_loss")
@@ -409,20 +536,16 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
         if direction == "short" and not (tp < entry_ref < sl):
             raise legacy_engine.Halt("SHORT 必须满足 TP < 入场参考价 < SL")
 
-        tp_exit_type = str(proposal.get("tp_exit_type") or "market").lower()
-        sl_exit_type = str(proposal.get("sl_exit_type") or "market").lower()
-        if tp_exit_type not in ("market", "limit") or sl_exit_type not in ("market", "limit"):
-            raise legacy_engine.Halt("tp_exit_type / sl_exit_type 必须为 market 或 limit")
-        tp_limit = None
-        sl_limit = None
-        if tp_exit_type == "limit":
-            tp_limit = _d(proposal.get("tp_limit_price"), "tp_limit_price")
-            if tp_limit % tick != 0:
-                raise legacy_engine.Halt(f"tp_limit_price 必须按 tickSz={tick} 递增")
-        if sl_exit_type == "limit":
-            sl_limit = _d(proposal.get("sl_limit_price"), "sl_limit_price")
-            if sl_limit % tick != 0:
-                raise legacy_engine.Halt(f"sl_limit_price 必须按 tickSz={tick} 递增")
+        tp_exit_type = str(proposal.get("tp_exit_type") or "limit").lower()
+        sl_exit_type = str(proposal.get("sl_exit_type") or "limit").lower()
+        if tp_exit_type != "limit" or sl_exit_type != "limit":
+            raise legacy_engine.Halt("Limit Only：TP/SL 保护退出只允许 limit")
+        tp_limit = _d(proposal.get("tp_limit_price", tp) or tp, "tp_limit_price")
+        sl_limit = _d(proposal.get("sl_limit_price", sl) or sl, "sl_limit_price")
+        if tp_limit % tick != 0:
+            raise legacy_engine.Halt(f"tp_limit_price 必须按 tickSz={tick} 递增")
+        if sl_limit % tick != 0:
+            raise legacy_engine.Halt(f"sl_limit_price 必须按 tickSz={tick} 递增")
 
         unit = _d(meta.get("ctVal"), "ctVal") * _d(meta.get("ctMult") or "1", "ctMult")
         notional = qty * unit * entry_ref
@@ -510,8 +633,8 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
                 "tp_limit_price": float(checked["tp_limit_price"]) if checked["tp_limit_price"] is not None else None,
                 "sl_limit_price": float(checked["sl_limit_price"]) if checked["sl_limit_price"] is not None else None,
                 "exit_order": None,
-                "status": "live" if checked["order_type"] == "limit" else "accepted",
-                "order_state": "live" if checked["order_type"] == "limit" else "accepted",
+                "status": "live",
+                "order_state": "live",
                 "accepted_at": accepted,
                 "cancel_deadline": accepted + PAPER_ENTRY_TTL_SEC,
                 "reason": str(proposal.get("reason") or "")[:1000],
@@ -523,18 +646,14 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
             paper["updated_at"] = _now()
             self.store.save()
 
-            if checked["order_type"] == "market":
-                self._fill_entry(item, checked["last"])
-                self.store.save()
-            else:
-                self._event(
-                    "ENTRY_ACCEPTED",
-                    {
-                        "tier": int(key),
-                        "paper_order_id": item["paper_order_id"],
-                        "detail": f"第{key}档限价入场 @{item['limit_price']:.2f}，60分钟未成交自动撤单",
-                    },
-                )
+            self._event(
+                "ENTRY_ACCEPTED",
+                {
+                    "tier": int(key),
+                    "paper_order_id": item["paper_order_id"],
+                    "detail": f"第{key}档限价入场 @{item['limit_price']:.2f}，60分钟未成交自动撤单",
+                },
+            )
 
             self._record_ai_plan(proposal, proposal_id=proposal_id, status="PAPER_" + item["status"].upper())
             result = {
@@ -575,8 +694,6 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
             key, item = self._tier(payload.get("tier"), require=True)
             if item.get("status") not in ("live", "partially_filled"):
                 raise legacy_engine.Halt("只有活动中的限价入场委托可以修改")
-            if item.get("order_type") != "limit":
-                raise legacy_engine.Halt("市价入场成交后不存在可修改的入场委托")
 
             proposal = {
                 "tier": int(key),
@@ -632,26 +749,24 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
             if item["direction"] == "short" and not (tp < entry_ref < sl):
                 raise legacy_engine.Halt("SHORT保护必须满足 TP < 入场价 < SL")
 
-            tp_type = str(payload.get("tp_exit_type", item.get("tp_exit_type") or "market")).lower()
-            sl_type = str(payload.get("sl_exit_type", item.get("sl_exit_type") or "market")).lower()
-            if tp_type not in ("market", "limit") or sl_type not in ("market", "limit"):
-                raise legacy_engine.Halt("保护退出方式必须为 market 或 limit")
+            tp_type = str(payload.get("tp_exit_type", item.get("tp_exit_type") or "limit")).lower()
+            sl_type = str(payload.get("sl_exit_type", item.get("sl_exit_type") or "limit")).lower()
+            if tp_type != "limit" or sl_type != "limit":
+                raise legacy_engine.Halt("Limit Only：保护退出方式只允许 limit")
             meta = self.x.instrument()
             tick = _d(meta.get("tickSz"), "tickSz")
-            tp_limit = payload.get("tp_limit_price", item.get("tp_limit_price"))
-            sl_limit = payload.get("sl_limit_price", item.get("sl_limit_price"))
-            if tp_type == "limit":
-                tp_limit = _d(tp_limit, "tp_limit_price")
-                if tp_limit % tick != 0:
-                    raise legacy_engine.Halt(f"tp_limit_price 必须按 tickSz={tick} 递增")
-            else:
-                tp_limit = None
-            if sl_type == "limit":
-                sl_limit = _d(sl_limit, "sl_limit_price")
-                if sl_limit % tick != 0:
-                    raise legacy_engine.Halt(f"sl_limit_price 必须按 tickSz={tick} 递增")
-            else:
-                sl_limit = None
+            tp_limit = _d(
+                payload.get("tp_limit_price", item.get("tp_limit_price") or tp) or tp,
+                "tp_limit_price",
+            )
+            sl_limit = _d(
+                payload.get("sl_limit_price", item.get("sl_limit_price") or sl) or sl,
+                "sl_limit_price",
+            )
+            if tp_limit % tick != 0:
+                raise legacy_engine.Halt(f"tp_limit_price 必须按 tickSz={tick} 递增")
+            if sl_limit % tick != 0:
+                raise legacy_engine.Halt(f"sl_limit_price 必须按 tickSz={tick} 递增")
 
             item["take_profit"] = float(tp)
             item["stop_loss"] = float(sl)
@@ -702,15 +817,12 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
 
     def paper_close_position(self, payload):
         with self._ai_lock:
-            order_type = str(payload.get("order_type") or payload.get("close_type") or "market").lower()
-            if order_type not in ("market", "limit"):
-                raise legacy_engine.Halt("close order_type 必须为 market 或 limit")
+            order_type = str(payload.get("order_type") or payload.get("close_type") or "limit").lower()
+            if order_type != "limit":
+                raise legacy_engine.Halt("Limit Only：close order_type 只允许 limit")
             target_tier = payload.get("tier")
             requested = _d(payload.get("size") or payload.get("close_size"), "close_size")
-            last = self._ticker_price()
-            limit_price = None
-            if order_type == "limit":
-                limit_price = _d(payload.get("limit_price"), "limit_price")
+            limit_price = _d(payload.get("limit_price"), "limit_price")
 
             targets = []
             if target_tier is not None:
@@ -733,19 +845,16 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
                 "requested_size": float(requested),
                 "remaining_size": float(requested),
                 "tier": int(target_tier) if target_tier is not None else None,
-                "status": "live" if order_type == "limit" else "accepted",
+                "status": "live",
                 "created_at": _now(),
                 "reason": str(payload.get("reason") or "AI指定减仓")[:500],
             }
             self._paper()["close_orders"].append(close_order)
             self.store.save()
-            if order_type == "market":
-                self._execute_close_order(close_order, last)
-            else:
-                self._event(
-                    "CLOSE_ACCEPTED",
-                    {"detail": f"限价减仓 {float(requested):g}张 @{float(limit_price):.2f}"},
-                )
+            self._event(
+                "CLOSE_ACCEPTED",
+                {"detail": f"限价减仓 {float(requested):g}张 @{float(limit_price):.2f}"},
+            )
             return dict(close_order)
 
     def _execute_close_order(self, close_order, price):
@@ -793,10 +902,6 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
         return price <= trigger if kind == "tp" else price >= trigger
 
     def _start_protection_exit(self, item, kind, price):
-        exit_type = item[f"{kind}_exit_type"]
-        if exit_type == "market":
-            self._apply_close(item, self._position_remaining(item), price, kind.upper())
-            return
         limit_price = item.get(f"{kind}_limit_price")
         item["exit_order"] = {
             "paper_exit_id": _paper_id(kind),
@@ -897,8 +1002,10 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
             "connected": bool(self.store),
             "ai_enabled": bool(self.enabled),
             "live_ai_writes": False,
-            "supported_entry_order_types": ["market", "limit"],
-            "supported_close_order_types": ["market", "limit"],
+            "supported_entry_order_types": ["limit"],
+            "supported_close_order_types": ["limit"],
+            "supported_protection_exit_order_types": ["limit"],
+            "limit_only": True,
             "supports_partial_close": True,
             "supports_amend_entry": True,
             "supports_cancel_entry": True,
@@ -926,7 +1033,7 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
 
 
 def _order_type(value):
-    return "限价" if str(value).lower() == "limit" else "市价"
+    return "限价" if str(value).lower() == "limit" else "不支持"
 
 
 def _tier_ui_text(item):
@@ -1014,7 +1121,7 @@ def _install_auto_execute_setting(owner):
     ).pack(anchor="w")
     owner._v181_auto_exec_status_var = app.tk.StringVar(value="关闭")
     owner._v181_auto_exec_note_var = app.tk.StringVar(
-        value="AI推荐仅展示；开启后，完整入场方案会立即转换为Paper委托。TP + SL 为强制条件。"
+        value="AI推荐仅展示；开启后，完整入场方案会立即转换为Paper限价委托。TP + SL 均使用限价保护。"
     )
     visual.label(
         left,
@@ -1075,9 +1182,9 @@ def _refresh_v181_dashboard(owner):
             status_var.set("已开启 · AI方案到达即自动Paper挂单" if auto_on else "关闭 · AI推荐仅展示")
         if note_var is not None:
             note_var.set(
-                "强制条件：方向 / 数量 / 杠杆 / 入场方式 / TP / SL 完整；限价方案还必须有入场价。"
+                "强制条件：方向 / 数量 / 杠杆 / 限价入场价 / TP / SL 完整；不接受任何市价委托。"
                 if auto_on else
-                "AI推荐仅展示；开启后，完整入场方案会立即转换为Paper委托。TP + SL 为强制条件。"
+                "AI推荐仅展示；开启后，完整入场方案会立即转换为Paper限价委托。TP + SL 均使用限价保护。"
             )
         if button is not None:
             button.configure(
@@ -1196,9 +1303,9 @@ _PREVIOUS_BRIDGE_POST = v172._BridgeHandler.do_POST
 
 def _app_init_v181(self, *args, **kwargs):
     _PREVIOUS_APP_INIT(self, *args, **kwargs)
-    self.root.title("KAYTRADE 1.8.1 · PAPER AI · Build 1811")
+    self.root.title("KAYTRADE 1.8.1 · PAPER AI · Build 1813")
     try:
-        self.signal.set("V1.8.1 PAPER｜BTC行情只读｜AI方案可自动执行｜TP/SL强制｜双档 / 改单 / 撤单 / 60分钟自动撤单")
+        self.signal.set("V1.8.1 PAPER｜LIMIT ONLY｜AI方案自动限价挂单｜TP/SL限价保护｜双档 / 改单 / 撤单 / 60分钟自动撤单")
     except Exception:
         pass
     _move_btc_quote_to_top(self)
@@ -1230,8 +1337,8 @@ def _app_arm_v181(self):
         "启用 Paper AI",
         "KAYTRADE V1.8.1 PAPER EXECUTION\n\n"
         "所有交易操作仅在本地模拟，不向OKX发送任何下单/改单/撤单请求。\n"
-        "支持：市价/限价、双档同向挂单、60分钟自动撤单、修改入场、修改保护、"
-        "TP/SL触发后市价/限价退出、指定数量市价/限价减仓。\n"
+        "支持：仅限价委托、双档同向挂单、60分钟自动撤单、修改入场、修改保护、"
+        "TP/SL触发后仅限价退出、指定数量仅限价减仓。\n"
         "交易总览可开启「AI方案自动执行」；自动入场必须同时设置止盈TP和止损SL。\n\n"
         "确认启用请输入 PAPER",
         parent=self.root,
@@ -1285,7 +1392,7 @@ def apply():
         module.VERSION = VERSION
         module.BUILD = BUILD
     ui166.BUILD = BUILD
-    ui166.WINDOW_TITLE = "KAYTRADE 1.8.1 · PAPER AI · Build 1811"
+    ui166.WINDOW_TITLE = "KAYTRADE 1.8.1 · PAPER AI · Build 1813"
 
     model.STRATEGY_ENABLED = False
     model.AI_ONLY = True

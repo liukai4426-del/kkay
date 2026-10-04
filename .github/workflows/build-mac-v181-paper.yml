@@ -1,4 +1,4 @@
-name: Build KAYTRADE Intel Mac 1.8.1 Paper Build1811
+name: Build KAYTRADE Intel Mac 1.8.1 Paper Build1813
 
 on:
   push:
@@ -44,7 +44,7 @@ jobs:
           import v181_paper_patch as v181
 
           assert v181.VERSION == '1.8.1'
-          assert v181.BUILD == '1811'
+          assert v181.BUILD == '1813'
           assert v181.PAPER_ONLY is True
           assert model.STRATEGY_ENABLED is False
           assert app.Engine is v181.PaperEngineV181
@@ -62,7 +62,13 @@ jobs:
           assert 'set_auto_execute_plans' in source
           assert 'publish_ai_plan' in source
           assert 'take_profit' in source and 'stop_loss' in source
-          print('PASS V1.8.1 Build1811: paper-only auto AI-plan execution requires TP/SL')
+          assert 'AUTO_PLAN_REPLACED' in source
+          assert 'AUTO_ALREADY_ACTIVE' in source
+          assert '"supported_entry_order_types": ["limit"]' in source
+          assert '"supported_close_order_types": ["limit"]' in source
+          assert '"supported_protection_exit_order_types": ["limit"]' in source
+          assert '"limit_only": True' in source
+          print('PASS V1.8.1 Build1813: paper-only auto AI-plan execution requires TP/SL')
           PY
 
   build:
@@ -87,14 +93,14 @@ jobs:
         run: |
           python verify_bundle.py
           /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1.8.1'
-          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1811'
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1813'
           codesign --verify --deep --strict dist/KAYTRADE.app
       - name: Packaged V1.8.1 smoke test
         run: |
           TMPDIR_CHECK="$(mktemp -d)"
           dist/KAYTRADE.app/Contents/MacOS/KAYTRADE --smoke-test "$TMPDIR_CHECK/smoke.txt"
           cat "$TMPDIR_CHECK/smoke.txt"
-          grep 'V1.8.1 Build1811 PAPER' "$TMPDIR_CHECK/smoke.txt"
+          grep 'V1.8.1 Build1813 PAPER' "$TMPDIR_CHECK/smoke.txt"
           grep 'BTC quote is topmost' "$TMPDIR_CHECK/smoke.txt"
           grep 'automatic AI-plan paper execution requires TP/SL' "$TMPDIR_CHECK/smoke.txt"
           grep 'no OKX write path is exposed' "$TMPDIR_CHECK/smoke.txt"
@@ -103,13 +109,13 @@ jobs:
           mkdir -p installer
           ditto dist/KAYTRADE.app installer/KAYTRADE.app
           cp RELEASE-1.8.1-PAPER.md installer/RELEASE-1.8.1-PAPER.md
-          printf 'KAYTRADE V1.8.1 PAPER Build1811\nAI plan auto execution (user toggle) · mandatory TP/SL · two-tier paper execution · 60m auto-cancel.\n' > installer/RELEASE-1.8.1-PAPER.txt
-          hdiutil create -volname 'KAYTRADE 1.8.1 PAPER' -srcfolder installer -ov -format UDZO KAYTRADE-1.8.1-PAPER-Intel-build1811.dmg
+          printf 'KAYTRADE V1.8.1 PAPER Build1813\nLIMIT ONLY · AI auto-plan limit entry · TP/SL limit protection · two-tier paper execution · 60m auto-cancel.\n' > installer/RELEASE-1.8.1-PAPER.txt
+          hdiutil create -volname 'KAYTRADE 1.8.1 PAPER' -srcfolder installer -ov -format UDZO KAYTRADE-1.8.1-PAPER-Intel-build1813.dmg
       - uses: actions/upload-artifact@v4
         with:
-          name: KAYTRADE-1.8.1-PAPER-Intel-build1811
+          name: KAYTRADE-1.8.1-PAPER-Intel-build1813
           path: |
-            KAYTRADE-1.8.1-PAPER-Intel-build1811.dmg
+            KAYTRADE-1.8.1-PAPER-Intel-build1813.dmg
             installer/RELEASE-1.8.1-PAPER.md
             installer/RELEASE-1.8.1-PAPER.txt
           if-no-files-found: error

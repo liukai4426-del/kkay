@@ -17,12 +17,12 @@ BRIDGE_FILE = Path.home() / "Library" / "Application Support" / "OKXLocal" / "ai
 mcp = FastMCP(
     "kaytrade-v181-paper",
     instructions=(
-        "KAYTRADE V1.8.1 is paper-only and supports market/limit entry, two same-direction tiers, amend/cancel, partial close and market/limit protection exits. "
+        "KAYTRADE V1.8.1 is PAPER and LIMIT ONLY. Entry, partial close, take-profit and stop-loss exits must all use limit orders. "
         "Inspect get_kaytrade_state before proposing a trade. "
         "All trade-management tools mutate local paper state only; no tool sends OKX write requests. "
         "KAYTRADE must be connected to OKX Demo for read-only market data and the user must enable the Paper AI channel. "
         "Use publish_trade_plan for tier-1/tier-2 recommendations. If the user has enabled AI-plan auto execution in KAYTRADE, an executable entry plan is immediately converted into a local Paper order. "
-        "Always provide direction, size, leverage, order type, take-profit and stop-loss for executable entry plans; limit plans also require a limit/suggested entry price. "
+        "Always provide direction, size, leverage, limit entry price, take-profit and stop-loss. Protection exits are limit-only. Never propose a market order. "
         "Never ask for, read, or expose OKX API credentials."
     ),
 )
@@ -83,24 +83,35 @@ def publish_trade_plan(
     reason: str,
     operation_advice: str,
     suggested_entry: float | None = None,
-    order_type: str = "market",
+    order_type: str = "limit",
     limit_price: float | None = None,
     take_profit: float | None = None,
     stop_loss: float | None = None,
     size: float | None = None,
     leverage: int | None = None,
     plan_id: str | None = None,
-    tp_exit_type: str = "market",
+    tp_exit_type: str = "limit",
     tp_limit_price: float | None = None,
-    sl_exit_type: str = "market",
+    sl_exit_type: str = "limit",
     sl_limit_price: float | None = None,
 ) -> dict:
     """Publish an AI recommendation.
 
     If the user-controlled auto-execution setting is ON, a complete open plan
-    is immediately converted into a local Paper order. TP and SL are mandatory.
+    is immediately converted into a local Paper LIMIT order. TP and SL are mandatory and use LIMIT exits.
     No OKX write request is sent.
     """
+    if order_type.lower() != "limit":
+        raise RuntimeError("KAYTRADE LIMIT ONLY: order_type must be limit")
+    if limit_price is None and suggested_entry is None:
+        raise RuntimeError("KAYTRADE LIMIT ONLY: limit_price or suggested_entry is required")
+    if tp_exit_type.lower() != "limit" or sl_exit_type.lower() != "limit":
+        raise RuntimeError("KAYTRADE LIMIT ONLY: TP/SL exit type must be limit")
+    if tp_limit_price is None and take_profit is not None:
+        tp_limit_price = take_profit
+    if sl_limit_price is None and stop_loss is not None:
+        sl_limit_price = stop_loss
+
     payload = {
         "tier": tier,
         "direction": direction,
@@ -132,13 +143,13 @@ def submit_trade_proposal(
     stop_loss: float | None = None,
     leverage: int = 5,
     proposal_id: str | None = None,
-    order_type: str = "market",
+    order_type: str = "limit",
     limit_price: float | None = None,
     tier: int = 1,
     operation_advice: str = "",
-    tp_exit_type: str = "market",
+    tp_exit_type: str = "limit",
     tp_limit_price: float | None = None,
-    sl_exit_type: str = "market",
+    sl_exit_type: str = "limit",
     sl_limit_price: float | None = None,
 ) -> dict:
     """Submit a structured AI trade request to KAYTRADE V1.8.1.
@@ -146,9 +157,20 @@ def submit_trade_proposal(
     action: open or close.
     direction: long or short.
     For open: size, take_profit and stop_loss are mandatory.
-    order_type: market or limit. limit requires limit_price.
-    For close: KAYTRADE closes its currently managed position.
+    order_type: limit only; limit_price is mandatory.
+    For close: a limit_price is also mandatory.
     """
+    if order_type.lower() != "limit":
+        raise RuntimeError("KAYTRADE LIMIT ONLY: order_type must be limit")
+    if limit_price is None:
+        raise RuntimeError("KAYTRADE LIMIT ONLY: limit_price is required")
+    if tp_exit_type.lower() != "limit" or sl_exit_type.lower() != "limit":
+        raise RuntimeError("KAYTRADE LIMIT ONLY: TP/SL exit type must be limit")
+    if tp_limit_price is None and take_profit is not None:
+        tp_limit_price = take_profit
+    if sl_limit_price is None and stop_loss is not None:
+        sl_limit_price = stop_loss
+
     payload = {
         "action": action,
         "direction": direction,
@@ -171,12 +193,8 @@ def submit_trade_proposal(
         payload["take_profit"] = take_profit
     if stop_loss is not None:
         payload["stop_loss"] = stop_loss
-    if action.lower() == "open":
-        payload["order_type"] = order_type
-        if order_type.lower() == "limit":
-            if limit_price is None:
-                raise RuntimeError("limit order requires limit_price")
-            payload["limit_price"] = limit_price
+    payload["order_type"] = "limit"
+    payload["limit_price"] = limit_price
     return _request("POST", "/v1/trade", payload)
 
 
@@ -212,14 +230,18 @@ def amend_paper_protection(
     sl_exit_type: str | None = None,
     sl_limit_price: float | None = None,
 ) -> dict:
-    """Amend TP/SL trigger prices and choose market or limit exits after trigger."""
-    payload = {"tier": tier}
+    """Amend TP/SL trigger prices. Protection exits are always LIMIT."""
+    if tp_exit_type not in (None, "limit") or sl_exit_type not in (None, "limit"):
+        raise RuntimeError("KAYTRADE LIMIT ONLY: TP/SL exit type must be limit")
+    if tp_limit_price is None and take_profit is not None:
+        tp_limit_price = take_profit
+    if sl_limit_price is None and stop_loss is not None:
+        sl_limit_price = stop_loss
+    payload = {"tier": tier, "tp_exit_type": "limit", "sl_exit_type": "limit"}
     for key, value in {
         "take_profit": take_profit,
         "stop_loss": stop_loss,
-        "tp_exit_type": tp_exit_type,
         "tp_limit_price": tp_limit_price,
-        "sl_exit_type": sl_exit_type,
         "sl_limit_price": sl_limit_price,
     }.items():
         if value is not None:
@@ -230,23 +252,24 @@ def amend_paper_protection(
 @mcp.tool()
 def close_paper_position(
     size: float,
-    order_type: str = "market",
+    order_type: str = "limit",
     limit_price: float | None = None,
     tier: int | None = None,
     reason: str = "AI指定减仓",
 ) -> dict:
-    """Reduce a specified paper position size with a market or limit close order."""
+    """Reduce a specified paper position size with a LIMIT close order."""
+    if order_type.lower() != "limit":
+        raise RuntimeError("KAYTRADE LIMIT ONLY: close order_type must be limit")
+    if limit_price is None:
+        raise RuntimeError("KAYTRADE LIMIT ONLY: limit close requires limit_price")
     payload = {
         "size": size,
-        "order_type": order_type,
+        "order_type": "limit",
+        "limit_price": limit_price,
         "reason": reason,
     }
     if tier is not None:
         payload["tier"] = tier
-    if order_type.lower() == "limit":
-        if limit_price is None:
-            raise RuntimeError("limit close requires limit_price")
-        payload["limit_price"] = limit_price
     return _request("POST", "/v1/paper/close", payload)
 
 

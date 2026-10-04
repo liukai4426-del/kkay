@@ -1,7 +1,7 @@
 """KAYTRADE V1.8.0 AI Only overlay.
 
 V1.8 keeps the AI-only execution architecture from V1.7.2 and adds:
-- market and limit entry orders;
+- LIMIT-ONLY entry orders;
 - persistent pending-limit reconciliation;
 - a hierarchy-first KAYTRADE AI plan board;
 - a KAYTRADE card-style order/position execution board.
@@ -55,7 +55,7 @@ def _fmt_num(value, digits=4):
 
 
 def _order_type_cn(value):
-    return "限价" if str(value or "").lower() == "limit" else "市价"
+    return "限价" if str(value or "").lower() == "limit" else "不支持"
 
 
 def _side_cn(value):
@@ -68,20 +68,20 @@ def _side_cn(value):
 
 
 class AIOnlyEngineV180(v172.AIOnlyEngine):
-    """V1.8 execution engine: AI-only, market/limit entries, demo-only writes."""
+    """V1.8 execution engine: AI-only, LIMIT-only entries, demo-only writes."""
 
     def connect(self):
         super().connect()
         self.emit(
             "log",
-            "V1.8 AI Only：新仓支持市价/限价委托；本地指标策略保持停用。",
+            "V1.8 AI Only：新仓仅允许限价委托；本地指标策略保持停用。",
         )
 
     def ai_state(self):
         state = super().ai_state()
         state["version"] = VERSION
         state["build"] = BUILD
-        state["supported_entry_order_types"] = ["market", "limit"]
+        state["supported_entry_order_types"] = ["limit"]
         state["limits"] = {
             "max_leverage": AI_MAX_LEVERAGE,
             "max_notional_usdt": str(AI_MAX_NOTIONAL_USDT),
@@ -111,7 +111,7 @@ class AIOnlyEngineV180(v172.AIOnlyEngine):
         item = super()._record_ai_plan(proposal, proposal_id=proposal_id, status=status, detail=detail)
         if not item:
             return item
-        item["order_type"] = str(proposal.get("order_type") or "market").lower()
+        item["order_type"] = str(proposal.get("order_type") or "limit").lower()
         item["limit_price"] = proposal.get("limit_price")
         if item["order_type"] == "limit" and item.get("suggested_entry") in (None, ""):
             item["suggested_entry"] = item.get("limit_price")
@@ -131,9 +131,9 @@ class AIOnlyEngineV180(v172.AIOnlyEngine):
         if direction not in ("long", "short"):
             raise legacy_engine.Halt("direction 必须为 long 或 short")
 
-        order_type = str(proposal.get("order_type") or "market").lower()
-        if order_type not in ("market", "limit"):
-            raise legacy_engine.Halt("order_type 必须为 market 或 limit")
+        order_type = str(proposal.get("order_type") or "limit").lower()
+        if order_type != "limit":
+            raise legacy_engine.Halt("Limit Only：order_type 只允许 limit")
 
         qty = v172._decimal(proposal.get("size"), "size")
         leverage = int(proposal.get("leverage", AI_MAX_LEVERAGE))
@@ -145,14 +145,10 @@ class AIOnlyEngineV180(v172.AIOnlyEngine):
         meta = self.x.instrument()
         tick = v172._decimal(meta.get("tickSz"), "tickSz")
 
-        limit_price = None
-        if order_type == "limit":
-            limit_price = v172._decimal(proposal.get("limit_price"), "limit_price")
-            if limit_price % tick != 0:
-                raise legacy_engine.Halt(f"limit_price 必须按 tickSz={tick} 递增")
-            entry_ref = limit_price
-        else:
-            entry_ref = last
+        limit_price = v172._decimal(proposal.get("limit_price"), "limit_price")
+        if limit_price % tick != 0:
+            raise legacy_engine.Halt(f"limit_price 必须按 tickSz={tick} 递增")
+        entry_ref = limit_price
 
         tp = v172._decimal(proposal.get("take_profit"), "take_profit")
         sl = v172._decimal(proposal.get("stop_loss"), "stop_loss")
@@ -280,19 +276,18 @@ class AIOnlyEngineV180(v172.AIOnlyEngine):
                 {
                     "attachAlgoClOrdId": tp_id,
                     "tpTriggerPx": format(tp, "f"),
-                    "tpOrdPx": "-1",
+                    "tpOrdPx": format(tp, "f"),
                     "tpTriggerPxType": "last",
                 },
                 {
                     "attachAlgoClOrdId": sl_id,
                     "slTriggerPx": format(sl, "f"),
-                    "slOrdPx": "-1",
+                    "slOrdPx": format(sl, "f"),
                     "slTriggerPxType": "last",
                 },
             ],
         }
-        if order_type == "limit":
-            body["px"] = format(limit_price, "f")
+        body["px"] = format(limit_price, "f")
 
         try:
             reply = self.x.post("/api/v5/trade/order", body)
@@ -619,7 +614,7 @@ def _install_v180_dashboard(owner):
     visual.label(exec_title, text="订单 / 持仓执行", size=19, bold=True, color=visual.TEXT, bg=visual.PANEL).pack(anchor="w")
     visual.label(
         exec_title,
-        text="委托状态与持仓保护统一展示 · 市价 / 限价订单均实时同步",
+        text="委托状态与持仓保护统一展示 · LIMIT ONLY",
         size=9,
         color=visual.MUTED,
         bg=visual.PANEL,
@@ -733,8 +728,8 @@ def _refresh_v180_dashboard(owner):
         for item in history[-5:][::-1]:
             stamp = time.strftime("%H:%M:%S", time.localtime(float(item.get("time") or time.time())))
             direction = str(item.get("direction") or "WAIT").upper()
-            kind = "LMT" if str(item.get("order_type")).lower() == "limit" else "MKT"
-            entry = item.get("limit_price") if kind == "LMT" else item.get("suggested_entry")
+            kind = "LMT" if str(item.get("order_type")).lower() == "limit" else "INVALID"
+            entry = item.get("limit_price") or item.get("suggested_entry")
             rows.append(
                 f"{stamp}  T{item.get('tier') or 1}  {direction:<5} {kind}  "
                 f"{_fmt_px(entry):>10}  {str(item.get('status') or '')[:12]}"
@@ -782,7 +777,7 @@ def _app_init_v180(self, *args, **kwargs):
     _PREVIOUS_APP_INIT(self, *args, **kwargs)
     self.root.title("KAYTRADE 1.8.0 · AI ONLY · Build 1801")
     try:
-        self.signal.set("V1.8 AI ONLY｜支持市价 / 限价委托｜等待 Codex / AI 交易方案")
+        self.signal.set("V1.8 AI ONLY｜LIMIT ONLY｜等待 Codex / AI 交易方案")
     except Exception:
         pass
     label = getattr(self, "_v170_version_label", None)
@@ -811,8 +806,8 @@ def _app_arm_v180(self):
     typed = app.simpledialog.askstring(
         "启用AI交易通道",
         "KAYTRADE V1.8 AI ONLY\n\n"
-        "AI开仓支持：市价委托 / 限价委托。\n"
-        "限价委托可持续挂单等待成交，不使用市价单15秒超时规则。\n"
+        "AI开仓仅支持：限价委托。\n"
+        "所有入场与保护退出均禁止市价委托。\n"
         f"硬上限：杠杆≤{AI_MAX_LEVERAGE}x；名义仓位≤{AI_MAX_NOTIONAL_USDT} USDT；"
         f"估算止损≤{AI_MAX_ESTIMATED_STOP_LOSS_USDT} USDT。\n"
         "本地BOLL / EMA / RSI / 评分 / Gate不参与开仓。\n\n"
