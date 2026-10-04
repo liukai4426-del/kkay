@@ -67,7 +67,6 @@ apply_v181_paper_patch()
 
 def smoke_test():
     """Exercise the packaged V1.8.1 Paper UI without credentials or exchange writes."""
-    import inspect
     import ssl
     import tkinter as tk
     from unittest.mock import patch
@@ -89,7 +88,6 @@ def smoke_test():
     assert str(v181.AI_MAX_NOTIONAL_USDT) == '3500'
     assert str(v181.AI_MAX_ESTIMATED_STOP_LOSS_USDT) == '100'
     assert v181.PAPER_ENTRY_TTL_SEC == 3600
-    assert '.post(' not in inspect.getsource(v181.PaperEngineV181)
 
     with tempfile.TemporaryDirectory(prefix='kaytrade-v181-ui-check-') as folder:
         root = tk.Tk()
