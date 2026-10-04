@@ -1020,7 +1020,7 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
                             "newTpTriggerPx": format(tp, "f"),
                             "newTpOrdPx": "-1",
                             "newTpTriggerPxType": "last",
-                            "newTpOrdKind": "limit",
+                            "newTpOrdKind": "condition",
                         },
                         {
                             "attachAlgoClOrdId": item["sl_client_id"],
