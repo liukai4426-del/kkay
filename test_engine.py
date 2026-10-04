@@ -1,6 +1,7 @@
 import io
 import json
 import tempfile
+import threading
 import time
 import unittest
 from dataclasses import replace
@@ -65,6 +66,35 @@ class RiskTests(unittest.TestCase):
         with self.assertRaises(ValueError): indicators([dict(c=100)]*5)
     def test_hosts_locked(self):
         with self.assertRaises(ValueError): Client(host='attacker.example')
+
+
+class StoreTests(unittest.TestCase):
+    def test_concurrent_saves_leave_valid_json_and_no_tmp_collision(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path=Path(temp)/'state.json'
+            store=Store(path)
+            errors=[]
+            barrier=threading.Barrier(8)
+
+            def writer(index):
+                try:
+                    barrier.wait()
+                    for n in range(30):
+                        store.data['writer']=index
+                        store.data['iteration']=n
+                        store.save()
+                except Exception as exc:
+                    errors.append(exc)
+
+            threads=[threading.Thread(target=writer,args=(i,)) for i in range(8)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            self.assertEqual(errors,[])
+            json.loads(path.read_text())
+            self.assertEqual(list(Path(temp).glob('.*.tmp')),[])
 
 class EngineTests(unittest.TestCase):
     def setUp(self):
