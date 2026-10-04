@@ -766,16 +766,23 @@ def _app_emit_v172(self, kind, data):
 def _hide_legacy_strategy_tabs(owner):
     book = getattr(owner, "book", None)
     if book is not None:
-        for tab in list(book.tabs()):
+        # visual.Tabs is a custom flat navigation component, not ttk.Notebook.
+        # App creates pages in this stable order:
+        # 0 connection, 1 risk, 2 execution, 3 overview, 4 history.
+        for index in (1, 2):
             try:
-                title = str(book.tab(tab, "text"))
+                book.buttons[index].pack_forget()
             except Exception:
-                continue
-            if title in ("风险设置", "执行参数"):
-                try:
-                    book.hide(tab)
-                except Exception:
-                    pass
+                pass
+            try:
+                book.pages[index].pack_forget()
+            except Exception:
+                pass
+        try:
+            if book.active in (1, 2):
+                book.select(0)
+        except Exception:
+            pass
     try:
         detail = owner.score_table.master.master
         detail.pack_forget()
