@@ -70,7 +70,7 @@ apply_v190_dual_env_patch()
 
 
 def smoke_test():
-    """Exercise packaged Build1900 dual OKX runtime without credentials or writes."""
+    """Exercise packaged Build2000 dual OKX runtime without credentials or writes."""
     import ssl
     import tkinter as tk
     from unittest.mock import patch
@@ -82,12 +82,12 @@ def smoke_test():
     import v190_dual_env_patch as v190
 
     assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
-    assert v183.VERSION == '1.9.0' and v183.BUILD == '1900'
-    assert v184.VERSION == '1.9.0' and v184.BUILD == '1900'
-    assert v190.VERSION == '1.9.0' and v190.BUILD == '1900'
+    assert v183.VERSION == '2.0.0' and v183.BUILD == '2000'
+    assert v184.VERSION == '2.0.0' and v184.BUILD == '2000'
+    assert v190.VERSION == '2.0.0' and v190.BUILD == '2000'
     assert v183.DEMO_EXECUTION is True
     assert v183.LIMIT_ONLY is True
-    assert model.VERSION == '1.9.0' and model.BUILD == '1900'
+    assert model.VERSION == '2.0.0' and model.BUILD == '2000'
     assert model.STRATEGY_ENABLED is False
     assert getattr(model, '_kaytrade_v183_okx_demo_applied', False)
     assert getattr(app.App, '_kaytrade_v183_okx_demo_applied', False)
@@ -105,15 +105,15 @@ def smoke_test():
                 ui = app.App(root, Path(folder))
                 root.update()
                 assert 'KAYTRADE' in root.title()
-                assert '1.9.0' in root.title()
+                assert '2.0.0' in root.title()
                 assert 'OKX DEMO' in root.title()
-                assert '1900' in root.title()
+                assert '2000' in root.title()
                 assert ui.mode.get() == 'OKX模拟盘'
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
                 assert getattr(ui, '_v183_okx_demo_ready', False)
                 assert getattr(ui, '_v190_dual_env_ready', False)
-                assert 'V1.9.0 Build1900' in ui.signal.get()
+                assert 'V2.0.0 Build2000' in ui.signal.get()
                 assert 'DEMO / LIVE' in ui.signal.get()
                 assert getattr(ui, '_v183_auto_exec_card', None) is not None
                 assert getattr(ui, '_v184_plan_card', None) is not None
@@ -148,7 +148,7 @@ def smoke_test():
             root.destroy()
 
     Path(sys.argv[2]).write_text(
-        'PASS: KAYTRADE V1.9.0 Build1900 DUAL OKX LIMIT ONLY; '
+        'PASS: KAYTRADE V2.0.0 Build2000 DUAL OKX LIMIT ONLY; '
         'Demo/Live runtime is isolated; Live starts AUTO OFF; AI cannot select the execution environment.\n'
     )
 
