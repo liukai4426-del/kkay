@@ -59,14 +59,17 @@ def _limit_protection_price(value, trigger, name):
     """Normalize every OKX protection exit to a positive LIMIT price.
 
     OKX uses -1 as the market-order sentinel for TP/SL. Build1840 never
-    forwards that sentinel: None/blank/zero/negative values fall back to the
-    corresponding TP/SL trigger price.
+    forwards that sentinel: None/blank/zero/negative/non-finite values fall
+    back to the corresponding positive TP/SL trigger price.
     """
     trigger_price = _d(trigger, name.replace("_limit_price", ""))
     if value in (None, ""):
         return trigger_price
-    price = _d(value, name)
-    if price <= 0:
+    try:
+        price = Decimal(str(value))
+    except Exception:
+        return trigger_price
+    if not price.is_finite() or price <= 0:
         return trigger_price
     return price
 
@@ -554,11 +557,13 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
             "stop_loss": sl,
             "tp_exit_type": "limit",
             "sl_exit_type": "limit",
-            "tp_limit_price": float(
-                _limit_protection_price(plan.get("tp_limit_price"), tp, "tp_limit_price")
+            "tp_limit_price": format(
+                _limit_protection_price(plan.get("tp_limit_price"), tp, "tp_limit_price"),
+                "f",
             ),
-            "sl_limit_price": float(
-                _limit_protection_price(plan.get("sl_limit_price"), sl, "sl_limit_price")
+            "sl_limit_price": format(
+                _limit_protection_price(plan.get("sl_limit_price"), sl, "sl_limit_price"),
+                "f",
             ),
             "reason": str(plan.get("reason") or "")[:1000],
             "operation_advice": str(
