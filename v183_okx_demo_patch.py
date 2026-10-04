@@ -104,28 +104,34 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
         """One-way migration: delete obsolete local Paper execution state."""
         if not self.store:
             return
-        removed = self.store.data.pop("paper_execution", None) is not None
-        history = self.store.data.get("ai_plan_history") or []
-        clean_history = [
-            item for item in history
-            if "PAPER" not in str((item or {}).get("status") or "").upper()
-            and "PAPER" not in str((item or {}).get("mode") or "").upper()
-        ]
-        if len(clean_history) != len(history):
-            self.store.data["ai_plan_history"] = clean_history[-30:]
-            removed = True
-        tiers = self.store.data.get("ai_tiers") or {}
-        for key in list(tiers):
-            item = tiers.get(key)
-            if isinstance(item, dict) and (
-                "PAPER" in str(item.get("status") or "").upper()
-                or "PAPER" in str(item.get("mode") or "").upper()
-            ):
-                tiers.pop(key, None)
-                removed = True
-        if removed:
+        had_paper = self.store.data.pop("paper_execution", None) is not None
+        if had_paper:
+            # Paper tier snapshots and recommendation history were coupled to
+            # the removed local simulator. Do not carry them into exchange execution.
+            self.store.data["ai_tiers"] = {}
+            self.store.data["ai_plan_history"] = []
+        else:
+            history = self.store.data.get("ai_plan_history") or []
+            clean_history = [
+                item for item in history
+                if "PAPER" not in str((item or {}).get("status") or "").upper()
+                and "PAPER" not in str((item or {}).get("mode") or "").upper()
+            ]
+            if len(clean_history) != len(history):
+                self.store.data["ai_plan_history"] = clean_history[-30:]
+                had_paper = True
+            tiers = self.store.data.get("ai_tiers") or {}
+            for key in list(tiers):
+                item = tiers.get(key)
+                if isinstance(item, dict) and (
+                    "PAPER" in str(item.get("status") or "").upper()
+                    or "PAPER" in str(item.get("mode") or "").upper()
+                ):
+                    tiers.pop(key, None)
+                    had_paper = True
+        if had_paper:
             self.store.save()
-            self.emit("log", "Build1831：已删除旧 paper_execution 本地模拟状态；不会迁移为OKX订单。")
+            self.emit("log", "Build1831：已彻底清除旧Paper执行状态/档位缓存/方案历史；不会迁移为OKX订单。")
 
     def _ensure_demo_state(self):
         if not self.store:
