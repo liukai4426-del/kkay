@@ -12,7 +12,7 @@ Implements:
 - market/limit partial close with explicit size;
 - persistent paper state restored after restart;
 - Trading Overview BTC quote moved to top;
-- LONG green / SHORT red UI semantics.
+- LONG green / SHORT red UI semantics;\n- optional user-controlled auto execution of executable AI entry plans with mandatory TP/SL.
 """
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ import v180_ai_only_patch as v180
 import visual
 
 VERSION = "1.8.1"
-BUILD = "1810"
+BUILD = "1811"
 AI_ONLY = True
 PAPER_ONLY = True
 
@@ -119,6 +119,7 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
         paper.setdefault("events", [])
         paper.setdefault("results", {})
         paper.setdefault("last_price", None)
+        paper.setdefault("auto_execute_plans", False)
         paper.setdefault("updated_at", _now())
         if set(paper["tiers"].keys()) != {"1", "2"}:
             paper["tiers"] = {
@@ -132,6 +133,188 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
         if not self.store:
             raise legacy_engine.Halt("KAYTRADE尚未连接")
         return self._ensure_paper_state()
+
+    def set_auto_execute_plans(self, enabled):
+        """User-controlled Paper setting. AI cannot enable live exchange writes."""
+        with self._ai_lock:
+            if not self.store:
+                raise legacy_engine.Halt("先连接 OKX模拟盘")
+            if not self.enabled:
+                raise legacy_engine.Halt("先启用 Paper AI交易通道，再开启AI方案自动执行")
+            paper = self._paper()
+            paper["auto_execute_plans"] = bool(enabled)
+            paper["updated_at"] = _now()
+            self.store.save()
+            state = "开启" if enabled else "关闭"
+            self.emit(
+                "log",
+                f"AI方案自动执行已{state}：仅Paper；自动入场必须同时包含TP和SL。",
+            )
+            return {
+                "version": VERSION,
+                "build": BUILD,
+                "paper_only": True,
+                "auto_execute_plans": bool(enabled),
+                "requires_take_profit": True,
+                "requires_stop_loss": True,
+            }
+
+    def _set_plan_status(self, item, status, detail=""):
+        if not isinstance(item, dict):
+            return
+        item["status"] = str(status)
+        item["detail"] = str(detail or "")[:1000]
+        item["updated_at"] = _now()
+        if self.store:
+            tier = str(int(item.get("tier") or 1))
+            self.store.data.setdefault("ai_tiers", {})[tier] = item
+            self.store.save()
+
+    def _auto_proposal_from_plan(self, plan, item):
+        """Convert a recommendation into an executable paper proposal."""
+        direction = str(plan.get("direction") or "").lower()
+        order_type = str(plan.get("order_type") or "market").lower()
+        tier = int(plan.get("tier") or 1)
+
+        tp = plan.get("take_profit")
+        sl = plan.get("stop_loss")
+        if tp in (None, "") or sl in (None, ""):
+            raise legacy_engine.Halt("自动执行要求每个入场方案必须同时设置 take_profit 和 stop_loss")
+
+        size = plan.get("size")
+        leverage = plan.get("leverage")
+        missing = []
+        if direction not in ("long", "short"):
+            missing.append("direction")
+        if size in (None, ""):
+            missing.append("size")
+        if leverage in (None, ""):
+            missing.append("leverage")
+        if order_type not in ("market", "limit"):
+            missing.append("order_type")
+        if missing:
+            raise legacy_engine.Halt("自动执行方案缺少/无效字段：" + ", ".join(missing))
+
+        proposal_id = str(
+            plan.get("proposal_id")
+            or f"autoplan-{item.get('plan_id') or uuid.uuid4().hex}"
+        )
+        proposal = {
+            "proposal_id": proposal_id,
+            "plan_id": item.get("plan_id"),
+            "action": "open",
+            "tier": tier,
+            "direction": direction,
+            "order_type": order_type,
+            "size": size,
+            "leverage": leverage,
+            "take_profit": tp,
+            "stop_loss": sl,
+            "reason": str(plan.get("reason") or "")[:1000],
+            "operation_advice": str(
+                plan.get("operation_advice") or plan.get("advice") or ""
+            )[:1000],
+            "tp_exit_type": str(plan.get("tp_exit_type") or "market").lower(),
+            "sl_exit_type": str(plan.get("sl_exit_type") or "market").lower(),
+        }
+        if proposal["tp_exit_type"] == "limit":
+            proposal["tp_limit_price"] = plan.get("tp_limit_price")
+        if proposal["sl_exit_type"] == "limit":
+            proposal["sl_limit_price"] = plan.get("sl_limit_price")
+
+        if order_type == "limit":
+            limit_price = plan.get("limit_price")
+            if limit_price in (None, ""):
+                limit_price = plan.get("suggested_entry", plan.get("entry"))
+            if limit_price in (None, ""):
+                raise legacy_engine.Halt("限价AI方案自动执行必须包含 limit_price 或 suggested_entry")
+            proposal["limit_price"] = limit_price
+        return proposal
+
+    def publish_ai_plan(self, plan):
+        """Publish recommendation; optionally convert it into a Paper entry immediately."""
+        with self._ai_lock:
+            if not isinstance(plan, dict):
+                raise legacy_engine.Halt("AI推荐计划必须为JSON对象")
+
+            item = self._record_ai_plan(plan, status="RECOMMENDED")
+            paper = self._paper()
+            auto_on = bool(paper.get("auto_execute_plans"))
+            base = {
+                "version": VERSION,
+                "build": BUILD,
+                "mode": "PAPER_EXECUTION",
+                "paper_only": True,
+                "auto_execute_plans": auto_on,
+                "plan": item,
+            }
+
+            if str(plan.get("action") or "open").lower() != "open":
+                self.emit("log", f"AI推荐计划已更新：第{item['tier']}档；非入场方案不触发自动挂单")
+                return dict(base, status="RECOMMENDED", auto_execution="NOT_ENTRY")
+
+            if not auto_on:
+                self.emit(
+                    "log",
+                    f"AI推荐计划已更新：第{item['tier']}档 · 自动执行关闭，仅展示方案",
+                )
+                return dict(base, status="RECOMMENDED", auto_execution="OFF")
+
+            if not self.enabled:
+                self._set_plan_status(item, "AUTO_BLOCKED", "Paper AI交易通道未启用")
+                self.emit("log", f"第{item['tier']}档AI方案未自动执行：Paper AI交易通道未启用")
+                return dict(
+                    base,
+                    status="AUTO_BLOCKED",
+                    auto_execution="BLOCKED",
+                    error="Paper AI交易通道未启用",
+                )
+
+            try:
+                proposal = self._auto_proposal_from_plan(plan, item)
+                execution = self.submit_ai_trade(proposal)
+            except legacy_engine.Halt as exc:
+                message = str(exc)
+                status = "AUTO_REJECTED_NO_TP_SL" if (
+                    "take_profit" in message or "stop_loss" in message
+                ) else "AUTO_REJECTED"
+                self._set_plan_status(item, status, message)
+                self._event(
+                    "AUTO_PLAN_REJECTED",
+                    {"tier": item["tier"], "detail": message},
+                )
+                return dict(
+                    base,
+                    status=status,
+                    auto_execution="REJECTED",
+                    error=message,
+                )
+
+            # submit_ai_trade records the executable copy of the plan. Remove the
+            # earlier RECOMMENDED duplicate so the dashboard shows one row per plan.
+            history = self.store.data.get("ai_plan_history") or []
+            try:
+                history.remove(item)
+            except ValueError:
+                pass
+            latest = history[-1] if history else item
+            latest["detail"] = "AI推荐方案已自动转换为Paper委托"
+            self.store.data.setdefault("ai_tiers", {})[str(item["tier"])] = latest
+            self.store.save()
+            self._event(
+                "AUTO_PLAN_EXECUTED",
+                {
+                    "tier": item["tier"],
+                    "detail": f"第{item['tier']}档AI方案已自动执行为{_order_type(execution.get('order_type'))}Paper委托",
+                },
+            )
+            return {
+                **base,
+                "status": "AUTO_EXECUTED",
+                "auto_execution": "EXECUTED",
+                "plan": latest,
+                "execution": execution,
+            }
 
     def _event(self, event, payload):
         paper = self._paper()
@@ -721,6 +904,8 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
             "supports_amend_protection": True,
             "supports_two_same_direction_tiers": True,
             "entry_auto_cancel_seconds": PAPER_ENTRY_TTL_SEC,
+            "supports_auto_execute_ai_plans": True,
+            "auto_execute_requires_tp_sl": True,
             "limits": {
                 "max_leverage": str(AI_MAX_LEVERAGE),
                 "max_notional_usdt": str(AI_MAX_NOTIONAL_USDT),
@@ -730,6 +915,7 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
         if self.store:
             paper = self._paper()
             state["paper_execution"] = paper
+            state["auto_execute_plans"] = bool(paper.get("auto_execute_plans"))
             state["recent_ai_plans"] = (self.store.data.get("ai_plan_history") or [])[-8:]
         try:
             state["ticker"] = self.x.ticker()
@@ -801,6 +987,76 @@ def _move_btc_quote_to_top(owner):
         pass
 
 
+def _install_auto_execute_setting(owner):
+    try:
+        dash = owner.book.pages[3].body
+        execution = owner._v180_execution_card
+    except Exception:
+        return
+    if getattr(owner, "_v181_auto_exec_card", None) is not None:
+        return
+
+    card = visual.Card(dash, height=104)
+    card.pack(fill="x", pady=(0, 12), before=execution)
+    row = app.tk.Frame(card.body, bg=visual.PANEL)
+    row.pack(fill="both", expand=True)
+
+    left = app.tk.Frame(row, bg=visual.PANEL)
+    left.pack(side="left", fill="both", expand=True)
+    visual.label(
+        left,
+        text="AI方案自动执行",
+        size=15,
+        bold=True,
+        color=visual.TEXT,
+        bg=visual.PANEL,
+    ).pack(anchor="w")
+    owner._v181_auto_exec_status_var = app.tk.StringVar(value="关闭")
+    owner._v181_auto_exec_note_var = app.tk.StringVar(
+        value="AI推荐仅展示；开启后，完整入场方案会立即转换为Paper委托。TP + SL 为强制条件。"
+    )
+    visual.label(
+        left,
+        variable=owner._v181_auto_exec_status_var,
+        size=11,
+        bold=True,
+        color=visual.MUTED,
+        bg=visual.PANEL,
+    ).pack(anchor="w", pady=(4, 1))
+    visual.label(
+        left,
+        variable=owner._v181_auto_exec_note_var,
+        size=9,
+        color=visual.MUTED,
+        bg=visual.PANEL,
+    ).pack(anchor="w")
+
+    owner._v181_auto_exec_button = visual.RoundedButton(
+        row,
+        text="开启自动执行",
+        command=lambda: _toggle_auto_execute(owner),
+        variant="accent",
+        width=150,
+        height=40,
+    )
+    owner._v181_auto_exec_button.pack(side="right", padx=(18, 0), pady=10)
+    owner._v181_auto_exec_card = card
+
+
+def _toggle_auto_execute(owner):
+    engine = getattr(owner, "engine", None)
+    if engine is None or not callable(getattr(engine, "set_auto_execute_plans", None)):
+        app.messagebox.showerror("未连接", "先连接 OKX模拟盘并启用 Paper AI交易通道")
+        return
+    try:
+        paper = engine._paper()
+        target = not bool(paper.get("auto_execute_plans"))
+        engine.set_auto_execute_plans(target)
+        _refresh_v181_dashboard(owner)
+    except Exception as exc:
+        app.messagebox.showerror("自动执行设置失败", str(exc))
+
+
 def _refresh_v181_dashboard(owner):
     try:
         engine = getattr(owner, "engine", None)
@@ -810,6 +1066,27 @@ def _refresh_v181_dashboard(owner):
         tiers = paper.get("tiers") or {}
         history = data.get("ai_plan_history") or []
         latest = history[-1] if history else {}
+        auto_on = bool(paper.get("auto_execute_plans"))
+        status_var = getattr(owner, "_v181_auto_exec_status_var", None)
+        note_var = getattr(owner, "_v181_auto_exec_note_var", None)
+        button = getattr(owner, "_v181_auto_exec_button", None)
+        if status_var is not None:
+            status_var.set("已开启 · AI方案到达即自动Paper挂单" if auto_on else "关闭 · AI推荐仅展示")
+        if note_var is not None:
+            note_var.set(
+                "强制条件：方向 / 数量 / 杠杆 / 入场方式 / TP / SL 完整；限价方案还必须有入场价。"
+                if auto_on else
+                "AI推荐仅展示；开启后，完整入场方案会立即转换为Paper委托。TP + SL 为强制条件。"
+            )
+        if button is not None:
+            button.configure(
+                text="关闭自动执行" if auto_on else "开启自动执行",
+                variant="danger" if auto_on else "accent",
+            )
+        try:
+            owner._v180_mode_var.set("PAPER · AUTO ON" if auto_on else "PAPER · MANUAL")
+        except Exception:
+            pass
 
         # Reuse the V1.8 KAYTRADE-native cards, but source execution state from paper tiers.
         if latest:
@@ -918,12 +1195,13 @@ _PREVIOUS_BRIDGE_POST = v172._BridgeHandler.do_POST
 
 def _app_init_v181(self, *args, **kwargs):
     _PREVIOUS_APP_INIT(self, *args, **kwargs)
-    self.root.title("KAYTRADE 1.8.1 · PAPER AI · Build 1810")
+    self.root.title("KAYTRADE 1.8.1 · PAPER AI · Build 1811")
     try:
-        self.signal.set("V1.8.1 PAPER｜BTC行情只读｜双档 / 改单 / 撤单 / 部分减仓 / 60分钟自动撤单")
+        self.signal.set("V1.8.1 PAPER｜BTC行情只读｜AI方案可自动执行｜TP/SL强制｜双档 / 改单 / 撤单 / 60分钟自动撤单")
     except Exception:
         pass
     _move_btc_quote_to_top(self)
+    _install_auto_execute_setting(self)
     try:
         self._v181_direction_label = _find_label_for_var(self._v180_plan_card, self._v180_side_var)
         self._v181_tier1_label = _find_label_text(self._v180_execution_card, "第一档执行方案")
@@ -952,7 +1230,7 @@ def _app_arm_v181(self):
         "KAYTRADE V1.8.1 PAPER EXECUTION\n\n"
         "所有交易操作仅在本地模拟，不向OKX发送任何下单/改单/撤单请求。\n"
         "支持：市价/限价、双档同向挂单、60分钟自动撤单、修改入场、修改保护、"
-        "TP/SL触发后市价/限价退出、指定数量市价/限价减仓。\n\n"
+        "TP/SL触发后市价/限价退出、指定数量市价/限价减仓。\n"\n        "交易总览可开启「AI方案自动执行」；自动入场必须同时设置止盈TP和止损SL。\n\n"
         "确认启用请输入 PAPER",
         parent=self.root,
     )
@@ -1005,7 +1283,7 @@ def apply():
         module.VERSION = VERSION
         module.BUILD = BUILD
     ui166.BUILD = BUILD
-    ui166.WINDOW_TITLE = "KAYTRADE 1.8.1 · PAPER AI · Build 1810"
+    ui166.WINDOW_TITLE = "KAYTRADE 1.8.1 · PAPER AI · Build 1811"
 
     model.STRATEGY_ENABLED = False
     model.AI_ONLY = True
