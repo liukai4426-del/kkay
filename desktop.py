@@ -59,27 +59,33 @@ from v171_update_patch import apply as apply_v171_update_patch
 apply_v171_update_patch()
 from v172_ai_only_patch import apply as apply_v172_ai_only_patch
 apply_v172_ai_only_patch()
+from v180_ai_only_patch import apply as apply_v180_ai_only_patch
+apply_v180_ai_only_patch()
 
 
 def smoke_test():
-    """Exercise the packaged V1.7.2 AI-only UI without credentials or orders."""
+    """Exercise the packaged V1.8 AI-only UI without credentials or orders."""
     import ssl
     import tkinter as tk
     from unittest.mock import patch
     import app
     import v165_model as model
     import v172_ai_only_patch as v172
+    import v180_ai_only_patch as v180
 
     assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
-    assert v172.VERSION == '1.7.2' and v172.BUILD == '1723'
-    assert v172.AI_ONLY is True
-    assert model.VERSION == '1.7.2' and model.BUILD == '1723'
+    assert v180.VERSION == '1.8.0' and v180.BUILD == '1801'
+    assert v180.AI_ONLY is True
+    assert model.VERSION == '1.8.0' and model.BUILD == '1801'
     assert model.STRATEGY_ENABLED is False
-    assert getattr(model, '_kaytrade_v172_ai_only_applied', False)
-    assert getattr(app.App, '_kaytrade_v172_ai_only_applied', False)
-    assert app.Engine is v172.AIOnlyEngine
+    assert getattr(model, '_kaytrade_v180_ai_only_applied', False)
+    assert getattr(app.App, '_kaytrade_v180_ai_only_applied', False)
+    assert app.Engine is v180.AIOnlyEngineV180
+    assert v180.AI_MAX_LEVERAGE == 20
+    assert str(v180.AI_MAX_NOTIONAL_USDT) == '3500'
+    assert str(v180.AI_MAX_ESTIMATED_STOP_LOSS_USDT) == '100'
 
-    with tempfile.TemporaryDirectory(prefix='kaytrade-v172-ui-check-') as folder:
+    with tempfile.TemporaryDirectory(prefix='kaytrade-v180-ui-check-') as folder:
         root = tk.Tk()
         try:
             with (
@@ -91,15 +97,21 @@ def smoke_test():
                 ui = app.App(root, Path(folder))
                 root.update()
                 assert 'KAYTRADE' in root.title()
-                assert '1.7.2' in root.title()
+                assert '1.8.0' in root.title()
                 assert 'AI ONLY' in root.title()
-                assert '1723' in root.title()
+                assert '1801' in root.title()
                 assert ui.mode.get() == 'OKX模拟盘'
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
-                assert getattr(ui, '_v172_ai_only_ready', False)
-                assert 'AI ONLY' in ui.signal.get()
-                assert '无本地交易策略' in ui.signal.get()
+                assert getattr(ui, '_v180_ai_only_ready', False)
+                assert 'V1.8 AI ONLY' in ui.signal.get()
+                assert '市价 / 限价' in ui.signal.get()
+                assert getattr(ui, '_v180_plan_card', None) is not None
+                assert getattr(ui, '_v180_execution_card', None) is not None
+                assert 'AI 交易方案看板' in v172._widget_text(ui._v180_plan_card)
+                assert '订单 / 持仓执行' in v172._widget_text(ui._v180_execution_card)
+                assert '第一档执行方案' in v172._widget_text(ui._v180_execution_card)
+                assert '第二档执行方案' in v172._widget_text(ui._v180_execution_card)
                 assert '启用AI交易通道' in str(getattr(ui.trade_button, 'text', ''))
                 visible = [
                     str(button.text)
@@ -108,13 +120,6 @@ def smoke_test():
                 ]
                 assert '风险设置' not in visible
                 assert '执行参数' not in visible
-                assert getattr(ui, '_v172_ai_card', None) is not None
-                assert getattr(ui, '_v172_ai_plan_card', None) is not None
-                assert getattr(ui, '_v172_position_card', None) is not None
-                assert 'AI交易方案运行看板' in v172._widget_text(ui._v172_ai_plan_card)
-                assert '第一档' in v172._widget_text(ui._v172_position_card)
-                assert '第二档' in v172._widget_text(ui._v172_position_card)
-                assert 'Build1723' in v172._widget_text(ui._v172_ai_card)
                 pee4 = getattr(ui, '_v170_pee4_card', None)
                 assert pee4 is None or not pee4.winfo_manager()
                 ui.finished.set()
@@ -124,9 +129,9 @@ def smoke_test():
             root.destroy()
 
     Path(sys.argv[2]).write_text(
-        'PASS: KAYTRADE V1.7.2 Build1723 AI ONLY packaged runtime; '
-        'legacy strategy entry is disabled, AI bridge is localhost-token protected, '
-        'and autonomous AI writes are restricted to OKX Demo Trading.\n'
+        'PASS: KAYTRADE V1.8.0 Build1801 AI ONLY packaged runtime; '
+        'market and limit entry orders are supported, the redesigned KAYTRADE AI-plan and order/position dashboards are present, '
+        'legacy strategy entry is disabled, and autonomous AI writes remain restricted to OKX Demo Trading.\n'
     )
 
 

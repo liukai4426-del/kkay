@@ -1,0 +1,110 @@
+name: Build KAYTRADE Intel Mac 1.8.0 AI Only Build1801
+
+on:
+  push:
+    branches: [feature/v180-redesign]
+  pull_request:
+    branches: [release/v1.7.2-ai-only]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install runtime test dependencies
+        run: python -m pip install 'websocket-client==1.8.0' 'certifi==2025.8.3'
+      - name: Compile V1.8 AI Only
+        run: |
+          python -m py_compile \
+            desktop.py exchange.py engine.py app.py history.py \
+            v172_ai_only_patch.py v180_ai_only_patch.py \
+            kaytrade_mcp.py test_v172_ai_only.py test_v180_ai_only.py
+      - name: V1.7.1 maintenance regression
+        run: python -m unittest -v test_v171_update
+      - name: V1.7.2 AI-only regression
+        run: python -m unittest -v test_v172_ai_only
+      - name: V1.8 market/limit tests
+        run: python -m unittest -v test_v180_ai_only
+      - name: Verify V1.8 semantic lock
+        run: |
+          python - <<'PY'
+          import inspect
+          import app
+          import v165_model as model
+          import v180_ai_only_patch as v180
+
+          assert v180.VERSION == '1.8.0'
+          assert v180.BUILD == '1801'
+          assert v180.AI_ONLY is True
+          assert model.STRATEGY_ENABLED is False
+          assert app.Engine is v180.AIOnlyEngineV180
+          assert v180.AI_MAX_LEVERAGE == 20
+          assert str(v180.AI_MAX_NOTIONAL_USDT) == '3500'
+          assert str(v180.AI_MAX_ESTIMATED_STOP_LOSS_USDT) == '100'
+          validate = inspect.getsource(v180.AIOnlyEngineV180._validate_open)
+          assert '("market", "limit")' in validate
+          submit = inspect.getsource(v180.AIOnlyEngineV180._submit_open)
+          assert 'body["px"]' in submit
+          reconcile = inspect.getsource(v180.AIOnlyEngineV180.reconcile)
+          assert 'partially_filled' in reconcile
+          cycle = inspect.getsource(v180.AIOnlyEngineV180.cycle)
+          assert 'refresh_market' not in cycle
+          assert 'make_plan' not in cycle
+          print('PASS V1.8: AI-only market/limit entry with KAYTRADE-native dashboard')
+          PY
+
+  build:
+    needs: unit
+    runs-on: macos-15-intel
+    timeout-minutes: 70
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - name: Install build dependencies
+        run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0' 'websocket-client==1.8.0'
+      - name: V1.8 tests
+        run: python -m unittest -v test_v180_ai_only
+      - run: python build_icon.py
+      - run: python -m PyInstaller --noconfirm OKXLocal.spec
+      - name: Verify Intel bundle and V1.8 metadata
+        run: |
+          python verify_bundle.py
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1.8.0'
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1801'
+          codesign --verify --deep --strict dist/KAYTRADE.app
+      - name: Packaged V1.8 smoke test
+        run: |
+          TMPDIR_CHECK="$(mktemp -d)"
+          dist/KAYTRADE.app/Contents/MacOS/KAYTRADE --smoke-test "$TMPDIR_CHECK/smoke.txt"
+          cat "$TMPDIR_CHECK/smoke.txt"
+          grep 'V1.8.0 Build1801 AI ONLY' "$TMPDIR_CHECK/smoke.txt"
+          grep 'market and limit entry orders are supported' "$TMPDIR_CHECK/smoke.txt"
+          grep 'KAYTRADE AI-plan and order/position dashboards are present' "$TMPDIR_CHECK/smoke.txt"
+      - name: Create installer
+        run: |
+          mkdir -p installer
+          ditto dist/KAYTRADE.app installer/KAYTRADE.app
+          cp RELEASE-1.8.0-AI-ONLY.md installer/RELEASE-1.8.0-AI-ONLY.md
+          printf 'KAYTRADE V1.8.0 AI ONLY Build1801\nMarket + Limit AI entry · KAYTRADE-native AI plan + order/position dashboard.\n' > installer/RELEASE-1.8.0-AI-ONLY.txt
+          hdiutil create -volname 'KAYTRADE 1.8.0 AI ONLY' -srcfolder installer -ov -format UDZO KAYTRADE-1.8.0-AI-ONLY-Intel-build1801.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-1.8.0-AI-ONLY-Intel-build1801
+          path: |
+            KAYTRADE-1.8.0-AI-ONLY-Intel-build1801.dmg
+            installer/RELEASE-1.8.0-AI-ONLY.md
+            installer/RELEASE-1.8.0-AI-ONLY.txt
+          if-no-files-found: error

@@ -1,4 +1,4 @@
-"""Codex MCP adapter for KAYTRADE V1.7.2 AI Only.
+"""Codex MCP adapter for KAYTRADE V1.8.0 AI Only.
 
 The adapter never receives OKX credentials. It reads the short-lived local
 bridge descriptor created by the KAYTRADE app and talks only to 127.0.0.1.
@@ -15,9 +15,9 @@ from mcp.server.fastmcp import FastMCP
 BRIDGE_FILE = Path.home() / "Library" / "Application Support" / "OKXLocal" / "ai_bridge.json"
 
 mcp = FastMCP(
-    "kaytrade-v172-ai-only",
+    "kaytrade-v180-ai-only",
     instructions=(
-        "KAYTRADE V1.7.2 has no local indicator strategy. "
+        "KAYTRADE V1.8.0 has no local indicator strategy and supports market/limit entry orders. "
         "Inspect get_kaytrade_state before proposing a trade. "
         "submit_trade_proposal is permitted only when KAYTRADE is connected to OKX Demo "
         "and the user has enabled the AI execution channel. "
@@ -32,8 +32,8 @@ def _descriptor():
     if not BRIDGE_FILE.exists():
         raise RuntimeError("KAYTRADE AI Bridge is not running")
     data = json.loads(BRIDGE_FILE.read_text())
-    if data.get("version") != "1.7.2" or data.get("mode") != "AI_ONLY":
-        raise RuntimeError("KAYTRADE bridge is not V1.7.2 AI ONLY")
+    if data.get("version") != "1.8.0" or data.get("mode") != "AI_ONLY":
+        raise RuntimeError("KAYTRADE bridge is not V1.8.0 AI ONLY")
     if data.get("live_ai_writes") is not False:
         raise RuntimeError("Unexpected bridge safety state")
     return data
@@ -83,6 +83,8 @@ def publish_trade_plan(
     reason: str,
     operation_advice: str,
     suggested_entry: float | None = None,
+    order_type: str = "market",
+    limit_price: float | None = None,
     take_profit: float | None = None,
     stop_loss: float | None = None,
     size: float | None = None,
@@ -96,6 +98,8 @@ def publish_trade_plan(
         "reason": reason,
         "operation_advice": operation_advice,
         "suggested_entry": suggested_entry,
+        "order_type": order_type,
+        "limit_price": limit_price,
         "take_profit": take_profit,
         "stop_loss": stop_loss,
         "size": size,
@@ -115,14 +119,17 @@ def submit_trade_proposal(
     stop_loss: float | None = None,
     leverage: int = 5,
     proposal_id: str | None = None,
+    order_type: str = "market",
+    limit_price: float | None = None,
     tier: int = 1,
     operation_advice: str = "",
 ) -> dict:
-    """Submit a structured AI trade request to KAYTRADE V1.7.2.
+    """Submit a structured AI trade request to KAYTRADE V1.8.0.
 
     action: open or close.
     direction: long or short.
-    For open: size, take_profit and stop_loss are mandatory; order type is market.
+    For open: size, take_profit and stop_loss are mandatory.
+    order_type: market or limit. limit requires limit_price.
     For close: KAYTRADE closes its currently managed position.
     """
     payload = {
@@ -132,6 +139,8 @@ def submit_trade_proposal(
         "leverage": leverage,
         "tier": tier,
         "operation_advice": operation_advice,
+        "order_type": order_type,
+        "limit_price": limit_price,
     }
     if proposal_id is not None:
         payload["proposal_id"] = proposal_id
@@ -142,7 +151,11 @@ def submit_trade_proposal(
     if stop_loss is not None:
         payload["stop_loss"] = stop_loss
     if action.lower() == "open":
-        payload["order_type"] = "market"
+        payload["order_type"] = order_type
+        if order_type.lower() == "limit":
+            if limit_price is None:
+                raise RuntimeError("limit order requires limit_price")
+            payload["limit_price"] = limit_price
     return _request("POST", "/v1/trade", payload)
 
 
