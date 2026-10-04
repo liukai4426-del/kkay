@@ -77,9 +77,9 @@ def smoke_test():
     import visual
 
     assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
-    assert v181.VERSION == '1.8.1' and v181.BUILD == '1810'
+    assert v181.VERSION == '1.8.1' and v181.BUILD == '1811'
     assert v181.AI_ONLY is True and v181.PAPER_ONLY is True
-    assert model.VERSION == '1.8.1' and model.BUILD == '1810'
+    assert model.VERSION == '1.8.1' and model.BUILD == '1811'
     assert model.STRATEGY_ENABLED is False
     assert getattr(model, '_kaytrade_v181_paper_applied', False)
     assert getattr(app.App, '_kaytrade_v181_paper_applied', False)
@@ -103,7 +103,7 @@ def smoke_test():
                 assert 'KAYTRADE' in root.title()
                 assert '1.8.1' in root.title()
                 assert 'PAPER AI' in root.title()
-                assert '1810' in root.title()
+                assert '1811' in root.title()
                 assert ui.mode.get() == 'OKX模拟盘'
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
@@ -115,6 +115,10 @@ def smoke_test():
                 assert getattr(ui, '_v181_tier1_label', None) is not None
                 assert getattr(ui, '_v181_tier2_label', None) is not None
                 assert getattr(ui, '_v181_position_badge_label', None) is not None
+                assert getattr(ui, '_v181_auto_exec_card', None) is not None
+                assert getattr(ui, '_v181_auto_exec_button', None) is not None
+                assert 'AI方案自动执行' in v172._widget_text(ui._v181_auto_exec_card)
+                assert 'TP + SL' in v172._widget_text(ui._v181_auto_exec_card)
                 # BTC quote panel is packed before the AI plan panel.
                 packed = ui.book.pages[3].body.pack_slaves()
                 assert ui.quote in packed and ui._v180_plan_card in packed
@@ -128,10 +132,11 @@ def smoke_test():
             root.destroy()
 
     Path(sys.argv[2]).write_text(
-        'PASS: KAYTRADE V1.8.1 Build1810 PAPER; '
+        'PASS: KAYTRADE V1.8.1 Build1811 PAPER; '
         'BTC quote is topmost, LONG/SHORT color semantics are enabled, '
         'two-tier paper execution supports market/limit entry, 60-minute auto-cancel, '
-        'amend/cancel/protection changes and market/limit partial close; no OKX write path is exposed.\n'
+        'automatic AI-plan paper execution requires TP/SL, amend/cancel/protection changes and '
+        'market/limit partial close; no OKX write path is exposed.\n'
     )
 
 
