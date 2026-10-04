@@ -1619,6 +1619,7 @@ def _bridge_get_v183(self):
                 "ai_enabled": False,
                 "demo_exchange_writes": True,
                 "live_ai_writes": False,
+                "paper_runtime_present": False,
                 "limit_only": True,
             }
             self._json(200, payload)
