@@ -1,0 +1,25 @@
+<!doctype html><html lang="zh"><meta charset="utf-8"><title>kaytrade</title>
+<style>body{font:16px system-ui;max-width:960px;margin:32px auto;padding:20px;background:#101722;color:#edf3ff}textarea,input{box-sizing:border-box;width:100%;background:#192335;color:inherit;border:1px solid #526279;padding:12px;border-radius:8px}button{padding:12px;margin:10px 8px 10px 0;cursor:pointer}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#192335;padding:18px}small{color:#bfd0e7}</style>
+<h1>kaytrade</h1><p>导入策略 → 核实最终参数 → 明确确认 → 提交并查询</p>
+<p>首次使用先运行模拟盘。确认同时授权该订单到期撤未成交余量。限价止损可能未成交；部分成交须核查保护。</p>
+<label>本地访问令牌<input id="token" type="password" autocomplete="off"></label>
+<label>策略 JSON<textarea id="plan" rows="16" placeholder="粘贴完整结构化方案；不接受自然语言自动下单"></textarea></label>
+<button id="import">导入并核算</button><button id="refresh">刷新确认页面</button><button id="state">查询本地状态</button><button id="reconcile">查询交易所核实</button>
+<h2>最终方案与账户环境</h2><pre id="result">尚未导入</pre>
+<label><input id="ack" type="checkbox" style="width:auto">我已核对环境、账户、全部价格、数量、风险及到期撤单，确认执行此具体版本。</label>
+<button id="confirm" disabled>确认并提交上述版本</button><small>预览60秒失效；改价需导入新的方案ID。</small>
+<script>
+let preview=null;const $=id=>document.getElementById(id);
+async function request(path,body){const r=await fetch('/api/'+path,{method:'POST',headers:{'Content-Type':'application/json','X-Kaytrade-Token':$('token').value},body:JSON.stringify(body)});const x=await r.json();if(!r.ok)throw Error(x.error);return x}
+function show(x){$('result').textContent=JSON.stringify(x,null,2)}
+function invalidate(){preview=null;$('ack').checked=false;$('confirm').disabled=true}
+async function run(fn){try{await fn()}catch(e){invalidate();show({error:e.message})}}
+$('import').onclick=()=>run(async()=>{invalidate();const x=await request('import',JSON.parse($('plan').value));preview=x;show(x)});
+$('refresh').onclick=()=>run(async()=>{const id=JSON.parse($('plan').value).id;invalidate();preview=await request('preview',{id});show(preview)});
+$('ack').onchange=()=>{$('confirm').disabled=!preview||!$('ack').checked};
+$('plan').oninput=invalidate;$('token').oninput=invalidate;
+$('confirm').onclick=()=>run(async()=>{const v=preview;invalidate();show(await request('confirm',{id:v.plan.id,approval:v.approval,ack:'CONFIRM EXACT PLAN AND EXPIRY CANCEL'}))});
+$('state').onclick=()=>run(async()=>{invalidate();show(await request('state',{}))});
+$('reconcile').onclick=()=>run(async()=>{invalidate();show(await request('reconcile',{}))});
+setInterval(()=>{if(preview&&Date.now()/1000>preview.expires_at)invalidate()},1000);
+</script></html>

@@ -1,0 +1,30 @@
+{
+  "id": "offline-example-not-for-trading",
+  "environment": "demo",
+  "confirm_before": "2020-01-01T00:00:00+08:00",
+  "direction": "short",
+  "leverage": 20,
+  "validity_seconds": 3600,
+  "strategy": "countertrend_structure_mean_reversion",
+  "fixed_invalidation": "85900",
+  "legs": [
+    {
+      "entry": "85000",
+      "size": "0.5",
+      "tp_trigger": "84000",
+      "tp_limit": "84010",
+      "sl_trigger": "85500",
+      "sl_limit": "85520",
+      "funding_buffer": "0.3"
+    },
+    {
+      "entry": "85150",
+      "size": "0.5",
+      "tp_trigger": "84150",
+      "tp_limit": "84160",
+      "sl_trigger": "85650",
+      "sl_limit": "85670",
+      "funding_buffer": "0.3"
+    }
+  ]
+}
