@@ -169,9 +169,8 @@ class V190DualEnvironmentTests(unittest.TestCase):
             def writer(worker_id):
                 try:
                     for i in range(80):
-                        with store._save_lock:
-                            store.data["last_bar"] = worker_id * 1000 + i
-                            store.save()
+                        store.data["last_bar"] = worker_id * 1000 + i
+                        store.save()
                 except Exception as exc:
                     errors.append(exc)
 
@@ -187,7 +186,7 @@ class V190DualEnvironmentTests(unittest.TestCase):
             self.assertEqual(errors, [])
             parsed = json.loads(path.read_text())
             self.assertIn("last_bar", parsed)
-            leftovers = list(path.parent.glob("*.tmp"))
+            leftovers = list(path.parent.glob("*.tmp")) + list(path.parent.glob(".*.tmp"))
             self.assertEqual(leftovers, [])
 
     def test_bridge_tokens_and_descriptor_names_are_isolated(self):
