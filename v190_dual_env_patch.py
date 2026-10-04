@@ -1023,7 +1023,7 @@ def _refresh_v190_dashboard(owner):
                 else "已关闭 · AI推荐仅展示"
             )
             auto_note = (
-                "DEMO：完整策略立即提交LIMIT挂单；TP/SL均为限价保护。"
+                "DEMO：完整策略立即提交LIMIT挂单；TP/SL触发后市价保护。"
             )
         elif env == "live" and engine and engine.store:
             state = engine._review_state()
@@ -1047,7 +1047,7 @@ def _refresh_v190_dashboard(owner):
                 f"等待连接 · {_env_label(env)}"
             )
             auto_note = (
-                "DEMO与LIVE均支持独立自动执行；LIVE默认写入锁关闭。"
+                "DEMO与LIVE均支持独立自动执行；LIVE实盘默认写入锁关闭，TP/SL触发后市价保护。"
             )
 
         if hasattr(owner, "_v183_auto_exec_status_var"):
