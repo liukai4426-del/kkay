@@ -1603,6 +1603,7 @@ def _bridge_get_v183(self):
                 "mode": "OKX_DEMO_EXECUTION",
                 "demo_exchange_writes": True,
                 "live_ai_writes": False,
+                "paper_runtime_present": False,
                 "limit_only": True,
             },
         )
@@ -1684,6 +1685,7 @@ def _bridge_start_v183(self):
         "token": self.token,
         "demo_exchange_writes": True,
         "live_ai_writes": False,
+        "paper_runtime_present": False,
         "limit_only": True,
     }
     self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
