@@ -521,18 +521,14 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
 
         tp_exit_type = str(proposal.get("tp_exit_type") or "limit").lower()
         sl_exit_type = str(proposal.get("sl_exit_type") or "limit").lower()
-        if tp_exit_type not in ("market", "limit") or sl_exit_type not in ("market", "limit"):
-            raise legacy_engine.Halt("tp_exit_type / sl_exit_type 必须为 market 或 limit")
-        tp_limit = None
-        sl_limit = None
-        if tp_exit_type == "limit":
-            tp_limit = _d(proposal.get("tp_limit_price"), "tp_limit_price")
-            if tp_limit % tick != 0:
-                raise legacy_engine.Halt(f"tp_limit_price 必须按 tickSz={tick} 递增")
-        if sl_exit_type == "limit":
-            sl_limit = _d(proposal.get("sl_limit_price"), "sl_limit_price")
-            if sl_limit % tick != 0:
-                raise legacy_engine.Halt(f"sl_limit_price 必须按 tickSz={tick} 递增")
+        if tp_exit_type != "limit" or sl_exit_type != "limit":
+            raise legacy_engine.Halt("Limit Only：TP/SL 保护退出只允许 limit")
+        tp_limit = _d(proposal.get("tp_limit_price", tp) or tp, "tp_limit_price")
+        sl_limit = _d(proposal.get("sl_limit_price", sl) or sl, "sl_limit_price")
+        if tp_limit % tick != 0:
+            raise legacy_engine.Halt(f"tp_limit_price 必须按 tickSz={tick} 递增")
+        if sl_limit % tick != 0:
+            raise legacy_engine.Halt(f"sl_limit_price 必须按 tickSz={tick} 递增")
 
         unit = _d(meta.get("ctVal"), "ctVal") * _d(meta.get("ctMult") or "1", "ctMult")
         notional = qty * unit * entry_ref
