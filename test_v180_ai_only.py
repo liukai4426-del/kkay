@@ -25,26 +25,25 @@ class V180AIOnlyTests(unittest.TestCase):
         self.assertEqual(str(v180.AI_MAX_NOTIONAL_USDT), "3500")
         self.assertEqual(str(v180.AI_MAX_ESTIMATED_STOP_LOSS_USDT), "100")
 
-    def test_market_entry_uses_market_order(self):
+    def test_non_limit_entry_is_rejected(self):
         e, x = self.make_engine()
         e.arm()
-        result = e.submit_ai_trade(
-            {
-                "proposal_id": "v180-market-1",
-                "action": "open",
-                "direction": "long",
-                "order_type": "market",
-                "size": 1,
-                "leverage": 5,
-                "take_profit": 102000,
-                "stop_loss": 99000,
-                "reason": "market test",
-            }
-        )
-        self.assertEqual(result["order_type"], "market")
-        order = [body for path, body in x.posts if path == "/api/v5/trade/order"][0]
-        self.assertEqual(order["ordType"], "market")
-        self.assertNotIn("px", order)
+        with self.assertRaisesRegex(Exception, "只允许 limit"):
+            e.submit_ai_trade(
+                {
+                    "proposal_id": "v180-non-limit-1",
+                    "action": "open",
+                    "direction": "long",
+                    "order_type": "market",
+                    "limit_price": 99500,
+                    "size": 1,
+                    "leverage": 5,
+                    "take_profit": 102000,
+                    "stop_loss": 99000,
+                    "reason": "must reject non-limit",
+                }
+            )
+        self.assertFalse([body for path, body in x.posts if path == "/api/v5/trade/order"])
 
     def test_limit_entry_uses_limit_price(self):
         e, x = self.make_engine()
@@ -68,6 +67,8 @@ class V180AIOnlyTests(unittest.TestCase):
         order = [body for path, body in x.posts if path == "/api/v5/trade/order"][0]
         self.assertEqual(order["ordType"], "limit")
         self.assertEqual(order["px"], "99500")
+        self.assertEqual(order["attachAlgoOrds"][0]["tpOrdPx"], "102000")
+        self.assertEqual(order["attachAlgoOrds"][1]["slOrdPx"], "98500")
         self.assertEqual(e.store.data["active"]["order_type"], "limit")
         self.assertEqual(e.store.data["active"]["requested_entry"], "99500")
 
@@ -155,11 +156,11 @@ class V180AIOnlyTests(unittest.TestCase):
         self.assertEqual(plan["limit_price"], 99200)
         self.assertEqual(plan["suggested_entry"], 99200)
 
-    def test_state_advertises_both_entry_types(self):
+    def test_state_advertises_limit_only_entry(self):
         e, _x = self.make_engine()
         state = e.ai_state()
         self.assertEqual(state["version"], "1.8.0")
-        self.assertEqual(state["supported_entry_order_types"], ["market", "limit"])
+        self.assertEqual(state["supported_entry_order_types"], ["limit"])
 
 
 if __name__ == "__main__":
