@@ -1,6 +1,6 @@
-"""KAYTRADE V1.9.0 dual OKX execution overlay.
+"""KAYTRADE V2.0.0 dual OKX execution overlay.
 
-Build1900 keeps the V1.8.4 LIMIT-only execution contract and adds a strictly
+Build2000 keeps the V1.8.4 LIMIT-only execution contract and adds a strictly
 separated OKX Demo / OKX Live runtime. AI submits only trade plans; the desktop
 application chooses the active environment and the program performs the write.
 
@@ -15,6 +15,7 @@ Safety / separation contract:
 """
 from __future__ import annotations
 
+import copy
 import json
 import os
 import threading
@@ -41,8 +42,8 @@ import v184_ui_patch as v184
 import visual
 from exchange import APIError
 
-VERSION = "1.9.0"
-BUILD = "1900"
+VERSION = "2.0.0"
+BUILD = "2000"
 LIMIT_ONLY = True
 
 DEFAULT_RISK_LIMITS = {
@@ -119,7 +120,7 @@ class OKXDualExecutionEngineV190(v183.OKXDemoEngineV183):
             self.store.save()
         self.emit(
             "log",
-            f"[{_env_code(self)}] V1.9.0 Build1900 已连接：{_env_name(self)} · LIMIT ONLY · "
+            f"[{_env_code(self)}] V2.0.0 Build2000 已连接：{_env_name(self)} · LIMIT ONLY · "
             + ("AI方案自动执行默认开启。" if self.x.demo else "真实资金自动执行默认关闭。"),
         )
         owner = getattr(self.emit, "__self__", None)
@@ -248,47 +249,54 @@ class OKXDualExecutionEngineV190(v183.OKXDemoEngineV183):
         return _rewrite_result(self, super()._amend_pending_from_plan(current, proposal))
 
     def publish_ai_plan(self, plan):
-        if isinstance(plan, dict) and any(k in plan for k in ("environment", "execution_environment", "okx_environment")):
-            raise legacy_engine.Halt("AI方案不得指定 Demo/Live；执行环境只能由KAYTRADE当前连接决定")
-        result = super().publish_ai_plan(plan)
-        if isinstance(result, dict):
-            result = _rewrite_result(self, result)
-            result["mode"] = _env_mode(self)
-            result["environment"] = "OKX_DEMO" if self.x.demo else "OKX_LIVE"
-            plan_row = result.get("plan")
-            if isinstance(plan_row, dict) and plan_row.get("detail"):
-                plan_row["detail"] = _rewrite_env_text(self, plan_row["detail"])
-        return result
+        with self._ai_lock:
+            if isinstance(plan, dict) and any(k in plan for k in ("environment", "execution_environment", "okx_environment")):
+                raise legacy_engine.Halt("AI方案不得指定 Demo/Live；执行环境只能由KAYTRADE当前连接决定")
+            result = super().publish_ai_plan(plan)
+            if isinstance(result, dict):
+                result = _rewrite_result(self, copy.deepcopy(result))
+                result["mode"] = _env_mode(self)
+                result["environment"] = "OKX_DEMO" if self.x.demo else "OKX_LIVE"
+                plan_row = result.get("plan")
+                if isinstance(plan_row, dict) and plan_row.get("detail"):
+                    plan_row["detail"] = _rewrite_env_text(self, plan_row["detail"])
+            return result
 
     def submit_ai_trade(self, proposal):
-        if isinstance(proposal, dict) and any(k in proposal for k in ("environment", "execution_environment", "okx_environment")):
-            raise legacy_engine.Halt("AI交易请求不得指定 Demo/Live；执行环境只能由KAYTRADE当前连接决定")
-        return _rewrite_result(self, super().submit_ai_trade(proposal))
+        with self._ai_lock:
+            if isinstance(proposal, dict) and any(k in proposal for k in ("environment", "execution_environment", "okx_environment")):
+                raise legacy_engine.Halt("AI交易请求不得指定 Demo/Live；执行环境只能由KAYTRADE当前连接决定")
+            return _rewrite_result(self, copy.deepcopy(super().submit_ai_trade(proposal)))
 
     def close_position(self, payload):
-        return _rewrite_result(self, super().close_demo_position(payload))
+        with self._ai_lock:
+            return _rewrite_result(self, copy.deepcopy(super().close_demo_position(payload)))
 
     def cancel_entry(self, payload):
-        return _rewrite_result(self, super().cancel_demo_entry(payload))
+        with self._ai_lock:
+            return _rewrite_result(self, copy.deepcopy(super().cancel_demo_entry(payload)))
 
     def amend_entry(self, payload):
-        return _rewrite_result(self, super().amend_demo_entry(payload))
+        with self._ai_lock:
+            return _rewrite_result(self, copy.deepcopy(super().amend_demo_entry(payload)))
 
     def amend_protection(self, payload):
-        return _rewrite_result(self, super().amend_demo_protection(payload))
+        with self._ai_lock:
+            return _rewrite_result(self, copy.deepcopy(super().amend_demo_protection(payload)))
 
     def set_auto_execute_plans(self, enabled):
-        if enabled and not self.enabled:
-            raise legacy_engine.Halt(f"先启用{_env_name(self)} AI执行通道")
-        if enabled and not self.x.demo and not self._live_session_authorized:
-            raise legacy_engine.Halt("LIVE自动执行需要先完成本次实盘会话授权")
-        result = super().set_auto_execute_plans(enabled)
-        self.emit(
-            "log",
-            f"[{_env_code(self)}] AI方案自动执行已"
-            + ("开启：完整策略到达即提交交易所LIMIT挂单" if enabled else "关闭：AI方案仅展示"),
-        )
-        return _rewrite_result(self, result)
+        with self._ai_lock:
+            if enabled and not self.enabled:
+                raise legacy_engine.Halt(f"先启用{_env_name(self)} AI执行通道")
+            if enabled and not self.x.demo and not self._live_session_authorized:
+                raise legacy_engine.Halt("LIVE自动执行需要先完成本次实盘会话授权")
+            result = super().set_auto_execute_plans(enabled)
+            self.emit(
+                "log",
+                f"[{_env_code(self)}] AI方案自动执行已"
+                + ("开启：完整策略到达即提交交易所LIMIT挂单" if enabled else "关闭：AI方案仅展示"),
+            )
+            return _rewrite_result(self, copy.deepcopy(result))
 
     def arm(self, _settings=None):
         with self._ai_lock:
@@ -318,25 +326,26 @@ class OKXDualExecutionEngineV190(v183.OKXDemoEngineV183):
             )
 
     def ai_state(self):
-        state = super().ai_state()
-        execution = state.pop("okx_demo_execution", None)
-        if execution is None and self.store:
-            execution = self._demo_state()
-        state.update(
-            version=VERSION,
-            build=BUILD,
-            mode=_env_mode(self),
-            environment="OKX_DEMO" if self.x.demo else "OKX_LIVE",
-            active_environment=_env_code(self),
-            demo_exchange_writes=bool(self.x.demo),
-            live_ai_writes=bool((not self.x.demo) and self.enabled and self._live_session_authorized),
-            live_session_authorized=bool(self._live_session_authorized) if not self.x.demo else False,
-            auto_execute_plans=bool(self._demo_state().get("auto_execute_plans", self.x.demo)) if self.store else False,
-            risk_limits={k: str(v) for k, v in self._risk_limits().items()} if self.store else dict(DEFAULT_RISK_LIMITS),
-            execution_state=execution,
-        )
-        state[_state_key(self)] = execution
-        return state
+        with self._ai_lock:
+            state = copy.deepcopy(super().ai_state())
+            execution = state.pop("okx_demo_execution", None)
+            if execution is None and self.store:
+                execution = copy.deepcopy(self._demo_state())
+            state.update(
+                version=VERSION,
+                build=BUILD,
+                mode=_env_mode(self),
+                environment="OKX_DEMO" if self.x.demo else "OKX_LIVE",
+                active_environment=_env_code(self),
+                demo_exchange_writes=bool(self.x.demo),
+                live_ai_writes=bool((not self.x.demo) and self.enabled and self._live_session_authorized),
+                live_session_authorized=bool(self._live_session_authorized) if not self.x.demo else False,
+                auto_execute_plans=bool(execution.get("auto_execute_plans", self.x.demo)) if isinstance(execution, dict) else False,
+                risk_limits={k: str(v) for k, v in self._risk_limits().items()} if self.store else dict(DEFAULT_RISK_LIMITS),
+                execution_state=execution,
+            )
+            state[_state_key(self)] = copy.deepcopy(execution)
+            return state
 
 
 _PREVIOUS_APP_INIT = app.App.__init__
@@ -381,7 +390,7 @@ def _mode_changed_v190(owner, *_):
     owner._v190_last_mode = new
     try:
         owner.signal.set(
-            "V1.9.0 Build1900｜"
+            "V2.0.0 Build2000｜"
             + ("OKX DEMO" if new == "OKX模拟盘" else "OKX LIVE · REAL MONEY")
             + "｜LIMIT ONLY｜AI不能选择执行环境"
         )
@@ -419,7 +428,7 @@ def _ensure_v190_runtime(owner):
     replacement = OKXDualExecutionEngineV190(x, owner.folder, owner.emit)
     replacement.connect()
     owner.engine = replacement
-    owner.emit("log", f"[{_env_code(replacement)}] Runtime已升级为 V1.9.0 双环境执行器。")
+    owner.emit("log", f"[{_env_code(replacement)}] Runtime已升级为 V2.0.0 双环境执行器。")
     return replacement
 
 
@@ -439,7 +448,7 @@ def _app_arm_v190(owner):
     if live:
         typed = app.simpledialog.askstring(
             "启用 OKX LIVE AI执行",
-            "KAYTRADE V1.9.0 Build1900\n\n"
+            "KAYTRADE V2.0.0 Build2000\n\n"
             "当前连接：OKX REAL ACCOUNT / REAL MONEY\n"
             "AI只生成交易方案，KAYTRADE程序会在自动执行开启时直接向OKX实盘发送LIMIT订单。\n"
             "Entry、TP、SL、减仓均保持 LIMIT ONLY；禁止OKX -1市价哨兵。\n"
@@ -457,7 +466,7 @@ def _app_arm_v190(owner):
     else:
         typed = app.simpledialog.askstring(
             "启用 OKX Demo AI执行",
-            "KAYTRADE V1.9.0 Build1900\n\n"
+            "KAYTRADE V2.0.0 Build2000\n\n"
             "AI完整策略到达后，程序按当前自动执行开关向OKX模拟盘提交LIMIT挂单。\n"
             "确认启用请输入 DEMO",
             parent=owner.root,
@@ -470,7 +479,7 @@ def _app_arm_v190(owner):
 def _toggle_auto_execute_v190(owner):
     engine = getattr(owner, "engine", None)
     if not isinstance(engine, OKXDualExecutionEngineV190):
-        app.messagebox.showerror("未连接", "先连接并启用 V1.9.0 AI执行通道")
+        app.messagebox.showerror("未连接", "先连接并启用 V2.0.0 AI执行通道")
         return
     try:
         current = bool(engine._demo_state().get("auto_execute_plans", engine.x.demo))
@@ -573,10 +582,10 @@ def _app_init_v190(self, *args, **kwargs):
     self.mode.trace_add("write", lambda *_: _mode_changed_v190(self))
     self.root.title(f"KAYTRADE {VERSION} · OKX DEMO · Build {BUILD}")
     try:
-        self.signal.set("V1.9.0 Build1900｜OKX DEMO / LIVE完全隔离｜LIMIT ONLY｜AI不能选择执行环境")
+        self.signal.set("V2.0.0 Build2000｜OKX DEMO / LIVE完全隔离｜LIMIT ONLY｜AI不能选择执行环境")
         label = getattr(self, "_v170_version_label", None)
         if label is not None:
-            label.configure(text="BTC / USDT   ·   V1.9.0 Build1900 · DUAL OKX")
+            label.configure(text="BTC / USDT   ·   V2.0.0 Build2000 · DUAL OKX")
         if getattr(self, "_v183_auto_exec_button", None) is not None:
             self._v183_auto_exec_button.configure(command=lambda: _toggle_auto_execute_v190(self))
     except Exception:
@@ -643,7 +652,7 @@ def _bridge_post_v190(self):
             raise legacy_engine.Halt("AI不得指定 Demo/Live；执行环境由KAYTRADE桌面端当前连接决定")
         engine = self.bridge.owner.engine
         if not isinstance(engine, OKXDualExecutionEngineV190):
-            raise legacy_engine.Halt("当前Runtime不是 V1.9.0 Dual OKX Execution")
+            raise legacy_engine.Halt("当前Runtime不是 V2.0.0 Dual OKX Execution")
         routes = {
             "/v1/trade": engine.submit_ai_trade,
             "/v1/plan": engine.publish_ai_plan,
@@ -688,7 +697,7 @@ def _bridge_start_v190(self):
         json.dump(descriptor, handle, ensure_ascii=False, indent=2)
     self.thread = threading.Thread(target=httpd.serve_forever, name="kaytrade-ai-bridge", daemon=True)
     self.thread.start()
-    self.owner.emit("log", f"AI Bridge已启动：127.0.0.1:{actual_port} · V1.9.0 Dual OKX · 环境由桌面端锁定")
+    self.owner.emit("log", f"AI Bridge已启动：127.0.0.1:{actual_port} · V2.0.0 Dual OKX · 环境由桌面端锁定")
 
 
 def apply():
