@@ -767,7 +767,7 @@ _PREVIOUS_APP_QUIT = app.App.quit
 def _rewrite_ui_text(data):
     if not isinstance(data, str):
         return data
-    text = data.replace("V1.7.1", "V1.7.2").replace("Build1710", "Build1720")
+    text = data.replace("V1.7.1", "V1.7.2").replace("Build1710", "Build1721")
     if "开始加载1D / 4H / 1H / 15m / 5m指标历史K线" in text:
         return "V1.7.2 AI Only：策略K线/指标计算已停用；仅同步OKX实时行情与账户状态"
     if text.startswith("全自动运行 / "):
