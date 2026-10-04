@@ -94,8 +94,9 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
     """Exchange-backed AI engine. All writes are hard-limited to OKX Demo."""
 
     def connect(self):
-        # Skip PaperEngine entirely; use the AI-only exchange connection path.
-        v172.AIOnlyEngine.connect(self)
+        # Follow the class MRO captured when V1.8.0 was defined; do not use the
+        # mutable v172.AIOnlyEngine module alias (V1.8.1 repoints that alias).
+        super().connect()
         self._ensure_demo_state()
         self.emit(
             "log",
