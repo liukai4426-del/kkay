@@ -1424,10 +1424,14 @@ def _rewrite_v183_text(data):
     if not isinstance(data, str):
         return data
     text = (
-        data.replace("V1.8.2", VERSION)
+        data.replace("V1.7.2", VERSION)
+        .replace("V1.8.0", VERSION)
         .replace("V1.8.1", VERSION)
-        .replace("Build1820", f"Build{BUILD}")
+        .replace("V1.8.2", VERSION)
+        .replace("Build1723", f"Build{BUILD}")
+        .replace("Build1801", f"Build{BUILD}")
         .replace("Build1813", f"Build{BUILD}")
+        .replace("Build1820", f"Build{BUILD}")
         .replace("Paper运行", "OKX模拟盘执行")
         .replace("PAPER", "OKX DEMO")
     )
