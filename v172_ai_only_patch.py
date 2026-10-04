@@ -43,7 +43,7 @@ from core import INSTRUMENT
 from exchange import APIError
 
 VERSION = "1.7.2"
-BUILD = "1721"
+BUILD = "1722"
 AI_ONLY = True
 
 AI_BRIDGE_HOST = "127.0.0.1"
@@ -138,7 +138,7 @@ class AIOnlyEngine(legacy_engine.Engine):
             self.store.save()
             self.emit(
                 "log",
-                "V1.7.2 Build1721：已清理Build1720启用AI通道时产生的 stop_atr 兼容故障锁；未改变任何仓位/订单。",
+                "V1.7.2 Build1722：已清理Build1720启用AI通道时产生的 stop_atr 兼容故障锁；未改变任何仓位/订单。",
             )
 
     def arm(self, _settings=None):
@@ -767,7 +767,7 @@ _PREVIOUS_APP_QUIT = app.App.quit
 def _rewrite_ui_text(data):
     if not isinstance(data, str):
         return data
-    text = data.replace("V1.7.1", "V1.7.2").replace("Build1710", "Build1721")
+    text = data.replace("V1.7.1", "V1.7.2").replace("Build1710", "Build1722")
     if "开始加载1D / 4H / 1H / 15m / 5m指标历史K线" in text:
         return "V1.7.2 AI Only：策略K线/指标计算已停用；仅同步OKX实时行情与账户状态"
     if text.startswith("全自动运行 / "):
@@ -867,7 +867,7 @@ def _install_ai_only_dashboard(owner):
     ).pack(anchor="w")
     visual.label(
         card.body,
-        text="V1.7.2 Build1721 · 本地技术指标策略已断开，新仓只接受 Codex / AI 结构化交易请求",
+        text="V1.7.2 Build1722 · 本地技术指标策略已断开，新仓只接受 Codex / AI 结构化交易请求",
         size=10,
         color=visual.MUTED,
         bg=visual.PANEL,
@@ -898,14 +898,36 @@ def _set_ai_channel_ui(owner, enabled):
         var.set("AI交易通道：已启用 · 等待AI请求" if enabled else "AI交易通道：未启用")
 
 
+def _ensure_ai_only_engine(owner):
+    """Tolerate frozen-module class identity differences without entering legacy arm()."""
+    e = getattr(owner, "engine", None)
+    if e is None:
+        raise legacy_engine.Halt("先连接OKX模拟盘")
+
+    # Frozen/overlay builds can produce an equivalent AIOnlyEngine object whose
+    # class identity is not identical to this module's class object.
+    if callable(getattr(e, "submit_ai_trade", None)) and hasattr(e, "_ai_lock"):
+        return e
+
+    # If the connection was created with an older Engine object, rebuild only
+    # the runtime wrapper around the same Exchange connection. This does not
+    # copy credentials out of the process and does not enter the legacy
+    # Settings/stop_atr strategy arm chain.
+    x = getattr(e, "x", None)
+    if x is None:
+        raise legacy_engine.Halt("当前连接缺少Exchange对象，无法切换到AI Only Runtime")
+
+    replacement = AIOnlyEngine(x, owner.folder, owner.emit)
+    replacement.connect()
+    owner.engine = replacement
+    owner.emit("log", "Build1722：已将当前连接切换为AIOnlyEngine Runtime")
+    return replacement
+
+
 def _run_ai_enable(owner):
     """Dedicated AI-only enable path; never enters legacy worker kind='arm'."""
     try:
-        e = getattr(owner, "engine", None)
-        if not isinstance(e, AIOnlyEngine):
-            raise legacy_engine.Halt(
-                "AI Only Runtime不一致：拒绝进入旧版策略arm链；请重新启动KAYTRADE 1.7.2"
-            )
+        e = _ensure_ai_only_engine(owner)
         e.arm(None)
         try:
             keepawake._start_keepawake(owner)
@@ -915,7 +937,7 @@ def _run_ai_enable(owner):
         owner.emit("status", "AI Only运行 / OKX模拟盘")
         owner.emit(
             "log",
-            "V1.7.2 Build1721 AI交易通道已启用：启动流程未调用旧Settings/stop_atr/技术指标策略。",
+            "V1.7.2 Build1722 AI交易通道已启用：启动流程未调用旧Settings/stop_atr/技术指标策略。",
         )
     except Exception as exc:
         e = getattr(owner, "engine", None)
@@ -944,7 +966,7 @@ def _start_ai_enable(owner):
 
 def _app_init_v172(self, *args, **kwargs):
     _PREVIOUS_APP_INIT(self, *args, **kwargs)
-    self.root.title("KAYTRADE 1.7.2 · AI ONLY · Build 1721")
+    self.root.title("KAYTRADE 1.7.2 · AI ONLY · Build 1722")
     try:
         self.signal.set("V1.7.2 AI ONLY｜无本地交易策略｜等待 Codex / AI 提交结构化交易请求")
     except Exception:
@@ -1022,7 +1044,7 @@ def apply():
         module.VERSION = VERSION
         module.BUILD = BUILD
     ui166.BUILD = BUILD
-    ui166.WINDOW_TITLE = "KAYTRADE 1.7.2 · AI ONLY · Build 1721"
+    ui166.WINDOW_TITLE = "KAYTRADE 1.7.2 · AI ONLY · Build 1722"
 
     model.STRATEGY_ENABLED = False
     model.AI_ONLY = True
