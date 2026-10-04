@@ -1,4 +1,4 @@
-name: Build KAYTRADE Intel Mac 1.8.3 OKX Demo Build1830
+name: Build KAYTRADE Intel Mac 1.8.3 OKX Demo Build1831
 
 on:
   push:
@@ -25,8 +25,7 @@ jobs:
         run: |
           python -m py_compile \
             desktop.py exchange.py engine.py app.py history.py visual.py \
-            v172_ai_only_patch.py v180_ai_only_patch.py v181_paper_patch.py \
-            v182_ui_patch.py v183_okx_demo_patch.py \
+            v172_ai_only_patch.py v180_ai_only_patch.py v183_okx_demo_patch.py \
             kaytrade_mcp.py test_v183_okx_demo.py
       - name: V1.7.1 maintenance regression
         run: python -m unittest -v test_v171_update
@@ -42,7 +41,7 @@ jobs:
           import v183_okx_demo_patch as v183
 
           assert v183.VERSION == '1.8.3'
-          assert v183.BUILD == '1830'
+          assert v183.BUILD == '1831'
           assert v183.DEMO_EXECUTION is True
           assert v183.LIMIT_ONLY is True
           assert model.STRATEGY_ENABLED is False
@@ -54,6 +53,11 @@ jobs:
           assert 'SUBMITTED_TO_OKX' in src
           assert 'OKX_DEMO_EXECUTION' in src
           assert 'ENTRY_TTL_SEC = 60 * 60' in inspect.getsource(v183)
+          assert 'v181_paper_patch' not in open('desktop.py').read()
+          assert 'v182_ui_patch' not in open('desktop.py').read()
+          assert 'v181_paper_patch' not in open('OKXLocal.spec').read()
+          assert 'v182_ui_patch' not in open('OKXLocal.spec').read()
+          assert v183.v172.AIOnlyEngine is v183.OKXDemoEngineV183
           assert '"supported_entry_order_types": ["limit"]' in src
           assert '"supported_close_order_types": ["limit"]' in src
           assert '"demo_exchange_writes": True' in src
@@ -87,28 +91,28 @@ jobs:
         run: |
           python verify_bundle.py
           /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1.8.3'
-          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1830'
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1831'
           codesign --verify --deep --strict dist/KAYTRADE.app
       - name: Packaged V1.8.3 smoke test
         run: |
           TMPDIR_CHECK="$(mktemp -d)"
           dist/KAYTRADE.app/Contents/MacOS/KAYTRADE --smoke-test "$TMPDIR_CHECK/smoke.txt"
           cat "$TMPDIR_CHECK/smoke.txt"
-          grep 'V1.8.3 Build1830 OKX DEMO LIMIT ONLY' "$TMPDIR_CHECK/smoke.txt"
+          grep 'V1.8.3 Build1831 OKX DEMO LIMIT ONLY' "$TMPDIR_CHECK/smoke.txt"
           grep 'AI plans submit exchange limit orders immediately' "$TMPDIR_CHECK/smoke.txt"
-          grep 'no local Paper matching is active' "$TMPDIR_CHECK/smoke.txt"
+          grep 'Paper runtime modules are not imported or packaged' "$TMPDIR_CHECK/smoke.txt"
       - name: Create installer
         run: |
           mkdir -p installer
           ditto dist/KAYTRADE.app installer/KAYTRADE.app
           cp RELEASE-1.8.3-OKX-DEMO.md installer/RELEASE-1.8.3-OKX-DEMO.md
-          printf 'KAYTRADE V1.8.3 OKX DEMO Build1830\nAI plan -> immediate OKX Demo LIMIT order · exchange-sourced fills · LIMIT TP/SL.\n' > installer/RELEASE-1.8.3-OKX-DEMO.txt
-          hdiutil create -volname 'KAYTRADE 1.8.3 OKX DEMO' -srcfolder installer -ov -format UDZO KAYTRADE-1.8.3-OKX-DEMO-Intel-build1830.dmg
+          printf 'KAYTRADE V1.8.3 OKX DEMO CLEAN Build1831\nPaper runtime removed · AI plan -> immediate OKX Demo LIMIT order · exchange-sourced fills.\n' > installer/RELEASE-1.8.3-OKX-DEMO.txt
+          hdiutil create -volname 'KAYTRADE 1.8.3 OKX DEMO' -srcfolder installer -ov -format UDZO KAYTRADE-1.8.3-OKX-DEMO-Intel-build1831.dmg
       - uses: actions/upload-artifact@v4
         with:
-          name: KAYTRADE-1.8.3-OKX-DEMO-Intel-build1830
+          name: KAYTRADE-1.8.3-OKX-DEMO-Intel-build1831
           path: |
-            KAYTRADE-1.8.3-OKX-DEMO-Intel-build1830.dmg
+            KAYTRADE-1.8.3-OKX-DEMO-Intel-build1831.dmg
             installer/RELEASE-1.8.3-OKX-DEMO.md
             installer/RELEASE-1.8.3-OKX-DEMO.txt
           if-no-files-found: error
