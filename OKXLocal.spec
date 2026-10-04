@@ -19,7 +19,7 @@ exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='KAYTRADE',
 collection = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name='KAYTRADE')
 bundle = BUNDLE(collection, name='KAYTRADE.app',icon=str(root / 'OKXLocal.icns'),
                 bundle_identifier='design.kkay.kaytrade',
-                info_plist={'CFBundleShortVersionString': '1.9.0',
-                            'CFBundleVersion': '1900',
+                info_plist={'CFBundleShortVersionString': '1.9.1',
+                            'CFBundleVersion': '1910',
                             'LSMinimumSystemVersion': '14.0',
                             'NSHighResolutionCapable': True})
