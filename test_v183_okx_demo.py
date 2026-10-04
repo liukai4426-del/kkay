@@ -178,8 +178,8 @@ class V183OKXDemoTests(unittest.TestCase):
         return base
 
     def test_identity(self):
-        self.assertEqual(v183.VERSION, "1.8.3")
-        self.assertEqual(v183.BUILD, "1832")
+        self.assertEqual(v183.VERSION, "1.8.4")
+        self.assertEqual(v183.BUILD, "1840")
         self.assertTrue(v183.DEMO_EXECUTION)
         self.assertTrue(v183.LIMIT_ONLY)
         self.assertIs(v183.app.Engine, v183.OKXDemoEngineV183)
@@ -364,6 +364,35 @@ class V183OKXDemoTests(unittest.TestCase):
         result = e.publish_ai_plan(proposal)
         self.assertEqual(result["status"], "AUTO_REJECTED")
         self.assertIn("LIMIT ONLY", result["error"])
+
+    def test_transport_firewall_rejects_market_entry(self):
+        from exchange import _assert_limit_only_write, APIError
+        with self.assertRaises(APIError):
+            _assert_limit_only_write(
+                "/api/v5/trade/order",
+                {"instId": "BTC-USDT-SWAP", "ordType": "market", "sz": "1"},
+            )
+
+    def test_transport_firewall_rejects_minus_one_protection(self):
+        from exchange import _assert_limit_only_write, APIError
+        with self.assertRaises(APIError):
+            _assert_limit_only_write(
+                "/api/v5/trade/order",
+                {
+                    "instId": "BTC-USDT-SWAP",
+                    "ordType": "limit",
+                    "px": "95000",
+                    "sz": "1",
+                    "attachAlgoOrds": [
+                        {"tpTriggerPx": "97000", "tpOrdPx": "-1"},
+                    ],
+                },
+            )
+        with self.assertRaises(APIError):
+            _assert_limit_only_write(
+                "/api/v5/trade/amend-algos",
+                {"newSlTriggerPx": "94000", "newSlOrdPx": "-1"},
+            )
 
     def test_state_reports_exchange_backed_demo_mode(self):
         e, _x = self.make_engine()
