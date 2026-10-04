@@ -1,53 +1,53 @@
-# KAYTRADE V1.8.4 Build1840 · OKX DEMO ONLY
+# KAYTRADE V1.9.0 Build1900 · Dual Environment Safe
 
-KAYTRADE Build1840 has no local Paper execution runtime.
+KAYTRADE has two isolated OKX environments.
 
-## Runtime contract
+## DEMO
 
-Before publishing any executable plan:
-1. call get_kaytrade_state;
-2. confirm version=1.8.4 and build=1840;
-3. confirm mode=OKX_DEMO_EXECUTION;
-4. confirm demo_exchange_writes=true;
-5. confirm live_ai_writes=false;
-6. confirm paper_runtime_present=false;
-7. inspect Tier 1 / Tier 2, OKX positions and pending orders;
-8. keep simultaneous Tier 1 / Tier 2 orders in the same direction and leverage;
-9. provide LIMIT entry, explicit size, leverage, take-profit and stop-loss.
+- environment=demo
+- mode=OKX_DEMO_EXECUTION
+- AI auto execution may be enabled/disabled
+- complete AI plans may be submitted automatically to OKX simulated trading
+- entry/TP/SL/reductions are LIMIT ONLY
 
-When auto_execute_plans=true, publish_trade_plan immediately submits or amends the OKX Demo LIMIT order. Do not wait for market price to reach the entry before publishing.
+## LIVE
 
-Order fill status and average fill price must come from OKX only. Never infer a fill from the local ticker crossing the limit price.
+- environment=live
+- mode=OKX_LIVE_REVIEW
+- LIVE AI review channel may be enabled/disabled
+- real account data is read-only
+- AI plans may be validated and staged as READY_FOR_MANUAL_EXECUTION
+- no automated live trade-write tools are available
+- LIVE orders must be manually executed/confirmed in OKX
 
-## Execution rules
+## Required workflow
 
-- entry: LIMIT only;
-- TP: trigger + LIMIT order price;
-- SL: trigger + LIMIT order price;
-- reductions / partial closes: LIMIT only;
-- two same-direction tiers are supported;
-- incomplete entry remainder is canceled after 60 minutes;
-- changed unfilled plan for the same tier uses OKX amend-order rather than creating a duplicate;
-- partially-filled or filled entry is never overwritten by a new entry recommendation;
-- aggregate leverage/notional/estimated-stop limits must remain enforced.
+Before every AI plan:
+1. explicitly choose environment=demo or environment=live;
+2. call get_kaytrade_state for that same environment;
+3. verify bridge mode matches the requested environment;
+4. inspect current Tier 1 / Tier 2 and account state;
+5. use LIMIT entry only;
+6. provide size, leverage, TP and SL;
+7. never use market orders or OKX -1 TP/SL sentinels.
 
-## Safety boundary
+## Isolation contract
 
-Automated writes are permitted only when KAYTRADE is connected to OKX Demo Trading.
-Live-account AI writes remain hard-disabled.
-Never request, read, print or expose OKX credentials.
-Never bypass KAYTRADE with direct exchange writes.
-Never propose or retry a market order.
+DEMO and LIVE must never share:
+- API profile values;
+- Engine instances;
+- State files;
+- Tier state;
+- AI history;
+- Bridge descriptor;
+- Bridge token.
 
-## Removed behavior
+A bridge/plan environment mismatch must be rejected.
 
-The old local Paper matching engine, Paper API routes, Paper UI patch and Paper state are removed from Build1840.
-Do not reference or call /v1/paper/* endpoints.
+## Safety boundaries
 
-
-## V1.8.4 protection-price rule
-
-OKX uses -1 in tpOrdPx/slOrdPx (and newTpOrdPx/newSlOrdPx) as a market-execution sentinel.
-KAYTRADE V1.8.4 must never emit that sentinel.
-If an AI tool supplies a missing, zero or negative TP/SL limit price, normalize it to the corresponding positive trigger price before submission.
-The exchange transport layer must reject any outbound TP/SL protection payload that still contains -1.
+- Paper runtime is absent.
+- DEMO automated writes are allowed only to OKX simulated trading.
+- LIVE automated writes remain disabled.
+- LIVE API must not have withdrawal permission.
+- Never ask for, read, print, log or expose OKX API credentials.
