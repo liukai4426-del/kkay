@@ -1,0 +1,132 @@
+name: Build KAYTRADE Intel Mac 1.8.4 OKX Demo Build1840
+
+on:
+  push:
+    branches: [feature/v1832-restore-clean-ui]
+  pull_request:
+    branches: [release/v1.8.4-okx-demo]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install runtime test dependencies
+        run: python -m pip install 'websocket-client==1.8.0' 'certifi==2025.8.3'
+      - name: Verify clean runtime
+        run: |
+          test ! -e v181_paper_patch.py
+          test ! -e v182_ui_patch.py
+          ! grep -Eq "^(from|import) +v181_paper_patch" desktop.py
+          ! grep -Eq "^(from|import) +v182_ui_patch" desktop.py
+          ! grep -q "'v181_paper_patch'" OKXLocal.spec
+          ! grep -q "'v182_ui_patch'" OKXLocal.spec
+      - name: Compile V1.8.4
+        run: |
+          python -m py_compile \
+            desktop.py exchange.py engine.py app.py history.py visual.py \
+            v172_ai_only_patch.py v180_ai_only_patch.py v183_okx_demo_patch.py \
+            v184_ui_patch.py kaytrade_mcp.py test_v183_okx_demo.py
+      - name: V1.7.1 maintenance regression
+        run: python -m unittest -v test_v171_update
+      - name: V1.8.4 OKX Demo execution tests
+        run: python -m unittest -v test_v183_okx_demo
+      - name: Verify V1.8.4 semantics
+        run: |
+          python - <<'PY'
+          import inspect
+          import sys
+          import desktop
+          import app
+          import exchange
+          import v165_model as model
+          import v183_okx_demo_patch as v183
+          import v184_ui_patch as v184
+
+          assert v183.VERSION == '1.8.4'
+          assert v183.BUILD == '1840'
+          assert v184.VERSION == '1.8.4'
+          assert v184.BUILD == '1840'
+          assert model.VERSION == '1.8.4'
+          assert model.BUILD == '1840'
+          assert model.STRATEGY_ENABLED is False
+          assert app.Engine is v183.OKXDemoEngineV183
+          assert 'v181_paper_patch' not in sys.modules
+          assert 'v182_ui_patch' not in sys.modules
+
+          src = inspect.getsource(v183.OKXDemoEngineV183)
+          assert '"ordType": "limit"' in src
+          assert 'OKX_DEMO_EXECUTION' in src
+          assert '"supported_entry_order_types": ["limit"]' in src
+          assert '"supported_close_order_types": ["limit"]' in src
+
+          transport = inspect.getsource(exchange._assert_limit_only_write)
+          assert 'tpOrdPx' in transport
+          assert 'slOrdPx' in transport
+          assert 'newTpOrdPx' in transport
+          assert 'newSlOrdPx' in transport
+          assert 'ordType' in transport
+
+          ui = inspect.getsource(v184._install_refined_plan)
+          assert '建议 / 委托入场' in ui
+          assert '止盈 TP · 限价' in ui
+          assert '止损 SL · 限价' in ui
+          assert ui.count('visual.RoundedPanel(') >= 5
+          print('PASS V1.8.4 Build1840 refined UI + hard LIMIT-only transport')
+          PY
+
+  build:
+    needs: unit
+    runs-on: macos-15-intel
+    timeout-minutes: 70
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - name: Install build dependencies
+        run: python -m pip install 'pyinstaller==6.16.0' 'certifi==2025.8.3' 'Pillow==11.3.0' 'websocket-client==1.8.0'
+      - name: V1.8.4 tests
+        run: python -m unittest -v test_v183_okx_demo
+      - run: python build_icon.py
+      - run: python -m PyInstaller --noconfirm OKXLocal.spec
+      - name: Verify Intel bundle and metadata
+        run: |
+          python verify_bundle.py
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1.8.4'
+          /usr/bin/plutil -p dist/KAYTRADE.app/Contents/Info.plist | grep '1840'
+          codesign --verify --deep --strict dist/KAYTRADE.app
+      - name: Packaged V1.8.4 smoke test
+        run: |
+          TMPDIR_CHECK="$(mktemp -d)"
+          dist/KAYTRADE.app/Contents/MacOS/KAYTRADE --smoke-test "$TMPDIR_CHECK/smoke.txt"
+          cat "$TMPDIR_CHECK/smoke.txt"
+          grep 'V1.8.4 Build1840 OKX DEMO CLEAN LIMIT ONLY' "$TMPDIR_CHECK/smoke.txt"
+          grep 'refined AI plan UI is restored' "$TMPDIR_CHECK/smoke.txt"
+          grep 'TP/SL use positive limit prices only' "$TMPDIR_CHECK/smoke.txt"
+      - name: Create installer
+        run: |
+          mkdir -p installer
+          ditto dist/KAYTRADE.app installer/KAYTRADE.app
+          cp RELEASE-1.8.4-OKX-DEMO.md installer/RELEASE-1.8.4-OKX-DEMO.md
+          printf 'KAYTRADE V1.8.4 OKX DEMO CLEAN Build1840\nRefined AI plan UI restored · TP/SL -1 market sentinel blocked · LIMIT ONLY.\n' > installer/RELEASE-1.8.4-OKX-DEMO.txt
+          hdiutil create -volname 'KAYTRADE 1.8.4 OKX DEMO' -srcfolder installer -ov -format UDZO KAYTRADE-1.8.4-OKX-DEMO-Intel-build1840.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAYTRADE-1.8.4-OKX-DEMO-Intel-build1840
+          path: |
+            KAYTRADE-1.8.4-OKX-DEMO-Intel-build1840.dmg
+            installer/RELEASE-1.8.4-OKX-DEMO.md
+            installer/RELEASE-1.8.4-OKX-DEMO.txt
+          if-no-files-found: error
