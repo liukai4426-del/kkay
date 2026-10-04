@@ -68,7 +68,7 @@ class Exchange(Client):
                 time.sleep(2**attempt)
 
     def _request_once(self, method, path, params=None, private=False):
-        allowed={'/api/v5/trade/order','/api/v5/trade/cancel-order','/api/v5/account/set-leverage'}
+        allowed={'/api/v5/trade/order','/api/v5/trade/cancel-order','/api/v5/trade/amend-order','/api/v5/trade/amend-algos','/api/v5/account/set-leverage'}
         if method not in ('GET','POST') or (method=='POST' and path not in allowed):
             raise APIError('不允许此写入操作',method=method,path=path)
         if not path.startswith('/api/v5/') or '?' in path:
