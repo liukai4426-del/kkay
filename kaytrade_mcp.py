@@ -21,6 +21,7 @@ mcp = FastMCP(
         "Inspect get_kaytrade_state before proposing a trade. "
         "submit_trade_proposal is permitted only when KAYTRADE is connected to OKX Demo "
         "and the user has enabled the AI execution channel. "
+        "Use publish_trade_plan to keep the dashboard updated with tier-1/tier-2 recommendations and operation advice. "
         "Always provide take-profit and stop-loss for open requests. "
         "Never ask for, read, or expose OKX API credentials."
     ),
@@ -76,6 +77,35 @@ def get_kaytrade_state() -> dict:
 
 
 @mcp.tool()
+def publish_trade_plan(
+    tier: int,
+    direction: str,
+    reason: str,
+    operation_advice: str,
+    suggested_entry: float | None = None,
+    take_profit: float | None = None,
+    stop_loss: float | None = None,
+    size: float | None = None,
+    leverage: int | None = None,
+    plan_id: str | None = None,
+) -> dict:
+    """Publish an AI recommendation to the KAYTRADE dashboard without placing an order."""
+    payload = {
+        "tier": tier,
+        "direction": direction,
+        "reason": reason,
+        "operation_advice": operation_advice,
+        "suggested_entry": suggested_entry,
+        "take_profit": take_profit,
+        "stop_loss": stop_loss,
+        "size": size,
+        "leverage": leverage,
+        "plan_id": plan_id,
+    }
+    return _request("POST", "/v1/plan", payload)
+
+
+@mcp.tool()
 def submit_trade_proposal(
     action: str,
     direction: str,
@@ -85,6 +115,8 @@ def submit_trade_proposal(
     stop_loss: float | None = None,
     leverage: int = 5,
     proposal_id: str | None = None,
+    tier: int = 1,
+    operation_advice: str = "",
 ) -> dict:
     """Submit a structured AI trade request to KAYTRADE V1.7.2.
 
@@ -98,6 +130,8 @@ def submit_trade_proposal(
         "direction": direction,
         "reason": reason,
         "leverage": leverage,
+        "tier": tier,
+        "operation_advice": operation_advice,
     }
     if proposal_id is not None:
         payload["proposal_id"] = proposal_id
