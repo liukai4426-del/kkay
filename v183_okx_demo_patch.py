@@ -172,10 +172,14 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
 
     def _read_order(self, item):
         try:
-            return self.x.order(
+            row = self.x.order(
                 order_id=str(item.get("order_id") or ""),
                 client_id=str(item.get("client_order_id") or ""),
             )
+            if row and not item.get("order_id") and row.get("ordId"):
+                item["order_id"] = str(row.get("ordId"))
+                self.store.save()
+            return row
         except APIError as exc:
             if str(getattr(exc, "code", "")) != "51603":
                 raise
@@ -523,6 +527,8 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
         return True
 
     def _amend_pending_from_plan(self, current, proposal):
+        if not current.get("order_id"):
+            raise legacy_engine.Halt("上一笔OKX提交结果仍未知，缺少ordId；禁止改单或重复下单")
         checked = self._validate_demo_open(proposal, replace_tier=current["tier"])
         if float(current.get("filled_size") or 0) > 0:
             raise legacy_engine.Halt("已部分成交的档位不会被新的AI入场方案覆盖")
@@ -653,7 +659,29 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
                     execution = self._amend_pending_from_plan(current, proposal)
                 else:
                     execution = self._submit_open(proposal, proposal["proposal_id"])
-            except (legacy_engine.Halt, APIError) as exc:
+            except APIError as exc:
+                if not getattr(exc, "write_rejected", False):
+                    item["status"] = "OKX_RESULT_UNKNOWN"
+                    item["detail"] = str(exc)[:1000]
+                    self.store.save()
+                    self._event(
+                        "OKX_RESULT_UNKNOWN",
+                        {
+                            "tier": item["tier"],
+                            "detail": "OKX写入结果未知；保留幂等状态，禁止重复提交：" + str(exc),
+                        },
+                    )
+                    raise
+                item["status"] = "AUTO_REJECTED"
+                item["detail"] = str(exc)[:1000]
+                self.store.save()
+                return dict(
+                    base,
+                    status="AUTO_REJECTED",
+                    auto_execution="REJECTED",
+                    error=str(exc),
+                )
+            except legacy_engine.Halt as exc:
                 item["status"] = "AUTO_REJECTED"
                 item["detail"] = str(exc)[:1000]
                 self.store.save()
@@ -788,12 +816,14 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
             self.emit("log", "OKX Demo AI执行通道已停止；不再接收新AI开仓，既有OKX订单继续只读核对")
 
     def _cancel_entry_internal(self, item, reason):
-        if not item.get("order_id"):
-            raise legacy_engine.Halt("当前档位缺少OKX ordId，无法撤单")
-        self.x.post(
-            "/api/v5/trade/cancel-order",
-            {"instId": INSTRUMENT, "ordId": str(item["order_id"])},
-        )
+        if not item.get("order_id") and not item.get("client_order_id"):
+            raise legacy_engine.Halt("当前档位缺少OKX ordId/clOrdId，无法撤单")
+        body = {"instId": INSTRUMENT}
+        if item.get("order_id"):
+            body["ordId"] = str(item["order_id"])
+        else:
+            body["clOrdId"] = str(item["client_order_id"])
+        self.x.post("/api/v5/trade/cancel-order", body)
         item["status"] = "cancel_requested"
         item["order_state"] = "cancel_requested"
         item["cancel_requested_at"] = _now()
@@ -855,12 +885,15 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
                 raise legacy_engine.Halt("new_size 不能小于已成交数量")
             body = {
                 "instId": INSTRUMENT,
-                "ordId": str(item["order_id"]),
                 "reqId": v172._client_id("am"),
                 "cxlOnFail": False,
                 "newPx": format(checked["limit_price"], "f"),
                 "newSz": format(checked["qty"], "f"),
             }
+            if item.get("order_id"):
+                body["ordId"] = str(item["order_id"])
+            else:
+                body["clOrdId"] = str(item["client_order_id"])
             self.x.post("/api/v5/trade/amend-order", body)
             item["limit_price"] = float(checked["limit_price"])
             item["requested_entry"] = float(checked["limit_price"])
@@ -1049,7 +1082,9 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
             }
 
     def _sync_tier(self, item, algos, cancel_expired=True):
-        if not isinstance(item, dict) or not item.get("order_id"):
+        if not isinstance(item, dict) or (
+            not item.get("order_id") and not item.get("client_order_id")
+        ):
             return
         order = self._read_order(item)
         if not order:
@@ -1073,6 +1108,8 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
             ):
                 self._cancel_entry_internal(item, "60分钟未完全成交，自动撤销剩余入场单")
         elif exchange_state == "filled":
+            if item.get("status") != "filled":
+                item["filled_at"] = _now()
             item["status"] = "filled"
         elif exchange_state == "canceled":
             if filled > 0:
