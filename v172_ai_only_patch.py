@@ -43,14 +43,12 @@ from core import INSTRUMENT
 from exchange import APIError
 
 VERSION = "1.7.2"
-BUILD = "1721"
+BUILD = "1722"
 AI_ONLY = True
 
 AI_BRIDGE_HOST = "127.0.0.1"
 AI_BRIDGE_PORT = int(os.getenv("KAYTRADE_AI_BRIDGE_PORT", "17872"))
-AI_MAX_LEVERAGE = 5
-AI_MAX_NOTIONAL_USDT = Decimal(os.getenv("KAYTRADE_AI_MAX_NOTIONAL_USDT", "100"))
-AI_MAX_ESTIMATED_STOP_LOSS_USDT = Decimal(os.getenv("KAYTRADE_AI_MAX_STOP_LOSS_USDT", "5"))
+AI_DEFAULT_LEVERAGE = int(os.getenv("KAYTRADE_AI_DEFAULT_LEVERAGE", "5"))
 AI_MIN_ORDER_INTERVAL_SEC = float(os.getenv("KAYTRADE_AI_MIN_ORDER_INTERVAL_SEC", "5"))
 AI_BRIDGE_FILENAME = "ai_bridge.json"
 
@@ -59,7 +57,7 @@ AI_BRIDGE_FILENAME = "ai_bridge.json"
 class AIOnlySettings:
     """Execution-only safety settings; no indicator/score strategy fields exist."""
 
-    leverage: int = AI_MAX_LEVERAGE
+    leverage: int = AI_DEFAULT_LEVERAGE
     consecutive_losses: int = 999999
 
 
@@ -138,7 +136,7 @@ class AIOnlyEngine(legacy_engine.Engine):
             self.store.save()
             self.emit(
                 "log",
-                "V1.7.2 Build1721：已清理Build1720启用AI通道时产生的 stop_atr 兼容故障锁；未改变任何仓位/订单。",
+                "V1.7.2 Build1722：已清理Build1720启用AI通道时产生的 stop_atr 兼容故障锁；未改变任何仓位/订单。",
             )
 
     def arm(self, _settings=None):
@@ -204,9 +202,8 @@ class AIOnlyEngine(legacy_engine.Engine):
                 "positions": self.x.positions(),
                 "active": _clean_active(self.store.data.get("active")),
                 "limits": {
-                    "max_leverage": AI_MAX_LEVERAGE,
-                    "max_notional_usdt": str(AI_MAX_NOTIONAL_USDT),
-                    "max_estimated_stop_loss_usdt": str(AI_MAX_ESTIMATED_STOP_LOSS_USDT),
+                    "local_hard_risk_caps": False,
+                    "default_leverage": AI_DEFAULT_LEVERAGE,
                 },
             }
 
@@ -233,9 +230,9 @@ class AIOnlyEngine(legacy_engine.Engine):
             raise legacy_engine.Halt("V1.7.2 AI Only 首版只允许 market 开仓")
 
         qty = _decimal(proposal.get("size"), "size")
-        leverage = int(proposal.get("leverage", AI_MAX_LEVERAGE))
-        if not 1 <= leverage <= AI_MAX_LEVERAGE:
-            raise legacy_engine.Halt(f"leverage 必须在 1—{AI_MAX_LEVERAGE}")
+        leverage = int(proposal.get("leverage", AI_DEFAULT_LEVERAGE))
+        if leverage < 1:
+            raise legacy_engine.Halt("leverage 必须为正整数；V1.7.2 Build1722不再设置本地最大杠杆上限")
 
         ticker = self.x.ticker()
         last = _decimal(ticker.get("last"), "OKX last")
@@ -255,22 +252,12 @@ class AIOnlyEngine(legacy_engine.Engine):
 
         unit = _decimal(meta.get("ctVal"), "ctVal") * _decimal(meta.get("ctMult") or "1", "ctMult")
         notional = qty * unit * last
-        if notional > AI_MAX_NOTIONAL_USDT:
-            raise legacy_engine.Halt(
-                f"名义仓位 {notional:.4f} USDT 超过 AI Only 上限 {AI_MAX_NOTIONAL_USDT} USDT"
-            )
 
         equity, available = self.x.balance()
-        account_cap = Decimal(str(available)) * Decimal(leverage) * Decimal("0.90")
-        if notional > account_cap:
-            raise legacy_engine.Halt("可用保证金不足以覆盖该AI交易请求")
 
+        # Build1722: no local leverage/notional/estimated-loss hard caps.
+        # Exchange/account margin rules remain authoritative at write time.
         estimated_loss = qty * unit * abs(last - sl) + notional * Decimal("0.0012")
-        if estimated_loss > AI_MAX_ESTIMATED_STOP_LOSS_USDT:
-            raise legacy_engine.Halt(
-                f"估算止损损失 {estimated_loss:.4f} USDT 超过 AI Only 上限 "
-                f"{AI_MAX_ESTIMATED_STOP_LOSS_USDT} USDT"
-            )
 
         return {
             "direction": direction,
@@ -767,7 +754,7 @@ _PREVIOUS_APP_QUIT = app.App.quit
 def _rewrite_ui_text(data):
     if not isinstance(data, str):
         return data
-    text = data.replace("V1.7.1", "V1.7.2").replace("Build1710", "Build1721")
+    text = data.replace("V1.7.1", "V1.7.2").replace("Build1710", "Build1722")
     if "开始加载1D / 4H / 1H / 15m / 5m指标历史K线" in text:
         return "V1.7.2 AI Only：策略K线/指标计算已停用；仅同步OKX实时行情与账户状态"
     if text.startswith("全自动运行 / "):
@@ -877,7 +864,7 @@ def _install_ai_only_dashboard(owner):
     owner._v172_ai_bridge_var = app.tk.StringVar(value="AI Bridge：本机 127.0.0.1 · READY")
     owner._v172_ai_env_var = app.tk.StringVar(value="执行环境：仅 OKX 模拟盘")
     owner._v172_ai_limits_var = app.tk.StringVar(
-        value=f"硬风控：≤{AI_MAX_LEVERAGE}× · 名义仓位≤{AI_MAX_NOTIONAL_USDT} USDT · 估算止损≤{AI_MAX_ESTIMATED_STOP_LOSS_USDT} USDT"
+        value="本地硬风控：已关闭 · 杠杆/名义仓位/估算止损不设本地上限，OKX账户规则仍生效"
     )
 
     for var, color in (
@@ -898,14 +885,33 @@ def _set_ai_channel_ui(owner, enabled):
         var.set("AI交易通道：已启用 · 等待AI请求" if enabled else "AI交易通道：未启用")
 
 
+def _ensure_ai_only_engine(owner):
+    """Accept frozen-module identity differences; rebuild only when AI capabilities are absent."""
+    e = getattr(owner, "engine", None)
+    if e is None:
+        raise legacy_engine.Halt("先连接OKX模拟盘")
+
+    if callable(getattr(e, "submit_ai_trade", None)) and hasattr(e, "_ai_lock"):
+        return e
+
+    # Some frozen/overlay combinations can leave an older Engine instance on an
+    # otherwise valid connection. Rebind the same Exchange to the AI-only engine
+    # instead of entering any legacy Settings/strategy arm chain.
+    x = getattr(e, "x", None)
+    if x is None:
+        raise legacy_engine.Halt("当前连接缺少Exchange对象，无法切换到AI Only Runtime")
+
+    replacement = AIOnlyEngine(x, owner.folder, owner.emit)
+    replacement.connect()
+    owner.engine = replacement
+    owner.emit("log", "Build1722：检测到旧Runtime实例，已复用当前OKX连接重建为AIOnlyEngine")
+    return replacement
+
+
 def _run_ai_enable(owner):
     """Dedicated AI-only enable path; never enters legacy worker kind='arm'."""
     try:
-        e = getattr(owner, "engine", None)
-        if not isinstance(e, AIOnlyEngine):
-            raise legacy_engine.Halt(
-                "AI Only Runtime不一致：拒绝进入旧版策略arm链；请重新启动KAYTRADE 1.7.2"
-            )
+        e = _ensure_ai_only_engine(owner)
         e.arm(None)
         try:
             keepawake._start_keepawake(owner)
@@ -915,7 +921,7 @@ def _run_ai_enable(owner):
         owner.emit("status", "AI Only运行 / OKX模拟盘")
         owner.emit(
             "log",
-            "V1.7.2 Build1721 AI交易通道已启用：启动流程未调用旧Settings/stop_atr/技术指标策略。",
+            "V1.7.2 Build1722 AI交易通道已启用：启动流程未调用旧Settings/stop_atr/技术指标策略。",
         )
     except Exception as exc:
         e = getattr(owner, "engine", None)
@@ -944,7 +950,7 @@ def _start_ai_enable(owner):
 
 def _app_init_v172(self, *args, **kwargs):
     _PREVIOUS_APP_INIT(self, *args, **kwargs)
-    self.root.title("KAYTRADE 1.7.2 · AI ONLY · Build 1721")
+    self.root.title("KAYTRADE 1.7.2 · AI ONLY · Build 1722")
     try:
         self.signal.set("V1.7.2 AI ONLY｜无本地交易策略｜等待 Codex / AI 提交结构化交易请求")
     except Exception:
@@ -985,8 +991,7 @@ def _app_arm_v172(self):
         "本地BOLL / EMA / RSI / 评分 / Gate 全部不参与开仓。\n"
         "启用后，Codex/AI 可通过本机AI Bridge提交结构化交易请求，"
         "KayTrade完成硬风控后直接发送到 OKX模拟盘。\n"
-        f"硬上限：杠杆≤{AI_MAX_LEVERAGE}x；名义仓位≤{AI_MAX_NOTIONAL_USDT} USDT；"
-        f"估算止损损失≤{AI_MAX_ESTIMATED_STOP_LOSS_USDT} USDT。\n\n"
+        "本地硬风控上限已关闭：不限制杠杆、名义仓位或估算止损金额；OKX账户与保证金规则仍生效。\n\n"
         "确认启用请输入 AI",
         parent=self.root,
     )
@@ -1022,7 +1027,7 @@ def apply():
         module.VERSION = VERSION
         module.BUILD = BUILD
     ui166.BUILD = BUILD
-    ui166.WINDOW_TITLE = "KAYTRADE 1.7.2 · AI ONLY · Build 1721"
+    ui166.WINDOW_TITLE = "KAYTRADE 1.7.2 · AI ONLY · Build 1722"
 
     model.STRATEGY_ENABLED = False
     model.AI_ONLY = True
