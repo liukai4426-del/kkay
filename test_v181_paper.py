@@ -67,7 +67,7 @@ class V181PaperTests(unittest.TestCase):
 
     def test_identity_and_paper_only(self):
         self.assertEqual(v181.VERSION, "1.8.1")
-        self.assertEqual(v181.BUILD, "1811")
+        self.assertEqual(v181.BUILD, "1812")
         self.assertTrue(v181.PAPER_ONLY)
         self.assertIs(v181.app.Engine, v181.PaperEngineV181)
 
@@ -263,6 +263,116 @@ class V181PaperTests(unittest.TestCase):
         self.assertIsNone(e.store.data["paper_execution"]["tiers"]["1"])
         self.assertEqual(x.posts, [])
         self.assertIn("stop_loss", result["error"])
+
+    def test_auto_execute_identical_pending_plan_does_not_duplicate(self):
+        e, x = self.make_engine()
+        e.set_auto_execute_plans(True)
+        plan = {
+            "plan_id": "same-t1",
+            "tier": 1,
+            "action": "open",
+            "direction": "long",
+            "order_type": "limit",
+            "suggested_entry": 99000,
+            "size": 1,
+            "leverage": 5,
+            "take_profit": 102000,
+            "stop_loss": 98000,
+            "reason": "same plan",
+        }
+        first = e.publish_ai_plan(dict(plan))
+        first_id = e.store.data["paper_execution"]["tiers"]["1"]["paper_order_id"]
+        second = e.publish_ai_plan(dict(plan))
+        current = e.store.data["paper_execution"]["tiers"]["1"]
+        self.assertEqual(first["status"], "AUTO_EXECUTED")
+        self.assertEqual(second["status"], "AUTO_ALREADY_ACTIVE")
+        self.assertEqual(second["auto_execution"], "ALREADY_ACTIVE")
+        self.assertEqual(current["paper_order_id"], first_id)
+        self.assertEqual(x.posts, [])
+
+    def test_auto_execute_changed_pending_plan_replaces_old_order(self):
+        e, x = self.make_engine()
+        e.set_auto_execute_plans(True)
+        first = e.publish_ai_plan(
+            {
+                "plan_id": "replace-t1",
+                "tier": 1,
+                "action": "open",
+                "direction": "short",
+                "order_type": "limit",
+                "limit_price": 101000,
+                "size": 1,
+                "leverage": 5,
+                "take_profit": 98000,
+                "stop_loss": 102000,
+                "reason": "old plan",
+            }
+        )
+        old = dict(e.store.data["paper_execution"]["tiers"]["1"])
+        second = e.publish_ai_plan(
+            {
+                "plan_id": "replace-t1",
+                "tier": 1,
+                "action": "open",
+                "direction": "short",
+                "order_type": "limit",
+                "limit_price": 100800,
+                "size": 1,
+                "leverage": 5,
+                "take_profit": 98500,
+                "stop_loss": 101800,
+                "reason": "new plan",
+            }
+        )
+        current = e.store.data["paper_execution"]["tiers"]["1"]
+        self.assertEqual(first["status"], "AUTO_EXECUTED")
+        self.assertEqual(second["status"], "AUTO_EXECUTED")
+        self.assertNotEqual(current["paper_order_id"], old["paper_order_id"])
+        self.assertEqual(current["limit_price"], 100800.0)
+        self.assertEqual(current["take_profit"], 98500.0)
+        self.assertEqual(current["stop_loss"], 101800.0)
+        events = e.store.data["paper_execution"]["events"]
+        self.assertTrue(any(row.get("event") == "AUTO_PLAN_REPLACED" for row in events))
+        self.assertEqual(x.posts, [])
+
+    def test_auto_execute_does_not_overwrite_filled_same_tier(self):
+        e, _x = self.make_engine()
+        e.set_auto_execute_plans(True)
+        e.publish_ai_plan(
+            {
+                "plan_id": "filled-t1",
+                "tier": 1,
+                "action": "open",
+                "direction": "long",
+                "order_type": "market",
+                "size": 1,
+                "leverage": 5,
+                "take_profit": 102000,
+                "stop_loss": 98000,
+                "reason": "fill first",
+            }
+        )
+        result = e.publish_ai_plan(
+            {
+                "plan_id": "new-after-fill",
+                "tier": 1,
+                "action": "open",
+                "direction": "long",
+                "order_type": "limit",
+                "limit_price": 99500,
+                "size": 1,
+                "leverage": 5,
+                "take_profit": 102500,
+                "stop_loss": 98500,
+                "reason": "must not overwrite position",
+            }
+        )
+        self.assertEqual(result["status"], "AUTO_REJECTED")
+        self.assertIn("不会覆盖现有仓位", result["error"])
+        tier = e.store.data["paper_execution"]["tiers"]["1"]
+        self.assertEqual(tier["status"], "filled")
+        self.assertEqual(tier["entry_price"], 100000.0)
+
 
     def test_auto_execute_off_only_records_recommendation(self):
         e, x = self.make_engine()
