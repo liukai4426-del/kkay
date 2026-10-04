@@ -65,10 +65,12 @@ from v183_okx_demo_patch import apply as apply_v183_okx_demo_patch
 apply_v183_okx_demo_patch()
 from v184_ui_patch import apply as apply_v184_ui_patch
 apply_v184_ui_patch()
+from v190_dual_env_patch import apply as apply_v190_dual_env_patch
+apply_v190_dual_env_patch()
 
 
 def smoke_test():
-    """Exercise packaged Build1840 clean OKX Demo runtime without credentials or writes."""
+    """Exercise packaged Build1900 dual OKX runtime without credentials or writes."""
     import ssl
     import tkinter as tk
     from unittest.mock import patch
@@ -77,17 +79,19 @@ def smoke_test():
     import v172_ai_only_patch as v172
     import v183_okx_demo_patch as v183
     import v184_ui_patch as v184
+    import v190_dual_env_patch as v190
 
     assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
-    assert v183.VERSION == '1.8.4' and v183.BUILD == '1840'
-    assert v184.VERSION == '1.8.4' and v184.BUILD == '1840'
+    assert v183.VERSION == '1.9.0' and v183.BUILD == '1900'
+    assert v184.VERSION == '1.9.0' and v184.BUILD == '1900'
+    assert v190.VERSION == '1.9.0' and v190.BUILD == '1900'
     assert v183.DEMO_EXECUTION is True
     assert v183.LIMIT_ONLY is True
-    assert model.VERSION == '1.8.4' and model.BUILD == '1840'
+    assert model.VERSION == '1.9.0' and model.BUILD == '1900'
     assert model.STRATEGY_ENABLED is False
     assert getattr(model, '_kaytrade_v183_okx_demo_applied', False)
     assert getattr(app.App, '_kaytrade_v183_okx_demo_applied', False)
-    assert app.Engine is v183.OKXDemoEngineV183
+    assert app.Engine is v190.OKXDualExecutionEngineV190
 
     with tempfile.TemporaryDirectory(prefix='kaytrade-v183-ui-check-') as folder:
         root = tk.Tk()
@@ -101,15 +105,16 @@ def smoke_test():
                 ui = app.App(root, Path(folder))
                 root.update()
                 assert 'KAYTRADE' in root.title()
-                assert '1.8.4' in root.title()
+                assert '1.9.0' in root.title()
                 assert 'OKX DEMO' in root.title()
-                assert '1840' in root.title()
+                assert '1900' in root.title()
                 assert ui.mode.get() == 'OKX模拟盘'
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
                 assert getattr(ui, '_v183_okx_demo_ready', False)
-                assert 'V1.8.4 Build1840 CLEAN' in ui.signal.get()
-                assert 'OKX DEMO ONLY' in ui.signal.get()
+                assert getattr(ui, '_v190_dual_env_ready', False)
+                assert 'V1.9.0 Build1900' in ui.signal.get()
+                assert 'DEMO / LIVE' in ui.signal.get()
                 assert getattr(ui, '_v183_auto_exec_card', None) is not None
                 assert getattr(ui, '_v184_plan_card', None) is not None
                 assert getattr(ui, '_v184_direction_label', None) is not None
@@ -143,9 +148,8 @@ def smoke_test():
             root.destroy()
 
     Path(sys.argv[2]).write_text(
-        'PASS: KAYTRADE V1.8.4 Build1840 OKX DEMO CLEAN LIMIT ONLY; '
-        'refined AI plan UI is restored without Paper runtime; TP/SL use positive limit prices only; '
-        'AI plans submit exchange limit orders immediately and fills come from OKX Demo only.\n'
+        'PASS: KAYTRADE V1.9.0 Build1900 DUAL OKX LIMIT ONLY; '
+        'Demo/Live runtime is isolated; Live starts AUTO OFF; AI cannot select the execution environment.\n'
     )
 
 
