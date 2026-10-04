@@ -1,8 +1,8 @@
-name: Build KAYTRADE Intel Mac 1.8.1 Paper Build1810
+name: Build KAYTRADE Intel Mac 1.8.1 Paper Build1811
 
 on:
   push:
-    branches: [feature/v181-paper-execution-controls]
+    branches: [feature/v181-auto-plan-paper]
   pull_request:
     branches: [release/v1.8.0-ai-only]
   workflow_dispatch:
@@ -44,7 +44,7 @@ jobs:
           import v181_paper_patch as v181
 
           assert v181.VERSION == '1.8.1'
-          assert v181.BUILD == '1810'
+          assert v181.BUILD == '1811'
           assert v181.PAPER_ONLY is True
           assert model.STRATEGY_ENABLED is False
           assert app.Engine is v181.PaperEngineV181
@@ -59,7 +59,10 @@ jobs:
           assert 'amend_paper_protection' in source
           assert 'paper_close_position' in source
           assert 'AUTO_CANCEL_60M' in source
-          print('PASS V1.8.1: paper-only two-tier execution with no OKX write path')
+          assert 'set_auto_execute_plans' in source
+          assert 'publish_ai_plan' in source
+          assert 'take_profit' in source and 'stop_loss' in source
+          print('PASS V1.8.1 Build1811: paper-only auto AI-plan execution requires TP/SL')
           PY
 
   build:
@@ -91,21 +94,22 @@ jobs:
           TMPDIR_CHECK="$(mktemp -d)"
           dist/KAYTRADE.app/Contents/MacOS/KAYTRADE --smoke-test "$TMPDIR_CHECK/smoke.txt"
           cat "$TMPDIR_CHECK/smoke.txt"
-          grep 'V1.8.1 Build1810 PAPER' "$TMPDIR_CHECK/smoke.txt"
+          grep 'V1.8.1 Build1811 PAPER' "$TMPDIR_CHECK/smoke.txt"
           grep 'BTC quote is topmost' "$TMPDIR_CHECK/smoke.txt"
+          grep 'automatic AI-plan paper execution requires TP/SL' "$TMPDIR_CHECK/smoke.txt"
           grep 'no OKX write path is exposed' "$TMPDIR_CHECK/smoke.txt"
       - name: Create installer
         run: |
           mkdir -p installer
           ditto dist/KAYTRADE.app installer/KAYTRADE.app
           cp RELEASE-1.8.1-PAPER.md installer/RELEASE-1.8.1-PAPER.md
-          printf 'KAYTRADE V1.8.1 PAPER Build1810\nTwo-tier paper execution · 60m auto-cancel · amend/cancel/protection · market/limit partial close.\n' > installer/RELEASE-1.8.1-PAPER.txt
-          hdiutil create -volname 'KAYTRADE 1.8.1 PAPER' -srcfolder installer -ov -format UDZO KAYTRADE-1.8.1-PAPER-Intel-build1810.dmg
+          printf 'KAYTRADE V1.8.1 PAPER Build1811\nAI plan auto execution (user toggle) · mandatory TP/SL · two-tier paper execution · 60m auto-cancel.\n' > installer/RELEASE-1.8.1-PAPER.txt
+          hdiutil create -volname 'KAYTRADE 1.8.1 PAPER' -srcfolder installer -ov -format UDZO KAYTRADE-1.8.1-PAPER-Intel-build1811.dmg
       - uses: actions/upload-artifact@v4
         with:
-          name: KAYTRADE-1.8.1-PAPER-Intel-build1810
+          name: KAYTRADE-1.8.1-PAPER-Intel-build1811
           path: |
-            KAYTRADE-1.8.1-PAPER-Intel-build1810.dmg
+            KAYTRADE-1.8.1-PAPER-Intel-build1811.dmg
             installer/RELEASE-1.8.1-PAPER.md
             installer/RELEASE-1.8.1-PAPER.txt
           if-no-files-found: error
