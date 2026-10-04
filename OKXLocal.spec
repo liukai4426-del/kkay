@@ -20,6 +20,6 @@ collection = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name='KAY
 bundle = BUNDLE(collection, name='KAYTRADE.app',icon=str(root / 'OKXLocal.icns'),
                 bundle_identifier='design.kkay.kaytrade',
                 info_plist={'CFBundleShortVersionString': '1.7.2',
-                            'CFBundleVersion': '1721',
+                            'CFBundleVersion': '1723',
                             'LSMinimumSystemVersion': '14.0',
                             'NSHighResolutionCapable': True})
