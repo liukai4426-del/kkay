@@ -209,9 +209,9 @@ def submit_demo_trade_proposal(
         "limit_price": limit_price,
         "tier": tier,
         "operation_advice": operation_advice,
-        "tp_exit_type": "limit",
+        "tp_exit_type": "market",
         "tp_limit_price": tp_limit_price,
-        "sl_exit_type": "limit",
+        "sl_exit_type": "market",
         "sl_limit_price": sl_limit_price,
     }
     return _request("demo", "POST", "/v1/trade", payload)
