@@ -80,6 +80,18 @@ class PaperEngineV181(v180.AIOnlyEngineV180):
             "V1.8.1 Paper Execution：仅使用OKX读取行情；所有开仓/平仓/改单/撤单均为本地模拟。",
         )
 
+    def _set_leverage(self, *_args, **_kwargs):
+        raise legacy_engine.Halt("V1.8.1 Paper禁止调用交易所杠杆写接口")
+
+    def _submit_open(self, *_args, **_kwargs):
+        raise legacy_engine.Halt("V1.8.1 Paper禁止调用交易所下单接口")
+
+    def _submit_close(self, *_args, **_kwargs):
+        raise legacy_engine.Halt("V1.8.1 Paper禁止调用交易所平仓接口")
+
+    def reconcile(self):
+        self._paper_tick()
+
     def arm(self, _settings=None):
         with self._ai_lock:
             if not self.store:
