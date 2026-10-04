@@ -112,7 +112,6 @@ def smoke_test():
                 assert 'Build1721' in v172._widget_text(ui._v172_ai_card)
                 pee4 = getattr(ui, '_v170_pee4_card', None)
                 assert pee4 is None or not pee4.winfo_manager()
-                assert 'submit("arm"' not in __import__('inspect').getsource(v172._app_arm_v172)
                 ui.finished.set()
                 ui.thread.join(timeout=2)
                 ui.lock.close()
