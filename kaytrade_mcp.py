@@ -1,4 +1,4 @@
-"""Codex MCP adapter for KAYTRADE V1.8.3 AI Only.
+"""Codex MCP adapter for KAYTRADE V1.8.3 OKX Demo Execution.
 
 The adapter never receives OKX credentials. It reads the short-lived local
 bridge descriptor created by the KAYTRADE app and talks only to 127.0.0.1.
@@ -32,9 +32,11 @@ def _descriptor():
     if not BRIDGE_FILE.exists():
         raise RuntimeError("KAYTRADE AI Bridge is not running")
     data = json.loads(BRIDGE_FILE.read_text())
-    if data.get("version") != "1.8.2":
-        raise RuntimeError("KAYTRADE bridge is not V1.8.3 Paper Execution")
-    if data.get("live_ai_writes") is not False:
+    if data.get("version") != "1.8.3":
+        raise RuntimeError("KAYTRADE bridge is not V1.8.3 OKX Demo Execution")
+    if data.get("mode") != "OKX_DEMO_EXECUTION":
+        raise RuntimeError("KAYTRADE bridge is not in OKX Demo execution mode")
+    if data.get("demo_exchange_writes") is not True or data.get("live_ai_writes") is not False:
         raise RuntimeError("Unexpected bridge safety state")
     return data
 
