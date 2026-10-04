@@ -21,8 +21,8 @@ mcp = FastMCP(
         "Inspect get_kaytrade_state before proposing a trade. "
         "All trade-management tools mutate local paper state only; no tool sends OKX write requests. "
         "KAYTRADE must be connected to OKX Demo for read-only market data and the user must enable the Paper AI channel. "
-        "Use publish_trade_plan to keep the dashboard updated with tier-1/tier-2 recommendations and operation advice. "
-        "Always provide take-profit and stop-loss for open requests. "
+        "Use publish_trade_plan for tier-1/tier-2 recommendations. If the user has enabled AI-plan auto execution in KAYTRADE, an executable entry plan is immediately converted into a local Paper order. "
+        "Always provide direction, size, leverage, order type, take-profit and stop-loss for executable entry plans; limit plans also require a limit/suggested entry price. "
         "Never ask for, read, or expose OKX API credentials."
     ),
 )
@@ -32,7 +32,7 @@ def _descriptor():
     if not BRIDGE_FILE.exists():
         raise RuntimeError("KAYTRADE AI Bridge is not running")
     data = json.loads(BRIDGE_FILE.read_text())
-    if data.get("version") != "1.8.0" or data.get("mode") != "AI_ONLY":
+    if data.get("version") != "1.8.1":
         raise RuntimeError("KAYTRADE bridge is not V1.8.1 Paper Execution")
     if data.get("live_ai_writes") is not False:
         raise RuntimeError("Unexpected bridge safety state")
@@ -90,8 +90,17 @@ def publish_trade_plan(
     size: float | None = None,
     leverage: int | None = None,
     plan_id: str | None = None,
+    tp_exit_type: str = "market",
+    tp_limit_price: float | None = None,
+    sl_exit_type: str = "market",
+    sl_limit_price: float | None = None,
 ) -> dict:
-    """Publish an AI recommendation to the KAYTRADE dashboard without placing an order."""
+    """Publish an AI recommendation.
+
+    If the user-controlled auto-execution setting is ON, a complete open plan
+    is immediately converted into a local Paper order. TP and SL are mandatory.
+    No OKX write request is sent.
+    """
     payload = {
         "tier": tier,
         "direction": direction,
@@ -105,6 +114,10 @@ def publish_trade_plan(
         "size": size,
         "leverage": leverage,
         "plan_id": plan_id,
+        "tp_exit_type": tp_exit_type,
+        "tp_limit_price": tp_limit_price,
+        "sl_exit_type": sl_exit_type,
+        "sl_limit_price": sl_limit_price,
     }
     return _request("POST", "/v1/plan", payload)
 
