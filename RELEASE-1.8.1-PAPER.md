@@ -1,4 +1,4 @@
-# KAYTRADE V1.8.1 PAPER EXECUTION · Build1811
+# KAYTRADE V1.8.1 PAPER EXECUTION · Build1812
 
 V1.8.1 converts the V1.8 AI-only execution layer into a local paper-trading state machine.
 OKX is used only for read-side market/account context; this build does not send OKX order,
@@ -36,7 +36,10 @@ When enabled:
 - `take_profit` and `stop_loss` are both mandatory;
 - direction, size, leverage and order type are also required;
 - a limit recommendation additionally requires an entry price;
-- if any mandatory field is missing or the plan violates the existing Paper limits, the recommendation remains visible but is marked rejected and no Paper order is created.
+- if any mandatory field is missing or the plan violates the existing Paper limits, the recommendation remains visible but is marked rejected and no Paper order is created;
+- if the same Tier already has an identical unfilled recommendation, the existing Paper order is kept without duplication;
+- if that Tier has a changed but still-unfilled recommendation, the old pending Paper order is replaced with the newest plan and a new 60-minute deadline begins;
+- if the Tier already has a filled position or active exit, a new entry recommendation is rejected instead of overwriting the position.
 
 The switch is OFF by default and can only be enabled after the Paper AI channel is running.
 Codex cannot turn this user setting on by itself.
@@ -105,6 +108,6 @@ No command in V1.8.1 sends an OKX write request.
 ## Package
 
 - Version: 1.8.1
-- Build: 1811
+- Build: 1812
 - Mode: PAPER AI
 - Intel macOS 14+
