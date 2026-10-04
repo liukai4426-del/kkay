@@ -77,9 +77,9 @@ def smoke_test():
     import visual
 
     assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
-    assert v181.VERSION == '1.8.1' and v181.BUILD == '1812'
+    assert v181.VERSION == '1.8.1' and v181.BUILD == '1813'
     assert v181.AI_ONLY is True and v181.PAPER_ONLY is True
-    assert model.VERSION == '1.8.1' and model.BUILD == '1812'
+    assert model.VERSION == '1.8.1' and model.BUILD == '1813'
     assert model.STRATEGY_ENABLED is False
     assert getattr(model, '_kaytrade_v181_paper_applied', False)
     assert getattr(app.App, '_kaytrade_v181_paper_applied', False)
@@ -103,7 +103,7 @@ def smoke_test():
                 assert 'KAYTRADE' in root.title()
                 assert '1.8.1' in root.title()
                 assert 'PAPER AI' in root.title()
-                assert '1812' in root.title()
+                assert '1813' in root.title()
                 assert ui.mode.get() == 'OKX模拟盘'
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
@@ -132,11 +132,11 @@ def smoke_test():
             root.destroy()
 
     Path(sys.argv[2]).write_text(
-        'PASS: KAYTRADE V1.8.1 Build1812 PAPER; '
+        'PASS: KAYTRADE V1.8.1 Build1813 PAPER; '
         'BTC quote is topmost, LONG/SHORT color semantics are enabled, '
-        'two-tier paper execution supports market/limit entry, 60-minute auto-cancel, '
-        'automatic AI-plan paper execution requires TP/SL, amend/cancel/protection changes and '
-        'market/limit partial close; no OKX write path is exposed.\n'
+        'two-tier paper execution is LIMIT ONLY, 60-minute auto-cancel, '
+        'automatic AI-plan paper execution requires TP/SL LIMIT protection, '
+        'amend/cancel/protection changes and LIMIT partial close; no OKX write path is exposed.\n'
     )
 
 
