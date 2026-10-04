@@ -24,7 +24,7 @@ BRIDGES = {
 mcp = FastMCP(
     "kaytrade-v191-live-execution",
     instructions=(
-        "KAYTRADE V1.9.1 Build1910 has two isolated environments. "
+        "KAYTRADE V1.9.1 Build1911 has two isolated environments. "
         "Always pass environment='demo' or environment='live' explicitly. "
         "DEMO and LIVE support AI auto execution only when that environment's UI channel is enabled. "
         "Parent entry and explicit reduction orders must be LIMIT. "
@@ -48,8 +48,8 @@ def _descriptor(environment: str) -> dict:
     if not path.exists():
         raise RuntimeError(f"KAYTRADE {environment} bridge is not running")
     data = json.loads(path.read_text())
-    if data.get("version") != "1.9.1" or str(data.get("build")) != "1910":
-        raise RuntimeError("KAYTRADE bridge must be V1.9.1 Build1910")
+    if data.get("version") != "1.9.1" or str(data.get("build")) != "1911":
+        raise RuntimeError("KAYTRADE bridge must be V1.9.1 Build1911")
     expected_mode = "OKX_DEMO_EXECUTION" if environment == "demo" else "OKX_LIVE_EXECUTION"
     if data.get("environment") != environment or data.get("mode") != expected_mode:
         raise RuntimeError("Environment Match Gate: bridge descriptor mismatch")
