@@ -1585,6 +1585,13 @@ def _app_init_v183(self, *args, **kwargs):
         except Exception:
             pass
     _install_auto_exec_card_v183(self)
+    # V1.8.0 inserted its AI plan before the original BTC quote. Build1831
+    # restores the intended clean hierarchy: quote -> auto execution -> plan -> execution.
+    try:
+        self.quote.pack_forget()
+        self.quote.pack(fill="x", pady=(0, 10), before=self._v183_auto_exec_card)
+    except Exception:
+        pass
     try:
         self._v180_mode_var.set("OKX DEMO")
         self._v180_position_badge_var.set("OKX 空仓")
