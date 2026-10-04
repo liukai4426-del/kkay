@@ -1,6 +1,6 @@
-# KAYTRADE V1.8.1 PAPER EXECUTION
+# KAYTRADE V1.8.2 PAPER EXECUTION
 
-V1.8.1 is paper-only. Never call OKX write endpoints from Codex or from the V1.8.1 runtime.
+V1.8.2 is paper-only. Never call OKX write endpoints from Codex or from the V1.8.2 runtime.
 
 Before any paper action:
 1. call get_kaytrade_state;
@@ -26,3 +26,11 @@ TP/SL exits are LIMIT-only. Never propose, request, or retry a market order.
 
 Never request, read, print or log OKX credentials.
 Never bypass KAYTRADE with direct exchange writes.
+
+
+## V1.8.2 UI contract
+
+Trading Overview must remain ordered as BTC quote -> AI auto execution -> AI plan -> order/position execution.
+Display entry order, TP, SL and reductions as LIMIT only.
+LONG direction and entry price are green; SHORT direction and entry price are red.
+Do not reintroduce legacy strategy position text or market-order UI labels.
