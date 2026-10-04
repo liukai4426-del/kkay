@@ -40,7 +40,7 @@ from core import INSTRUMENT
 from exchange import APIError
 
 VERSION = "1.8.3"
-BUILD = "1831"
+BUILD = "1832"
 AI_ONLY = True
 DEMO_EXECUTION = True
 LIMIT_ONLY = True
@@ -53,6 +53,38 @@ ENTRY_TTL_SEC = 60 * 60
 
 def _d(value, name="value"):
     return v172._decimal(value, name)
+
+
+def _limit_protection_price(value, trigger, name):
+    """Normalize every OKX protection exit to a positive LIMIT price.
+
+    OKX uses -1 as the market-order sentinel for TP/SL. Build1832 never
+    forwards that sentinel: None/blank/zero/negative values fall back to the
+    corresponding TP/SL trigger price.
+    """
+    trigger_price = _d(trigger, name.replace("_limit_price", ""))
+    if value in (None, ""):
+        return trigger_price
+    price = _d(value, name)
+    if price <= 0:
+        return trigger_price
+    return price
+
+
+def _assert_no_market_sentinel(payload):
+    forbidden = {"tpOrdPx", "slOrdPx", "newTpOrdPx", "newSlOrdPx"}
+    def walk(value):
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key in forbidden and str(child).strip() == "-1":
+                    raise legacy_engine.Halt(
+                        f"LIMIT ONLY：禁止向OKX发送 {key}=-1（-1代表市价执行）"
+                    )
+                walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+    walk(payload)
 
 
 def _now():
@@ -97,7 +129,7 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
         self._ensure_demo_state()
         self.emit(
             "log",
-            "V1.8.3 Build1831 Clean：仅OKX模拟盘交易所执行；本地Paper Runtime/撮合/API已从当前程序删除。",
+            "V1.8.3 Build1832 Clean：仅OKX模拟盘交易所执行；本地Paper Runtime/撮合/API已从当前程序删除。",
         )
 
     def _purge_removed_paper_state(self):
@@ -131,7 +163,7 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
                     had_paper = True
         if had_paper:
             self.store.save()
-            self.emit("log", "Build1831：已彻底清除旧Paper执行状态/档位缓存/方案历史；不会迁移为OKX订单。")
+            self.emit("log", "Build1832：已彻底清除旧Paper执行状态/档位缓存/方案历史；不会迁移为OKX订单。")
 
     def _ensure_demo_state(self):
         if not self.store:
@@ -305,8 +337,14 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
         sl_type = str(proposal.get("sl_exit_type") or "limit").lower()
         if tp_type != "limit" or sl_type != "limit":
             raise legacy_engine.Halt("LIMIT ONLY：TP/SL 保护退出只允许 limit")
-        tp_limit = _d(proposal.get("tp_limit_price", tp) or tp, "tp_limit_price")
-        sl_limit = _d(proposal.get("sl_limit_price", sl) or sl, "sl_limit_price")
+        tp_limit = _limit_protection_price(
+            proposal.get("tp_limit_price"), tp, "tp_limit_price"
+        )
+        sl_limit = _limit_protection_price(
+            proposal.get("sl_limit_price"), sl, "sl_limit_price"
+        )
+        if tp_limit <= 0 or sl_limit <= 0:
+            raise legacy_engine.Halt("LIMIT ONLY：TP/SL保护限价必须大于0")
         if tp_limit % tick != 0 or sl_limit % tick != 0:
             raise legacy_engine.Halt(f"TP/SL保护限价必须按 tickSz={tick} 递增")
 
@@ -340,7 +378,7 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
 
     def _entry_body(self, checked, ids):
         direction = checked["direction"]
-        return {
+        body = {
             "instId": INSTRUMENT,
             "tdMode": "isolated",
             "side": "buy" if direction == "long" else "sell",
@@ -365,6 +403,8 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
                 },
             ],
         }
+        _assert_no_market_sentinel(body)
+        return body
 
     def _submit_open(self, proposal, proposal_id):
         self._preflight_account()
@@ -514,8 +554,12 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
             "stop_loss": sl,
             "tp_exit_type": "limit",
             "sl_exit_type": "limit",
-            "tp_limit_price": plan.get("tp_limit_price", tp) or tp,
-            "sl_limit_price": plan.get("sl_limit_price", sl) or sl,
+            "tp_limit_price": float(
+                _limit_protection_price(plan.get("tp_limit_price"), tp, "tp_limit_price")
+            ),
+            "sl_limit_price": float(
+                _limit_protection_price(plan.get("sl_limit_price"), sl, "sl_limit_price")
+            ),
             "reason": str(plan.get("reason") or "")[:1000],
             "operation_advice": str(
                 plan.get("operation_advice") or plan.get("advice") or ""
@@ -586,6 +630,7 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
                 },
             ],
         }
+        _assert_no_market_sentinel(body)
         self.x.post("/api/v5/trade/amend-order", body)
 
         current.update(
@@ -964,8 +1009,12 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
                 raise legacy_engine.Halt("LONG保护必须满足 SL < 入场 < TP")
             if item["direction"] == "short" and not (tp < entry_ref < sl):
                 raise legacy_engine.Halt("SHORT保护必须满足 TP < 入场 < SL")
-            tp_limit = _d(payload.get("tp_limit_price", tp) or tp, "tp_limit_price")
-            sl_limit = _d(payload.get("sl_limit_price", sl) or sl, "sl_limit_price")
+            tp_limit = _limit_protection_price(
+                payload.get("tp_limit_price"), tp, "tp_limit_price"
+            )
+            sl_limit = _limit_protection_price(
+                payload.get("sl_limit_price"), sl, "sl_limit_price"
+            )
 
             parent_state = str(item.get("order_state") or item.get("status") or "")
             if parent_state in {"submitted", "live", "partially_filled", "amend_requested"}:
@@ -990,30 +1039,29 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
                         },
                     ],
                 }
+                _assert_no_market_sentinel(body)
                 self.x.post("/api/v5/trade/amend-order", body)
             else:
-                self.x.post(
-                    "/api/v5/trade/amend-algos",
-                    {
-                        "instId": INSTRUMENT,
-                        "algoClOrdId": item["tp_client_id"],
-                        "reqId": v172._client_id("tp"),
-                        "newTpTriggerPx": format(tp, "f"),
-                        "newTpOrdPx": format(tp_limit, "f"),
-                        "newTpTriggerPxType": "last",
-                    },
-                )
-                self.x.post(
-                    "/api/v5/trade/amend-algos",
-                    {
-                        "instId": INSTRUMENT,
-                        "algoClOrdId": item["sl_client_id"],
-                        "reqId": v172._client_id("sl"),
-                        "newSlTriggerPx": format(sl, "f"),
-                        "newSlOrdPx": format(sl_limit, "f"),
-                        "newSlTriggerPxType": "last",
-                    },
-                )
+                tp_body = {
+                    "instId": INSTRUMENT,
+                    "algoClOrdId": item["tp_client_id"],
+                    "reqId": v172._client_id("tp"),
+                    "newTpTriggerPx": format(tp, "f"),
+                    "newTpOrdPx": format(tp_limit, "f"),
+                    "newTpTriggerPxType": "last",
+                }
+                sl_body = {
+                    "instId": INSTRUMENT,
+                    "algoClOrdId": item["sl_client_id"],
+                    "reqId": v172._client_id("sl"),
+                    "newSlTriggerPx": format(sl, "f"),
+                    "newSlOrdPx": format(sl_limit, "f"),
+                    "newSlTriggerPxType": "last",
+                }
+                _assert_no_market_sentinel(tp_body)
+                _assert_no_market_sentinel(sl_body)
+                self.x.post("/api/v5/trade/amend-algos", tp_body)
+                self.x.post("/api/v5/trade/amend-algos", sl_body)
 
             item["take_profit"] = float(tp)
             item["stop_loss"] = float(sl)
@@ -1470,7 +1518,7 @@ def _toggle_auto_execute_v183(owner):
     if engine is None or not isinstance(engine, OKXDemoEngineV183):
         app.messagebox.showerror(
             "未连接",
-            "先连接并启用 V1.8.3 Build1831 OKX Demo AI执行通道",
+            "先连接并启用 V1.8.3 Build1832 OKX Demo AI执行通道",
         )
         return
     try:
@@ -1517,7 +1565,7 @@ def _update_trade_button_v183(self):
 
 
 def _ensure_v183_runtime(owner):
-    """Build1831 strict runtime repair: the only accepted engine is OKXDemoEngineV183."""
+    """Build1832 strict runtime repair: the only accepted engine is OKXDemoEngineV183."""
     current = getattr(owner, "engine", None)
     if current is None:
         raise legacy_engine.Halt("先连接OKX模拟盘")
@@ -1537,7 +1585,7 @@ def _ensure_v183_runtime(owner):
     owner.engine = replacement
     owner.emit(
         "log",
-        "Build1831：检测到旧Runtime并已强制替换为 OKXDemoEngineV183；Paper Runtime不会被保留。",
+        "Build1832：检测到旧Runtime并已强制替换为 OKXDemoEngineV183；Paper Runtime不会被保留。",
     )
     return replacement
 
@@ -1549,12 +1597,12 @@ def _app_arm_v183(self):
     if not self.engine.x.demo:
         app.messagebox.showerror(
             "禁止实盘",
-            "V1.8.3 Build1831 只允许 OKX模拟盘自动下单；真实账户写入保持硬禁用。",
+            "V1.8.3 Build1832 只允许 OKX模拟盘自动下单；真实账户写入保持硬禁用。",
         )
         return
     typed = app.simpledialog.askstring(
         "启用 OKX Demo AI执行",
-        "KAYTRADE V1.8.3 Build1831 CLEAN\n\n"
+        "KAYTRADE V1.8.3 Build1832 CLEAN\n\n"
         "本地Paper Runtime / 本地撮合 / Paper API 已删除。\n"
         "AI完整策略到达后立即向OKX模拟盘提交LIMIT挂单，不等待行情到达入场价。\n"
         "TP和SL必须同时存在并使用限价保护。\n"
@@ -1572,7 +1620,7 @@ def _app_init_v183(self, *args, **kwargs):
     self.root.title("KAYTRADE 1.8.3 · OKX DEMO CLEAN · Build 1831")
     try:
         self.signal.set(
-            "V1.8.3 Build1831 CLEAN｜OKX DEMO ONLY｜AI策略即刻提交LIMIT挂单｜无本地Paper Runtime"
+            "V1.8.3 Build1832 CLEAN｜OKX DEMO ONLY｜AI策略即刻提交LIMIT挂单｜无本地Paper Runtime"
         )
     except Exception:
         pass
@@ -1580,12 +1628,12 @@ def _app_init_v183(self, *args, **kwargs):
     if label is not None:
         try:
             label.configure(
-                text="BTC / USDT   ·   V1.8.3 Build1831 · OKX DEMO ONLY"
+                text="BTC / USDT   ·   V1.8.3 Build1832 · OKX DEMO ONLY"
             )
         except Exception:
             pass
     _install_auto_exec_card_v183(self)
-    # V1.8.0 inserted its AI plan before the original BTC quote. Build1831
+    # V1.8.0 inserted its AI plan before the original BTC quote. Build1832
     # restores the intended clean hierarchy: quote -> auto execution -> plan -> execution.
     try:
         self.quote.pack_forget()
