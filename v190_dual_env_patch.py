@@ -122,6 +122,10 @@ class OKXDualExecutionEngineV190(v183.OKXDemoEngineV183):
             f"[{_env_code(self)}] V1.9.0 Build1900 已连接：{_env_name(self)} · LIMIT ONLY · "
             + ("AI方案自动执行默认开启。" if self.x.demo else "真实资金自动执行默认关闭。"),
         )
+        owner = getattr(self.emit, "__self__", None)
+        registry = getattr(owner, "_v190_env_engines", None)
+        if isinstance(registry, dict):
+            registry[_env_code(self)] = self
 
     def _ensure_demo_state(self):
         if not self.store:
@@ -365,6 +369,13 @@ def _mode_changed_v190(owner, *_):
     new = owner.mode.get()
     if old == new:
         return
+    current = getattr(owner, "engine", None)
+    if isinstance(current, OKXDualExecutionEngineV190) and current.enabled:
+        try:
+            current.stop()
+            owner.emit("log", f"[{_env_code(current)}] 环境切换：已自动停止该环境的新单写权限；已有订单转只读核对。")
+        except Exception as exc:
+            owner.emit("alarm", "环境切换停止写权限失败：" + str(exc))
     _cache_credentials_for_mode(owner, old)
     _restore_credentials_for_mode(owner, new)
     owner._v190_last_mode = new
@@ -525,8 +536,35 @@ def _refresh_v190_dashboard(owner):
         pass
 
 
+def _readonly_cross_env_loop(owner):
+    """Keep the disconnected environment observable without granting writes."""
+    while not owner.finished.wait(10):
+        current = getattr(owner, "engine", None)
+        for code, engine in list(getattr(owner, "_v190_env_engines", {}).items()):
+            if engine is current or not isinstance(engine, OKXDualExecutionEngineV190) or not engine.store:
+                continue
+            try:
+                with engine._ai_lock:
+                    # cancel_expired=False is deliberate: non-current environments
+                    # are read-only and must never cancel/amend/place orders.
+                    engine._sync_all(cancel_expired=False)
+            except Exception as exc:
+                owner.emit("log", f"[{code}] 只读核对暂时失败：{type(exc).__name__}: {exc}")
+
+
 def _app_init_v190(self, *args, **kwargs):
     _PREVIOUS_APP_INIT(self, *args, **kwargs)
+    self._v190_env_engines = {}
+    current = getattr(self, "engine", None)
+    if isinstance(current, OKXDualExecutionEngineV190):
+        self._v190_env_engines[_env_code(current)] = current
+    self._v190_readonly_thread = threading.Thread(
+        target=_readonly_cross_env_loop,
+        args=(self,),
+        name="kaytrade-v190-readonly-cross-env",
+        daemon=True,
+    )
+    self._v190_readonly_thread.start()
     self._v190_credentials = {
         "OKX模拟盘": (self.key.get(), self.secret.get(), self.phrase.get()),
         "真实账户": ("", "", ""),
