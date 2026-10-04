@@ -1,5 +1,7 @@
 import tempfile
 import unittest
+import json
+import threading
 from pathlib import Path
 
 import v190_dual_env_patch as v190
@@ -156,6 +158,37 @@ class V190DualEnvironmentTests(unittest.TestCase):
         self.assertNotEqual(demo.store.path, live.store.path)
         self.assertIn("demo", str(demo.store.path))
         self.assertIn("live", str(live.store.path))
+
+    def test_store_save_is_safe_under_concurrent_writers(self):
+        from engine import Store
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "state.json"
+            store = Store(path)
+            errors = []
+
+            def writer(worker_id):
+                try:
+                    for i in range(80):
+                        with store._save_lock:
+                            store.data["last_bar"] = worker_id * 1000 + i
+                            store.save()
+                except Exception as exc:
+                    errors.append(exc)
+
+            threads = [
+                threading.Thread(target=writer, args=(idx,))
+                for idx in range(8)
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            self.assertEqual(errors, [])
+            parsed = json.loads(path.read_text())
+            self.assertIn("last_bar", parsed)
+            leftovers = list(path.parent.glob("*.tmp"))
+            self.assertEqual(leftovers, [])
 
     def test_bridge_tokens_and_descriptor_names_are_isolated(self):
         class Owner:
