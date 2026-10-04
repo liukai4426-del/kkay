@@ -1,4 +1,4 @@
-# KAYTRADE V1.9.0 Build1900 · Dual Environment Safe
+# KAYTRADE V1.9.1 Build1910 · Dual Environment Execution
 
 KAYTRADE has two isolated OKX environments.
 
@@ -8,28 +8,30 @@ KAYTRADE has two isolated OKX environments.
 - mode=OKX_DEMO_EXECUTION
 - AI auto execution may be enabled/disabled
 - complete AI plans may be submitted automatically to OKX simulated trading
-- entry/TP/SL/reductions are LIMIT ONLY
+- parent entry/reduction orders are LIMIT
+- attached TP/SL are trigger-market protections (`tpOrdPx=-1`, `slOrdPx=-1`)
 
 ## LIVE
 
 - environment=live
-- mode=OKX_LIVE_REVIEW
-- LIVE AI review channel may be enabled/disabled
-- real account data is read-only
-- AI plans may be validated and staged as READY_FOR_MANUAL_EXECUTION
-- no automated live trade-write tools are available
-- LIVE orders must be manually executed/confirmed in OKX
+- mode=OKX_LIVE_EXECUTION
+- LIVE writes are hard-locked OFF after connect/restart
+- the user must explicitly enable the LIVE AI auto-execution channel in KAYTRADE
+- when enabled, complete AI plans may be submitted automatically to the real OKX account
+- parent entry/reduction orders are LIMIT
+- attached TP/SL are trigger-market protections
+- LIVE API must include trade permission and must not include withdrawal permission
 
 ## Required workflow
 
 Before every AI plan:
 1. explicitly choose environment=demo or environment=live;
 2. call get_kaytrade_state for that same environment;
-3. verify bridge mode matches the requested environment;
-4. inspect current Tier 1 / Tier 2 and account state;
+3. verify the bridge mode matches the requested environment;
+4. inspect current Tier 1 / Tier 2, positions, pending orders and channel state;
 5. use LIMIT entry only;
 6. provide size, leverage, TP and SL;
-7. never use market orders or OKX -1 TP/SL sentinels.
+7. TP/SL use OKX trigger-market execution after their trigger prices.
 
 ## Isolation contract
 
@@ -47,7 +49,8 @@ A bridge/plan environment mismatch must be rejected.
 ## Safety boundaries
 
 - Paper runtime is absent.
-- DEMO automated writes are allowed only to OKX simulated trading.
-- LIVE automated writes remain disabled.
-- LIVE API must not have withdrawal permission.
+- No LIVE write is allowed until the user explicitly arms the LIVE channel.
+- Stopping/faulting LIVE closes the write gate again.
+- Main entry/reduction orders remain LIMIT.
+- TP/SL use exchange-attached trigger-market protection.
 - Never ask for, read, print, log or expose OKX API credentials.
