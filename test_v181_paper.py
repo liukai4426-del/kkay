@@ -32,21 +32,11 @@ class V181PaperTests(unittest.TestCase):
         x.posts.clear()
         return e, x
 
-    def market_open(self, e, tier=1, size=2, direction="long", **extra):
-        payload = {
-            "proposal_id": f"market-{tier}-{time.time_ns()}",
-            "action": "open",
-            "tier": tier,
-            "direction": direction,
-            "order_type": "market",
-            "size": size,
-            "leverage": 5,
-            "take_profit": 102000 if direction == "long" else 98000,
-            "stop_loss": 98000 if direction == "long" else 102000,
-            "reason": "test",
-        }
-        payload.update(extra)
-        return e.submit_ai_trade(payload)
+    def fill_limit(self, e, x, tier=1, size=2, direction="long", price=100000, **extra):
+        result = self.limit_open(e, tier, price, direction=direction, size=size, **extra)
+        x.last = price
+        e.cycle()
+        return result
 
     def limit_open(self, e, tier, price, direction="long", **extra):
         payload = {
@@ -67,18 +57,29 @@ class V181PaperTests(unittest.TestCase):
 
     def test_identity_and_paper_only(self):
         self.assertEqual(v181.VERSION, "1.8.1")
-        self.assertEqual(v181.BUILD, "1812")
+        self.assertEqual(v181.BUILD, "1813")
         self.assertTrue(v181.PAPER_ONLY)
         self.assertIs(v181.app.Engine, v181.PaperEngineV181)
 
-    def test_market_open_never_writes_exchange(self):
+    def test_non_limit_open_is_rejected(self):
         e, x = self.make_engine()
-        result = self.market_open(e, tier=1, size=2)
-        self.assertEqual(result["status"], "FILLED")
+        with self.assertRaisesRegex(Exception, "只允许 limit"):
+            e.submit_ai_trade(
+                {
+                    "proposal_id": f"non-limit-{time.time_ns()}",
+                    "action": "open",
+                    "tier": 1,
+                    "direction": "long",
+                    "order_type": "market",
+                    "limit_price": 100000,
+                    "size": 1,
+                    "leverage": 5,
+                    "take_profit": 102000,
+                    "stop_loss": 98000,
+                }
+            )
+        self.assertIsNone(e.store.data["paper_execution"]["tiers"]["1"])
         self.assertEqual(x.posts, [])
-        tier = e.store.data["paper_execution"]["tiers"]["1"]
-        self.assertEqual(tier["filled_size"], 2.0)
-        self.assertEqual(tier["entry_price"], 100000.0)
 
     def test_two_same_direction_tiers_can_be_live_together(self):
         e, x = self.make_engine()
@@ -119,7 +120,7 @@ class V181PaperTests(unittest.TestCase):
 
     def test_amend_protection_to_limit_and_fill_after_trigger(self):
         e, x = self.make_engine()
-        self.market_open(e, tier=1, size=1)
+        self.fill_limit(e, x, tier=1, size=1, price=100000)
         e.amend_paper_protection(
             {
                 "tier": 1,
@@ -142,21 +143,26 @@ class V181PaperTests(unittest.TestCase):
         self.assertEqual(tier["last_exit_reason"], "TP")
         self.assertEqual(x.posts, [])
 
-    def test_market_partial_close_by_size(self):
+    def test_non_limit_partial_close_is_rejected(self):
         e, x = self.make_engine()
-        self.market_open(e, tier=1, size=2)
-        result = e.paper_close_position(
-            {"tier": 1, "size": 1, "order_type": "market", "reason": "减一半"}
-        )
+        self.fill_limit(e, x, tier=1, size=2, price=100000)
+        with self.assertRaisesRegex(Exception, "只允许 limit"):
+            e.paper_close_position(
+                {
+                    "tier": 1,
+                    "size": 1,
+                    "order_type": "market",
+                    "limit_price": 101000,
+                    "reason": "不得市价减仓",
+                }
+            )
         tier = e.store.data["paper_execution"]["tiers"]["1"]
-        self.assertEqual(result["status"], "filled")
-        self.assertEqual(tier["closed_size"], 1.0)
-        self.assertEqual(e._position_remaining(tier), 1.0)
+        self.assertEqual(e._position_remaining(tier), 2.0)
         self.assertEqual(x.posts, [])
 
     def test_limit_partial_close_waits_then_fills(self):
         e, x = self.make_engine()
-        self.market_open(e, tier=1, size=2)
+        self.fill_limit(e, x, tier=1, size=2, price=100000)
         result = e.paper_close_position(
             {
                 "tier": 1,
@@ -215,30 +221,33 @@ class V181PaperTests(unittest.TestCase):
         self.assertEqual(tier["limit_price"], 99000.0)
         self.assertEqual(tier["take_profit"], 102000.0)
         self.assertEqual(tier["stop_loss"], 98000.0)
+        self.assertEqual(tier["tp_exit_type"], "limit")
+        self.assertEqual(tier["sl_exit_type"], "limit")
+        self.assertEqual(tier["tp_limit_price"], 102000.0)
+        self.assertEqual(tier["sl_limit_price"], 98000.0)
         self.assertEqual(x.posts, [])
 
-    def test_auto_execute_market_plan_with_tp_sl(self):
+    def test_auto_execute_non_limit_plan_is_rejected(self):
         e, x = self.make_engine()
         e.set_auto_execute_plans(True)
         result = e.publish_ai_plan(
             {
-                "plan_id": "auto-market-t2",
+                "plan_id": "auto-non-limit-t2",
                 "tier": 2,
                 "action": "open",
                 "direction": "short",
                 "order_type": "market",
+                "suggested_entry": 101000,
                 "size": 1,
                 "leverage": 5,
                 "take_profit": 98000,
                 "stop_loss": 102000,
-                "reason": "auto market test",
+                "reason": "must reject non-limit",
             }
         )
-        self.assertEqual(result["status"], "AUTO_EXECUTED")
-        tier = e.store.data["paper_execution"]["tiers"]["2"]
-        self.assertEqual(tier["status"], "filled")
-        self.assertEqual(tier["take_profit"], 98000.0)
-        self.assertEqual(tier["stop_loss"], 102000.0)
+        self.assertEqual(result["status"], "AUTO_REJECTED")
+        self.assertIn("只允许 limit", result["error"])
+        self.assertIsNone(e.store.data["paper_execution"]["tiers"]["2"])
         self.assertEqual(x.posts, [])
 
     def test_auto_execute_rejects_missing_take_profit_or_stop_loss(self):
@@ -344,7 +353,8 @@ class V181PaperTests(unittest.TestCase):
                 "tier": 1,
                 "action": "open",
                 "direction": "long",
-                "order_type": "market",
+                "order_type": "limit",
+                "limit_price": 100000,
                 "size": 1,
                 "leverage": 5,
                 "take_profit": 102000,
@@ -352,6 +362,7 @@ class V181PaperTests(unittest.TestCase):
                 "reason": "fill first",
             }
         )
+        e.cycle()
         result = e.publish_ai_plan(
             {
                 "plan_id": "new-after-fill",
@@ -397,13 +408,31 @@ class V181PaperTests(unittest.TestCase):
         self.assertEqual(x.posts, [])
 
 
+    def test_non_limit_protection_type_is_rejected(self):
+        e, x = self.make_engine()
+        self.fill_limit(e, x, tier=1, size=1, price=100000)
+        with self.assertRaisesRegex(Exception, "只允许 limit"):
+            e.amend_paper_protection(
+                {
+                    "tier": 1,
+                    "take_profit": 101000,
+                    "stop_loss": 99000,
+                    "tp_exit_type": "market",
+                    "sl_exit_type": "limit",
+                    "sl_limit_price": 99000,
+                }
+            )
+
+
     def test_state_advertises_all_v181_capabilities(self):
         e, _x = self.make_engine()
         state = e.ai_state()
         self.assertTrue(state["paper_only"])
         self.assertFalse(state["live_ai_writes"])
-        self.assertEqual(state["supported_entry_order_types"], ["market", "limit"])
-        self.assertEqual(state["supported_close_order_types"], ["market", "limit"])
+        self.assertEqual(state["supported_entry_order_types"], ["limit"])
+        self.assertEqual(state["supported_close_order_types"], ["limit"])
+        self.assertEqual(state["supported_protection_exit_order_types"], ["limit"])
+        self.assertTrue(state["limit_only"])
         self.assertTrue(state["supports_partial_close"])
         self.assertTrue(state["supports_amend_entry"])
         self.assertTrue(state["supports_cancel_entry"])
