@@ -1,6 +1,6 @@
-# KAYTRADE V1.7.2 AI ONLY
+# KAYTRADE V1.8.0 AI ONLY
 
-This repository's V1.7.2 runtime has no local technical-indicator entry strategy.
+This repository's V1.8.0 runtime has no local technical-indicator entry strategy.
 
 ## Mandatory workflow
 
@@ -24,7 +24,7 @@ Use \`submit_trade_proposal\` with:
 - concise \`reason\`
 - unique \`proposal_id\`
 
-KAYTRADE V1.7.2 uses market entry only.
+KAYTRADE V1.8.0 uses market entry only.
 
 ## Close proposal
 
@@ -38,6 +38,6 @@ position.
 - Never bypass KAYTRADE by calling OKX write endpoints directly.
 - Never retry the same logical trade with a different proposal ID when the
   previous write result is ambiguous. Inspect KAYTRADE/OKX state first.
-- Live-account autonomous AI writes are disabled in V1.7.2.
+- Live-account autonomous AI writes are disabled in V1.8.0.
 - The legacy BOLL/EMA/RSI/score/Gate code is compatibility-only and must not be
-  used as a V1.7.2 order source.
+  used as a V1.8.0 order source.
