@@ -43,14 +43,14 @@ from core import INSTRUMENT
 from exchange import APIError
 
 VERSION = "1.7.2"
-BUILD = "1722"
+BUILD = "1723"
 AI_ONLY = True
 
 AI_BRIDGE_HOST = "127.0.0.1"
 AI_BRIDGE_PORT = int(os.getenv("KAYTRADE_AI_BRIDGE_PORT", "17872"))
-AI_MAX_LEVERAGE = 5
-AI_MAX_NOTIONAL_USDT = Decimal(os.getenv("KAYTRADE_AI_MAX_NOTIONAL_USDT", "100"))
-AI_MAX_ESTIMATED_STOP_LOSS_USDT = Decimal(os.getenv("KAYTRADE_AI_MAX_STOP_LOSS_USDT", "5"))
+AI_MAX_LEVERAGE = 20
+AI_MAX_NOTIONAL_USDT = Decimal(os.getenv("KAYTRADE_AI_MAX_NOTIONAL_USDT", "3500"))
+AI_MAX_ESTIMATED_STOP_LOSS_USDT = Decimal(os.getenv("KAYTRADE_AI_MAX_STOP_LOSS_USDT", "100"))
 AI_MIN_ORDER_INTERVAL_SEC = float(os.getenv("KAYTRADE_AI_MIN_ORDER_INTERVAL_SEC", "5"))
 AI_BRIDGE_FILENAME = "ai_bridge.json"
 
@@ -82,8 +82,9 @@ def _clean_active(active):
     if not isinstance(active, dict):
         return None
     allowed = (
-        "proposal_id", "side", "posSide", "px", "sz", "sl", "tp",
-        "submitted", "filled", "order_id", "reason", "close_id",
+        "proposal_id", "side", "posSide", "px", "entry_px", "sz", "sl", "tp",
+        "submitted", "filled", "filled_sz", "order_id", "reason", "close_id",
+        "protected", "tier", "operation_advice", "order_state", "leverage",
     )
     return {k: active.get(k) for k in allowed if k in active}
 
@@ -138,7 +139,7 @@ class AIOnlyEngine(legacy_engine.Engine):
             self.store.save()
             self.emit(
                 "log",
-                "V1.7.2 Build1722：已清理Build1720启用AI通道时产生的 stop_atr 兼容故障锁；未改变任何仓位/订单。",
+                "V1.7.2 Build1723：已清理Build1720启用AI通道时产生的 stop_atr 兼容故障锁；未改变任何仓位/订单。",
             )
 
     def arm(self, _settings=None):
@@ -219,6 +220,52 @@ class AIOnlyEngine(legacy_engine.Engine):
 
     def _existing_result(self, proposal_id):
         return (self.store.data.get("ai_results") or {}).get(proposal_id)
+
+    def _record_ai_plan(self, proposal, proposal_id=None, status="RECOMMENDED", detail=""):
+        if not self.store:
+            return None
+        tier = int(proposal.get("tier") or 1)
+        if tier not in (1, 2):
+            raise legacy_engine.Halt("tier 仅支持 1 或 2")
+        plan_id = str(proposal.get("plan_id") or proposal_id or uuid.uuid4().hex).strip()
+        item = {
+            "plan_id": plan_id,
+            "proposal_id": proposal_id or str(proposal.get("proposal_id") or ""),
+            "time": time.time(),
+            "tier": tier,
+            "action": str(proposal.get("action") or "open").lower(),
+            "direction": str(proposal.get("direction") or "").lower(),
+            "suggested_entry": proposal.get("suggested_entry", proposal.get("entry")),
+            "take_profit": proposal.get("take_profit"),
+            "stop_loss": proposal.get("stop_loss"),
+            "size": proposal.get("size"),
+            "leverage": proposal.get("leverage"),
+            "reason": str(proposal.get("reason") or "")[:1000],
+            "operation_advice": str(proposal.get("operation_advice") or proposal.get("advice") or "")[:1000],
+            "status": str(status),
+            "detail": str(detail or "")[:1000],
+        }
+        history = self.store.data.setdefault("ai_plan_history", [])
+        history.append(item)
+        del history[:-30]
+        tiers = self.store.data.setdefault("ai_tiers", {})
+        tiers[str(tier)] = item
+        self.store.save()
+        return item
+
+    def publish_ai_plan(self, plan):
+        with self._ai_lock:
+            if not isinstance(plan, dict):
+                raise legacy_engine.Halt("AI推荐计划必须为JSON对象")
+            item = self._record_ai_plan(plan, status="RECOMMENDED")
+            self.emit("log", f"AI推荐计划已更新：第{item['tier']}档 · {item['direction'] or 'WAIT'} · {item['operation_advice'] or '等待执行建议'}")
+            return {
+                "version": VERSION,
+                "build": BUILD,
+                "mode": "AI_ONLY",
+                "status": "RECOMMENDED",
+                "plan": item,
+            }
 
     def _validate_open(self, proposal):
         if self.x.positions() or self.x.orders() or self.x.algos():
@@ -327,11 +374,15 @@ class AIOnlyEngine(legacy_engine.Engine):
         tp_id = _client_id("tp")
         sl_id = _client_id("sl")
         reason = str(proposal.get("reason") or "").strip()[:1000]
+        tier = int(proposal.get("tier") or 1)
+        operation_advice = str(proposal.get("operation_advice") or proposal.get("advice") or "").strip()[:1000]
 
         active = {
             "ai_only": True,
             "proposal_id": proposal_id,
             "reason": reason,
+            "operation_advice": operation_advice,
+            "tier": tier,
             "side": "做多" if direction == "long" else "做空",
             "posSide": pos_side,
             "exchange_side": exchange_side,
@@ -507,7 +558,13 @@ class AIOnlyEngine(legacy_engine.Engine):
                 raise legacy_engine.Halt("action 必须为 open 或 close")
 
             self._ai_last_submit = now
-            result = self._submit_open(proposal, proposal_id) if action == "open" else self._submit_close(proposal, proposal_id)
+            self._record_ai_plan(proposal, proposal_id=proposal_id, status="SUBMITTED")
+            try:
+                result = self._submit_open(proposal, proposal_id) if action == "open" else self._submit_close(proposal, proposal_id)
+            except Exception as exc:
+                self._record_ai_plan(proposal, proposal_id=proposal_id, status="REJECTED", detail=str(exc))
+                raise
+            self._record_ai_plan(proposal, proposal_id=proposal_id, status=result.get("status", "EXECUTED"))
             self._remember_result(proposal_id, result)
             return result
 
@@ -526,6 +583,10 @@ class AIOnlyEngine(legacy_engine.Engine):
 
             status = str(order.get("state") or "")
             filled = float(order.get("accFillSz") or 0)
+            avg_px = str(order.get("avgPx") or order.get("fillPx") or "").strip()
+            if active.get("order_state") != status:
+                active["order_state"] = status
+                self.store.save()
             positions = self.x.positions()
 
             if any(
@@ -562,6 +623,11 @@ class AIOnlyEngine(legacy_engine.Engine):
                 active["filled"] = True
                 active["filled_sz"] = filled
                 active["filled_at"] = time.time()
+                if avg_px and avg_px not in ("0", "0.0"):
+                    active["entry_px"] = avg_px
+                self.store.save()
+            elif avg_px and avg_px not in ("0", "0.0") and active.get("entry_px") != avg_px:
+                active["entry_px"] = avg_px
                 self.store.save()
 
             if not positions:
@@ -690,7 +756,7 @@ class _BridgeHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._require_auth():
             return
-        if self.path != "/v1/trade":
+        if self.path not in ("/v1/trade", "/v1/plan"):
             self._json(404, {"error": "not_found"})
             return
         try:
@@ -701,7 +767,7 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             engine = self.bridge.owner.engine
             if engine is None:
                 raise legacy_engine.Halt("KAYTRADE尚未连接OKX")
-            result = engine.submit_ai_trade(payload)
+            result = engine.publish_ai_plan(payload) if self.path == "/v1/plan" else engine.submit_ai_trade(payload)
             self._json(200, result)
         except legacy_engine.Halt as exc:
             self._json(409, {"error": str(exc)})
@@ -767,7 +833,7 @@ _PREVIOUS_APP_QUIT = app.App.quit
 def _rewrite_ui_text(data):
     if not isinstance(data, str):
         return data
-    text = data.replace("V1.7.1", "V1.7.2").replace("Build1710", "Build1722")
+    text = data.replace("V1.7.1", "V1.7.2").replace("Build1710", "Build1723")
     if "开始加载1D / 4H / 1H / 15m / 5m指标历史K线" in text:
         return "V1.7.2 AI Only：策略K线/指标计算已停用；仅同步OKX实时行情与账户状态"
     if text.startswith("全自动运行 / "):
@@ -867,7 +933,7 @@ def _install_ai_only_dashboard(owner):
     ).pack(anchor="w")
     visual.label(
         card.body,
-        text="V1.7.2 Build1722 · 本地技术指标策略已断开，新仓只接受 Codex / AI 结构化交易请求",
+        text="V1.7.2 Build1723 · 本地技术指标策略已断开，新仓只接受 Codex / AI 结构化交易请求",
         size=10,
         color=visual.MUTED,
         bg=visual.PANEL,
@@ -890,6 +956,161 @@ def _install_ai_only_dashboard(owner):
             anchor="w", pady=2
         )
     owner._v172_ai_card = card
+
+    # AI recommendation board sits above the live price card.
+    plan_card = visual.Card(dash, height=250)
+    quote = getattr(owner, "quote", None)
+    plan_kwargs = dict(fill="x", pady=(0, 12))
+    if quote is not None:
+        plan_kwargs["before"] = quote
+    plan_card.pack(**plan_kwargs)
+    visual.label(plan_card.body, text="AI交易方案运行看板", size=18, bold=True, color=visual.TEXT, bg=visual.PANEL).pack(anchor="w")
+    owner._v172_ai_advice_var = app.tk.StringVar(value="当前运行操作建议：等待AI建议")
+    owner._v172_ai_plan_history_var = app.tk.StringVar(value="等待 Codex / AI 发布推荐计划…")
+    visual.label(plan_card.body, variable=owner._v172_ai_advice_var, size=11, color=visual.GREEN, bg=visual.PANEL).pack(anchor="w", pady=(6, 8))
+    history_label = app.tk.Label(
+        plan_card.body,
+        textvariable=owner._v172_ai_plan_history_var,
+        bg=visual.PANEL,
+        fg=visual.TEXT,
+        font=("Helvetica", 10),
+        anchor="nw",
+        justify="left",
+        wraplength=1420,
+    )
+    history_label.pack(anchor="w", fill="x")
+    owner._v172_ai_plan_card = plan_card
+
+    # Two-tier position/order board.
+    position_card = visual.Card(dash, height=310)
+    position_kwargs = dict(fill="x", pady=(0, 12))
+    if actions is not None:
+        position_kwargs["before"] = actions
+    position_card.pack(**position_kwargs)
+    visual.label(position_card.body, text="订单 / 持仓执行", size=18, bold=True, color=visual.TEXT, bg=visual.PANEL).pack(anchor="w")
+    owner._v172_order_status_var = app.tk.StringVar(value="当前订单：无持仓 / 等待AI交易请求")
+    visual.label(position_card.body, variable=owner._v172_order_status_var, size=11, color=visual.MUTED, bg=visual.PANEL).pack(anchor="w", pady=(5, 10))
+    tiers_frame = app.tk.Frame(position_card.body, bg=visual.PANEL)
+    tiers_frame.pack(fill="both", expand=True)
+    owner._v172_tier1_var = app.tk.StringVar(value="状态：等待第一档AI计划")
+    owner._v172_tier2_var = app.tk.StringVar(value="状态：等待第二档AI计划")
+    for idx, (title, var) in enumerate((("第一档", owner._v172_tier1_var), ("第二档", owner._v172_tier2_var))):
+        box = app.tk.Frame(tiers_frame, bg=visual.PANEL_ALT, bd=0, highlightthickness=0)
+        box.grid(row=0, column=idx, sticky="nsew", padx=(0, 6) if idx == 0 else (6, 0))
+        visual.label(box, text=title, size=13, bold=True, color=visual.GREEN if idx == 0 else visual.TEXT, bg=visual.PANEL_ALT).pack(anchor="w", padx=14, pady=(12, 6))
+        app.tk.Label(
+            box,
+            textvariable=var,
+            bg=visual.PANEL_ALT,
+            fg=visual.TEXT,
+            font=("Helvetica", 11),
+            anchor="nw",
+            justify="left",
+            wraplength=650,
+        ).pack(anchor="w", fill="both", expand=True, padx=14, pady=(0, 12))
+        tiers_frame.columnconfigure(idx, weight=1, uniform="tiers")
+    owner._v172_position_card = position_card
+    owner.root.after(300, lambda: _refresh_ai_dashboard(owner))
+
+
+def _format_ai_price(value):
+    try:
+        return f"{float(value):,.2f}"
+    except Exception:
+        return "—"
+
+
+def _plan_line(item):
+    if not isinstance(item, dict):
+        return "—"
+    stamp = time.strftime("%H:%M:%S", time.localtime(float(item.get("time") or time.time())))
+    tier = item.get("tier") or 1
+    direction = str(item.get("direction") or "WAIT").upper()
+    status = str(item.get("status") or "RECOMMENDED")
+    entry = _format_ai_price(item.get("suggested_entry"))
+    tp = _format_ai_price(item.get("take_profit"))
+    sl = _format_ai_price(item.get("stop_loss"))
+    advice = str(item.get("operation_advice") or "等待AI操作建议")
+    reason = str(item.get("reason") or "")
+    pid = str(item.get("proposal_id") or item.get("plan_id") or "")[:18]
+    return f"{stamp}  第{tier}档  {direction}  入场 {entry}  TP {tp}  SL {sl}  [{status}]  {advice}  ·  {reason}  ·  {pid}"
+
+
+def _tier_summary(plan, active=None):
+    plan = plan if isinstance(plan, dict) else {}
+    active = active if isinstance(active, dict) else {}
+    actual = active if active and int(active.get("tier") or 1) == int(plan.get("tier") or active.get("tier") or 1) else {}
+    status = "未提交"
+    if actual:
+        if actual.get("close_id"):
+            status = "平仓请求已提交"
+        elif actual.get("filled"):
+            status = "持仓中 · TP/SL已核对" if actual.get("protected") else "持仓中 · 核对保护单"
+        elif actual.get("order_id"):
+            status = "订单已提交 · 等待成交"
+        else:
+            status = "准备提交"
+    elif plan:
+        status = str(plan.get("status") or "推荐计划")
+    entry = actual.get("entry_px") or actual.get("px") or plan.get("suggested_entry")
+    tp = actual.get("tp") or plan.get("take_profit")
+    sl = actual.get("sl") or plan.get("stop_loss")
+    size = actual.get("sz") or plan.get("size") or "—"
+    direction = actual.get("posSide") or plan.get("direction") or "—"
+    advice = actual.get("operation_advice") or plan.get("operation_advice") or "等待AI建议"
+    return (
+        f"状态：{status}\n"
+        f"方向：{str(direction).upper()}   数量：{size}\n"
+        f"入场：{_format_ai_price(entry)}\n"
+        f"止盈：{_format_ai_price(tp)}   止损：{_format_ai_price(sl)}\n"
+        f"操作建议：{advice}"
+    )
+
+
+def _refresh_ai_dashboard(owner):
+    try:
+        engine = getattr(owner, "engine", None)
+        store = getattr(engine, "store", None) if engine is not None else None
+        data = getattr(store, "data", {}) if store is not None else {}
+        history = data.get("ai_plan_history") or []
+        tiers = data.get("ai_tiers") or {}
+        active = data.get("active") if isinstance(data.get("active"), dict) else {}
+
+        plan_var = getattr(owner, "_v172_ai_plan_history_var", None)
+        advice_var = getattr(owner, "_v172_ai_advice_var", None)
+        if plan_var is not None:
+            lines = [_plan_line(item) for item in history[-6:]]
+            plan_var.set("\n".join(lines) if lines else "等待 Codex / AI 发布推荐计划…")
+        if advice_var is not None:
+            latest = history[-1] if history else {}
+            advice = latest.get("operation_advice") if isinstance(latest, dict) else ""
+            advice_var.set("当前运行操作建议：" + (str(advice) if advice else "等待AI建议"))
+
+        tier1 = getattr(owner, "_v172_tier1_var", None)
+        tier2 = getattr(owner, "_v172_tier2_var", None)
+        if tier1 is not None:
+            tier1.set(_tier_summary(tiers.get("1"), active))
+        if tier2 is not None:
+            tier2.set(_tier_summary(tiers.get("2"), active))
+
+        order_var = getattr(owner, "_v172_order_status_var", None)
+        if order_var is not None:
+            if active:
+                entry = active.get("entry_px") or active.get("px")
+                state = active.get("order_state") or ("filled" if active.get("filled") else "submitted")
+                order_var.set(
+                    f"当前订单：{state} · {active.get('side','—')} · 入场 {_format_ai_price(entry)} · "
+                    f"TP {_format_ai_price(active.get('tp'))} · SL {_format_ai_price(active.get('sl'))}"
+                )
+            else:
+                order_var.set("当前订单：无持仓 / 等待AI交易请求")
+    except Exception:
+        pass
+    try:
+        if owner.root.winfo_exists():
+            owner.root.after(500, lambda: _refresh_ai_dashboard(owner))
+    except Exception:
+        pass
 
 
 def _set_ai_channel_ui(owner, enabled):
@@ -920,7 +1141,7 @@ def _ensure_ai_only_engine(owner):
     replacement = AIOnlyEngine(x, owner.folder, owner.emit)
     replacement.connect()
     owner.engine = replacement
-    owner.emit("log", "Build1722：已将当前连接切换为AIOnlyEngine Runtime")
+    owner.emit("log", "Build1723：已将当前连接切换为AIOnlyEngine Runtime")
     return replacement
 
 
@@ -937,7 +1158,7 @@ def _run_ai_enable(owner):
         owner.emit("status", "AI Only运行 / OKX模拟盘")
         owner.emit(
             "log",
-            "V1.7.2 Build1722 AI交易通道已启用：启动流程未调用旧Settings/stop_atr/技术指标策略。",
+            "V1.7.2 Build1723 AI交易通道已启用：启动流程未调用旧Settings/stop_atr/技术指标策略。",
         )
     except Exception as exc:
         e = getattr(owner, "engine", None)
@@ -966,7 +1187,7 @@ def _start_ai_enable(owner):
 
 def _app_init_v172(self, *args, **kwargs):
     _PREVIOUS_APP_INIT(self, *args, **kwargs)
-    self.root.title("KAYTRADE 1.7.2 · AI ONLY · Build 1722")
+    self.root.title("KAYTRADE 1.7.2 · AI ONLY · Build 1723")
     try:
         self.signal.set("V1.7.2 AI ONLY｜无本地交易策略｜等待 Codex / AI 提交结构化交易请求")
     except Exception:
@@ -1044,7 +1265,7 @@ def apply():
         module.VERSION = VERSION
         module.BUILD = BUILD
     ui166.BUILD = BUILD
-    ui166.WINDOW_TITLE = "KAYTRADE 1.7.2 · AI ONLY · Build 1722"
+    ui166.WINDOW_TITLE = "KAYTRADE 1.7.2 · AI ONLY · Build 1723"
 
     model.STRATEGY_ENABLED = False
     model.AI_ONLY = True
