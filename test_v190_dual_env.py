@@ -62,6 +62,46 @@ class V190DualEnvironmentTests(unittest.TestCase):
             leftovers = [item for item in Path(folder).iterdir() if item.name.endswith(".tmp")]
             self.assertEqual(leftovers, [])
 
+    def test_store_save_handles_concurrent_nested_dict_mutation(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "mutating-state.json"
+            store = Store(path)
+            store.data["runtime"] = {}
+            workers = 8
+            rounds = 120
+            barrier = threading.Barrier(workers)
+            errors = []
+
+            def writer(worker_id):
+                try:
+                    barrier.wait()
+                    for i in range(rounds):
+                        key = f"{worker_id}-{i}"
+                        store.data["runtime"][key] = i
+                        if i >= 3:
+                            store.data["runtime"].pop(f"{worker_id}-{i-3}", None)
+                        store.save()
+                except Exception as exc:
+                    errors.append(exc)
+
+            threads = [threading.Thread(target=writer, args=(worker_id,)) for worker_id in range(workers)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            self.assertEqual(errors, [])
+            self.assertIsInstance(json.loads(path.read_text()), dict)
+            self.assertFalse(any("dictionary changed size during iteration" in str(exc) for exc in errors))
+
+    def test_ai_state_returns_detached_execution_snapshot(self):
+        with tempfile.TemporaryDirectory() as folder:
+            live, _ = self.make_engine(folder, False)
+            state = live.ai_state()
+            state["execution_state"]["events"].append({"event": "local-copy-only"})
+            current = live._demo_state()
+            self.assertFalse(any(row.get("event") == "local-copy-only" for row in current["events"]))
+
     def test_demo_and_live_use_different_store_files(self):
         with tempfile.TemporaryDirectory() as folder:
             demo, _ = self.make_engine(folder, True)
@@ -157,8 +197,8 @@ class V190DualEnvironmentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             live, _ = self.make_engine(folder, False)
             state = live.ai_state()
-            self.assertEqual(state["version"], "1.9.0")
-            self.assertEqual(state["build"], "1900")
+            self.assertEqual(state["version"], "2.0.0")
+            self.assertEqual(state["build"], "2000")
             self.assertEqual(state["mode"], "OKX_LIVE_EXECUTION")
             self.assertEqual(state["active_environment"], "LIVE")
             self.assertFalse(state["auto_execute_plans"])
