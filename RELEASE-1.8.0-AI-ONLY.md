@@ -1,4 +1,4 @@
-# KAYTRADE V1.8.0 AI ONLY · Build1800
+# KAYTRADE V1.8.0 AI ONLY · Build1801
 
 V1.8.0 keeps the V1.7.2 AI-only architecture and upgrades the execution/UI layer.
 
@@ -22,24 +22,19 @@ Closing the currently managed position remains a market close in V1.8.0.
 
 ## AI plan board
 
-The Trading Overview now uses a compact OKX-inspired dark trading workstation:
+The Trading Overview now uses KAYTRADE's own layered card layout:
 
-- AI Trading Plan header/status;
-- LONG/SHORT direction;
-- Market/Limit order type;
-- Tier 1 / Tier 2;
-- leverage;
-- suggested/limit entry;
-- TP and SL;
-- AI recommendation reason;
-- current operation advice;
-- recent AI plan history and execution status.
+- a dominant main-plan area for LONG/SHORT direction and suggested/limit entry;
+- separate TP and SL emphasis blocks;
+- compact Market/Limit, tier and leverage badges;
+- AI recommendation reason and operation advice with different visual weight;
+- a separate recent-plan strip rather than repeating identical tiles.
 
 \`publish_trade_plan\` can update the plan board without placing an order.
 
 ## Order / position board
 
-The order/position execution board shows:
+The order/position execution board returns to KAYTRADE's earlier trading-plan card language and shows:
 
 - current order state;
 - Market/Limit order type;
@@ -95,6 +90,6 @@ submit_trade_proposal(
 ## Package identity
 
 - Version: 1.8.0
-- Build: 1800
+- Build: 1801
 - Product mode: AI ONLY
 - Intel macOS target: macOS 14+
