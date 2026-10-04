@@ -1,4 +1,4 @@
-"""Codex MCP adapter for KAYTRADE V1.8.3 OKX Demo Execution.
+"""Codex MCP adapter for KAYTRADE V1.8.4 OKX Demo Execution.
 
 The adapter never receives OKX credentials. It reads the short-lived local
 bridge descriptor created by the KAYTRADE app and talks only to 127.0.0.1.
@@ -15,9 +15,9 @@ from mcp.server.fastmcp import FastMCP
 BRIDGE_FILE = Path.home() / "Library" / "Application Support" / "OKXLocal" / "ai_bridge.json"
 
 mcp = FastMCP(
-    "kaytrade-v183-okx-demo",
+    "kaytrade-v184-okx-demo",
     instructions=(
-        "KAYTRADE V1.8.3 Build1832 Clean executes LIMIT orders directly on OKX Demo Trading. Entry, reductions, take-profit and stop-loss exits are LIMIT only. "
+        "KAYTRADE V1.8.4 Build1832 Clean executes LIMIT orders directly on OKX Demo Trading. Entry, reductions, take-profit and stop-loss exits are LIMIT only. "
         "Inspect get_kaytrade_state before proposing a trade. "
         "Trade-management tools submit writes to OKX Demo Trading only; live-account writes remain disabled. "
         "KAYTRADE must be connected to OKX Demo and the user must enable the OKX Demo AI channel. "
@@ -32,8 +32,8 @@ def _descriptor():
     if not BRIDGE_FILE.exists():
         raise RuntimeError("KAYTRADE AI Bridge is not running")
     data = json.loads(BRIDGE_FILE.read_text())
-    if data.get("version") != "1.8.3" or str(data.get("build")) != "1832":
-        raise RuntimeError("KAYTRADE bridge must be V1.8.3 Build1832 Clean")
+    if data.get("version") != "1.8.4" or str(data.get("build")) != "1832":
+        raise RuntimeError("KAYTRADE bridge must be V1.8.4 Build1832 Clean")
     if data.get("mode") != "OKX_DEMO_EXECUTION":
         raise RuntimeError("KAYTRADE bridge is not in OKX Demo execution mode")
     if data.get("paper_runtime_present") is not False:
@@ -174,7 +174,7 @@ def submit_trade_proposal(
     sl_exit_type: str = "limit",
     sl_limit_price: float | None = None,
 ) -> dict:
-    """Submit a structured AI trade request to KAYTRADE V1.8.3 OKX Demo.
+    """Submit a structured AI trade request to KAYTRADE V1.8.4 OKX Demo.
 
     action: open or close.
     direction: long or short.
