@@ -162,6 +162,14 @@ class Store:
                     json.dump(self.data,f,ensure_ascii=False,indent=2)
                     f.flush(); os.fsync(f.fileno())
                 os.replace(temp,self.path)
+                try:
+                    dir_fd=os.open(self.path.parent,os.O_RDONLY)
+                    try:
+                        os.fsync(dir_fd)
+                    finally:
+                        os.close(dir_fd)
+                except OSError:
+                    pass
             finally:
                 try:
                     temp.unlink()
