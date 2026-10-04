@@ -63,10 +63,12 @@ from v180_ai_only_patch import apply as apply_v180_ai_only_patch
 apply_v180_ai_only_patch()
 from v181_paper_patch import apply as apply_v181_paper_patch
 apply_v181_paper_patch()
+from v182_ui_patch import apply as apply_v182_ui_patch
+apply_v182_ui_patch()
 
 
 def smoke_test():
-    """Exercise the packaged V1.8.1 Paper UI without credentials or exchange writes."""
+    """Exercise the packaged V1.8.2 Paper UI without credentials or exchange writes."""
     import ssl
     import tkinter as tk
     from unittest.mock import patch
@@ -74,15 +76,20 @@ def smoke_test():
     import v165_model as model
     import v172_ai_only_patch as v172
     import v181_paper_patch as v181
+    import v182_ui_patch as v182
     import visual
 
     assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
-    assert v181.VERSION == '1.8.1' and v181.BUILD == '1813'
+    assert v182.VERSION == '1.8.2' and v182.BUILD == '1820'
+    assert v181.VERSION == '1.8.2' and v181.BUILD == '1820'
     assert v181.AI_ONLY is True and v181.PAPER_ONLY is True
-    assert model.VERSION == '1.8.1' and model.BUILD == '1813'
+    assert v182.LIMIT_ONLY is True
+    assert model.VERSION == '1.8.2' and model.BUILD == '1820'
     assert model.STRATEGY_ENABLED is False
     assert getattr(model, '_kaytrade_v181_paper_applied', False)
+    assert getattr(model, '_kaytrade_v182_ui_applied', False)
     assert getattr(app.App, '_kaytrade_v181_paper_applied', False)
+    assert getattr(app.App, '_kaytrade_v182_ui_applied', False)
     assert app.Engine is v181.PaperEngineV181
     assert str(v181.AI_MAX_LEVERAGE) == '20'
     assert str(v181.AI_MAX_NOTIONAL_USDT) == '3500'
@@ -101,14 +108,14 @@ def smoke_test():
                 ui = app.App(root, Path(folder))
                 root.update()
                 assert 'KAYTRADE' in root.title()
-                assert '1.8.1' in root.title()
+                assert '1.8.2' in root.title()
                 assert 'PAPER AI' in root.title()
-                assert '1813' in root.title()
+                assert '1820' in root.title()
                 assert ui.mode.get() == 'OKX模拟盘'
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
                 assert getattr(ui, '_v181_paper_ready', False)
-                assert 'V1.8.1 PAPER' in ui.signal.get()
+                assert 'V1.8.2 PAPER' in ui.signal.get()
                 assert getattr(ui, '_v180_plan_card', None) is not None
                 assert getattr(ui, '_v180_execution_card', None) is not None
                 assert getattr(ui, '_v181_direction_label', None) is not None
@@ -117,13 +124,16 @@ def smoke_test():
                 assert getattr(ui, '_v181_position_badge_label', None) is not None
                 assert getattr(ui, '_v181_auto_exec_card', None) is not None
                 assert getattr(ui, '_v181_auto_exec_button', None) is not None
+                assert getattr(ui, '_v182_entry_value_label', None) is not None
+                assert getattr(ui, '_v182_plan_card', None) is not None
+                assert getattr(ui, '_v182_execution_card', None) is not None
                 assert 'AI方案自动执行' in v172._widget_text(ui._v181_auto_exec_card)
                 assert 'TP + SL' in v172._widget_text(ui._v181_auto_exec_card)
                 # BTC quote panel is packed before the AI plan panel.
                 packed = ui.book.pages[3].body.pack_slaves()
                 assert ui.quote in packed and ui._v180_plan_card in packed
                 assert packed.index(ui.quote) < packed.index(ui._v180_plan_card)
-                # Direction colors are explicitly available for V1.8.1 updates.
+                # Direction colors are explicitly available for V1.8.2 updates.
                 assert visual.GREEN and visual.RED
                 ui.finished.set()
                 ui.thread.join(timeout=2)
@@ -132,11 +142,10 @@ def smoke_test():
             root.destroy()
 
     Path(sys.argv[2]).write_text(
-        'PASS: KAYTRADE V1.8.1 Build1813 PAPER; '
-        'BTC quote is topmost, LONG/SHORT color semantics are enabled, '
-        'two-tier paper execution is LIMIT ONLY, 60-minute auto-cancel, '
-        'automatic AI-plan paper execution requires TP/SL LIMIT protection, '
-        'amend/cancel/protection changes and LIMIT partial close; no OKX write path is exposed.\n'
+        'PASS: KAYTRADE V1.8.2 Build1820 PAPER LIMIT ONLY; '
+        'Trading Overview order is BTC -> auto execution -> AI plan -> execution, '
+        'entry price follows LONG green / SHORT red, AI nested panels are rounded, '
+        'legacy position wording is hidden, and Paper LIMIT-only execution remains active.\n'
     )
 
 
