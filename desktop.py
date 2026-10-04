@@ -111,7 +111,7 @@ def smoke_test():
                 assert getattr(ui, '_v180_execution_card', None) is not None
                 plan_text = v172._widget_text(ui._v180_plan_card)
                 execution_text = v172._widget_text(ui._v180_execution_card)
-                assert 'LIMIT ONLY' in plan_text
+                assert 'LIMIT ONLY' in execution_text
                 assert 'OKX模拟盘' in execution_text or 'OKX' in execution_text
                 assert 'Paper' not in plan_text and 'PAPER' not in plan_text
                 assert 'Paper' not in execution_text and 'PAPER' not in execution_text
