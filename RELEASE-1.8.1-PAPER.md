@@ -1,4 +1,4 @@
-# KAYTRADE V1.8.1 PAPER EXECUTION · Build1810
+# KAYTRADE V1.8.1 PAPER EXECUTION · Build1811
 
 V1.8.1 converts the V1.8 AI-only execution layer into a local paper-trading state machine.
 OKX is used only for read-side market/account context; this build does not send OKX order,
@@ -24,6 +24,22 @@ Supported:
 - automatic cancellation of the unfilled entry remainder when the deadline is reached;
 - cancellation and amendment of a live limit entry;
 - amendment preserves the original 60-minute deadline.
+
+## AI plan auto execution
+
+Trading Overview now includes a user-controlled **AI方案自动执行** switch.
+
+When enabled:
+- every complete AI **open** recommendation is immediately converted into a local Paper order;
+- market recommendations fill at the current simulated market price;
+- limit recommendations are placed at `limit_price`, or `suggested_entry` when the limit price is omitted;
+- `take_profit` and `stop_loss` are both mandatory;
+- direction, size, leverage and order type are also required;
+- a limit recommendation additionally requires an entry price;
+- if any mandatory field is missing or the plan violates the existing Paper limits, the recommendation remains visible but is marked rejected and no Paper order is created.
+
+The switch is OFF by default and can only be enabled after the Paper AI channel is running.
+Codex cannot turn this user setting on by itself.
 
 ## Protection
 
@@ -66,6 +82,7 @@ The existing local limits remain:
 - LONG is shown in green.
 - SHORT is shown in red.
 - Tier 1 / Tier 2 execution panels show their own entry type, state, entry/fill, TP/SL and remaining paper position.
+- A dedicated auto-execution settings card shows ON/OFF state and the mandatory TP + SL rule.
 
 ## Codex / MCP commands
 
@@ -88,6 +105,6 @@ No command in V1.8.1 sends an OKX write request.
 ## Package
 
 - Version: 1.8.1
-- Build: 1810
+- Build: 1811
 - Mode: PAPER AI
 - Intel macOS 14+
