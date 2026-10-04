@@ -4,11 +4,12 @@ V1.8.4 removes local Paper matching. AI plans are sent immediately to OKX
 Demo Trading as LIMIT orders. Order/fill state is reconciled from OKX only.
 
 Execution contract:
-- OKX Demo only; live-account writes remain hard-disabled.
-- LIMIT ONLY for entry, TP, SL and reductions.
-- AI plan auto execution defaults ON once the Demo AI channel is enabled.
+- Exchange execution is environment-gated by the active overlay.
+- LIMIT ONLY for parent entry and explicit reduction orders.
+- TP and SL are mandatory exchange-attached conditional protections.
+- TP/SL use OKX trigger-market execution (order price = -1 after trigger).
+- AI plan auto execution defaults ON once the AI channel is enabled.
 - Tier 1 + Tier 2 may coexist only in the same direction.
-- TP and SL are mandatory and attached to the exchange entry order.
 - Unfilled entry remainder is canceled after 60 minutes.
 """
 from __future__ import annotations
@@ -55,39 +56,38 @@ def _d(value, name="value"):
     return v172._decimal(value, name)
 
 
-def _limit_protection_price(value, trigger, name):
-    """Normalize every OKX protection exit to a positive LIMIT price.
+def _limit_protection_price(_value, trigger, name):
+    """Return OKX's documented trigger-market sentinel for TP/SL.
 
-    OKX uses -1 as the market-order sentinel for TP/SL. Build1840 never
-    forwards that sentinel: None/blank/zero/negative/non-finite values fall
-    back to the corresponding positive TP/SL trigger price.
+    The trigger itself must remain a valid positive price. The attached order
+    price is always -1 so OKX executes the protection at market after trigger.
     """
     trigger_price = _d(trigger, name.replace("_limit_price", ""))
-    if value in (None, ""):
-        return trigger_price
-    try:
-        price = Decimal(str(value))
-    except Exception:
-        return trigger_price
-    if not price.is_finite() or price <= 0:
-        return trigger_price
-    return price
+    if trigger_price <= 0:
+        raise legacy_engine.Halt("TP/SL触发价必须大于0")
+    return Decimal("-1")
 
 
 def _assert_no_market_sentinel(payload):
-    forbidden = {"tpOrdPx", "slOrdPx", "newTpOrdPx", "newSlOrdPx"}
+    """Compatibility name; V1.9.1 requires trigger-market TP/SL sentinels."""
+    fields = {"tpOrdPx", "slOrdPx", "newTpOrdPx", "newSlOrdPx"}
+    seen = 0
     def walk(value):
+        nonlocal seen
         if isinstance(value, dict):
             for key, child in value.items():
-                if key in forbidden and str(child).strip() == "-1":
-                    raise legacy_engine.Halt(
-                        f"LIMIT ONLY：禁止向OKX发送 {key}=-1（-1代表市价执行）"
-                    )
+                if key in fields:
+                    seen += 1
+                    if str(child).strip() != "-1":
+                        raise legacy_engine.Halt(
+                            f"TRIGGER MARKET：{key} 必须为 -1（触发后市价执行）"
+                        )
                 walk(child)
         elif isinstance(value, list):
             for child in value:
                 walk(child)
     walk(payload)
+    return seen
 
 
 def _now():
@@ -336,20 +336,16 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
         if direction == "short" and not (tp < limit_price < sl):
             raise legacy_engine.Halt("SHORT 必须满足 TP < 限价入场 < SL")
 
-        tp_type = str(proposal.get("tp_exit_type") or "limit").lower()
-        sl_type = str(proposal.get("sl_exit_type") or "limit").lower()
-        if tp_type != "limit" or sl_type != "limit":
-            raise legacy_engine.Halt("LIMIT ONLY：TP/SL 保护退出只允许 limit")
+        tp_type = str(proposal.get("tp_exit_type") or "market").lower()
+        sl_type = str(proposal.get("sl_exit_type") or "market").lower()
+        if tp_type not in ("market", "trigger_market") or sl_type not in ("market", "trigger_market"):
+            raise legacy_engine.Halt("TP/SL 保护退出必须为 trigger-market")
         tp_limit = _limit_protection_price(
             proposal.get("tp_limit_price"), tp, "tp_limit_price"
         )
         sl_limit = _limit_protection_price(
             proposal.get("sl_limit_price"), sl, "sl_limit_price"
         )
-        if tp_limit <= 0 or sl_limit <= 0:
-            raise legacy_engine.Halt("LIMIT ONLY：TP/SL保护限价必须大于0")
-        if tp_limit % tick != 0 or sl_limit % tick != 0:
-            raise legacy_engine.Halt(f"TP/SL保护限价必须按 tickSz={tick} 递增")
 
         unit = _d(meta.get("ctVal"), "ctVal") * _d(meta.get("ctMult") or "1", "ctMult")
         notional = qty * unit * limit_price
@@ -394,14 +390,14 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
                 {
                     "attachAlgoClOrdId": ids["tp"],
                     "tpTriggerPx": format(checked["tp"], "f"),
-                    "tpOrdPx": format(checked["tp_limit"], "f"),
+                    "tpOrdPx": "-1",
                     "tpTriggerPxType": "last",
-                    "tpOrdKind": "limit",
+                    "tpOrdKind": "condition",
                 },
                 {
                     "attachAlgoClOrdId": ids["sl"],
                     "slTriggerPx": format(checked["sl"], "f"),
-                    "slOrdPx": format(checked["sl_limit"], "f"),
+                    "slOrdPx": "-1",
                     "slTriggerPxType": "last",
                 },
             ],
@@ -442,8 +438,8 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
             "leverage": float(checked["leverage"]),
             "take_profit": float(checked["tp"]),
             "stop_loss": float(checked["sl"]),
-            "tp_exit_type": "limit",
-            "sl_exit_type": "limit",
+            "tp_exit_type": "market",
+            "sl_exit_type": "market",
             "tp_limit_price": float(checked["tp_limit"]),
             "sl_limit_price": float(checked["sl_limit"]),
             "client_order_id": ids["client"],
@@ -493,8 +489,8 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
                 "detail": (
                     f"第{tier_key}档已立即提交OKX模拟盘："
                     f"{direction.upper()} {item['size']:g}张 @ {item['limit_price']:.2f} · "
-                    f"TP {item['take_profit']:.2f}/{item['tp_limit_price']:.2f} · "
-                    f"SL {item['stop_loss']:.2f}/{item['sl_limit_price']:.2f}"
+                    f"TP {item['take_profit']:.2f}→市价 · "
+                    f"SL {item['stop_loss']:.2f}→市价"
                 ),
             },
         )
@@ -555,16 +551,10 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
             "leverage": plan.get("leverage"),
             "take_profit": tp,
             "stop_loss": sl,
-            "tp_exit_type": "limit",
-            "sl_exit_type": "limit",
-            "tp_limit_price": format(
-                _limit_protection_price(plan.get("tp_limit_price"), tp, "tp_limit_price"),
-                "f",
-            ),
-            "sl_limit_price": format(
-                _limit_protection_price(plan.get("sl_limit_price"), sl, "sl_limit_price"),
-                "f",
-            ),
+            "tp_exit_type": "market",
+            "sl_exit_type": "market",
+            "tp_limit_price": "-1",
+            "sl_limit_price": "-1",
             "reason": str(plan.get("reason") or "")[:1000],
             "operation_advice": str(
                 plan.get("operation_advice") or plan.get("advice") or ""
@@ -623,14 +613,14 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
                 {
                     "attachAlgoClOrdId": current["tp_client_id"],
                     "newTpTriggerPx": format(checked["tp"], "f"),
-                    "newTpOrdPx": format(checked["tp_limit"], "f"),
+                    "newTpOrdPx": "-1",
                     "newTpTriggerPxType": "last",
-                    "newTpOrdKind": "limit",
+                    "newTpOrdKind": "condition",
                 },
                 {
                     "attachAlgoClOrdId": current["sl_client_id"],
                     "newSlTriggerPx": format(checked["sl"], "f"),
-                    "newSlOrdPx": format(checked["sl_limit"], "f"),
+                    "newSlOrdPx": "-1",
                     "newSlTriggerPxType": "last",
                 },
             ],
@@ -1014,12 +1004,8 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
                 raise legacy_engine.Halt("LONG保护必须满足 SL < 入场 < TP")
             if item["direction"] == "short" and not (tp < entry_ref < sl):
                 raise legacy_engine.Halt("SHORT保护必须满足 TP < 入场 < SL")
-            tp_limit = _limit_protection_price(
-                payload.get("tp_limit_price"), tp, "tp_limit_price"
-            )
-            sl_limit = _limit_protection_price(
-                payload.get("sl_limit_price"), sl, "sl_limit_price"
-            )
+            tp_limit = Decimal("-1")
+            sl_limit = Decimal("-1")
 
             parent_state = str(item.get("order_state") or item.get("status") or "")
             if parent_state in {"submitted", "live", "partially_filled", "amend_requested"}:
@@ -1032,14 +1018,14 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
                         {
                             "attachAlgoClOrdId": item["tp_client_id"],
                             "newTpTriggerPx": format(tp, "f"),
-                            "newTpOrdPx": format(tp_limit, "f"),
+                            "newTpOrdPx": "-1",
                             "newTpTriggerPxType": "last",
-                            "newTpOrdKind": "limit",
+                            "newTpOrdKind": "condition",
                         },
                         {
                             "attachAlgoClOrdId": item["sl_client_id"],
                             "newSlTriggerPx": format(sl, "f"),
-                            "newSlOrdPx": format(sl_limit, "f"),
+                            "newSlOrdPx": "-1",
                             "newSlTriggerPxType": "last",
                         },
                     ],
@@ -1052,7 +1038,7 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
                     "algoClOrdId": item["tp_client_id"],
                     "reqId": v172._client_id("tp"),
                     "newTpTriggerPx": format(tp, "f"),
-                    "newTpOrdPx": format(tp_limit, "f"),
+                    "newTpOrdPx": "-1",
                     "newTpTriggerPxType": "last",
                 }
                 sl_body = {
@@ -1060,7 +1046,7 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
                     "algoClOrdId": item["sl_client_id"],
                     "reqId": v172._client_id("sl"),
                     "newSlTriggerPx": format(sl, "f"),
-                    "newSlOrdPx": format(sl_limit, "f"),
+                    "newSlOrdPx": "-1",
                     "newSlTriggerPxType": "last",
                 }
                 _assert_no_market_sentinel(tp_body)
@@ -1076,7 +1062,7 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
             self.store.save()
             self._event(
                 "PROTECTION_AMEND_SUBMITTED",
-                {"tier": int(key), "detail": f"第{key}档TP/SL修改已提交OKX模拟盘"},
+                {"tier": int(key), "detail": f"第{key}档TP/SL触发市价保护修改已提交OKX模拟盘"},
             )
             return {
                 "status": "PROTECTION_AMEND_SUBMITTED_TO_OKX",
@@ -1294,10 +1280,12 @@ class OKXDemoEngineV183(v180.AIOnlyEngineV180):
             "demo_exchange_writes": True,
             "live_ai_writes": False,
             "paper_runtime_present": False,
-            "limit_only": True,
+            "limit_only": False,
+            "limit_entry_only": True,
             "supported_entry_order_types": ["limit"],
             "supported_close_order_types": ["limit"],
-            "supported_protection_exit_order_types": ["limit"],
+            "supported_protection_exit_order_types": ["trigger_market"],
+            "market_protection": True,
             "supports_two_same_direction_tiers": True,
             "supports_auto_execute_ai_plans": True,
             "auto_execute_requires_tp_sl": True,
@@ -1332,8 +1320,8 @@ def _tier_ui_text(item):
         f"OKX限价 · {status}\n"
         f"方向：{'LONG' if item.get('direction') == 'long' else 'SHORT'}   "
         f"入场：{v180._fmt_px(entry)}   已成交/持仓：{pos:g}张\n"
-        f"TP：{v180._fmt_px(item.get('take_profit'))} / 限价 {v180._fmt_px(item.get('tp_limit_price'))}   "
-        f"SL：{v180._fmt_px(item.get('stop_loss'))} / 限价 {v180._fmt_px(item.get('sl_limit_price'))}"
+        f"TP：{v180._fmt_px(item.get('take_profit'))} / 触发后市价   "
+        f"SL：{v180._fmt_px(item.get('stop_loss'))} / 触发后市价"
     )
 
 

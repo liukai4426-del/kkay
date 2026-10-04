@@ -1,4 +1,4 @@
-"""KAYTRADE V1.9.0 Dual Environment Safe overlay.
+"""KAYTRADE V1.9.1 Dual Environment Execution overlay.
 
 DEMO
 - isolated credentials/state/bridge/token
@@ -7,9 +7,9 @@ DEMO
 
 LIVE
 - isolated credentials/state/bridge/token
-- real-account read-only data
-- AI plan validation/review channel ON/OFF
-- no automated exchange writes
+- guarded real-account execution channel ON/OFF
+- AI plan auto execution when explicitly enabled
+- LIMIT parent entry/reduction + trigger-market TP/SL
 
 No Paper runtime is reintroduced.
 """
@@ -45,9 +45,9 @@ import visual
 from core import INSTRUMENT
 from exchange import Exchange, APIError
 
-VERSION = "1.9.0"
-BUILD = "1900"
-LIMIT_ONLY = True
+VERSION = "1.9.1"
+BUILD = "1910"
+LIMIT_ONLY = False
 PAPER_RUNTIME_PRESENT = False
 DEMO_BRIDGE_PORT = int(os.getenv("KAYTRADE_DEMO_BRIDGE_PORT", "17872"))
 LIVE_BRIDGE_PORT = int(os.getenv("KAYTRADE_LIVE_BRIDGE_PORT", "17873"))
@@ -65,7 +65,7 @@ ENV_META = {
     "live": {
         "label": "OKX实盘",
         "short": "LIVE",
-        "mode": "OKX_LIVE_REVIEW",
+        "mode": "OKX_LIVE_EXECUTION",
         "folder": "live",
         "descriptor": "ai_bridge_live.json",
         "port": LIVE_BRIDGE_PORT,
@@ -85,34 +85,50 @@ def _env_label(environment):
 
 
 class LiveReadOnlyExchange:
-    """Real OKX account wrapper that structurally blocks every write."""
+    """Compatibility name for a real-account exchange with a hard write lock.
+
+    The raw OKX real-account adapter is readable immediately after connection.
+    POST writes are structurally blocked until the LIVE engine explicitly arms
+    the wrapper. Stopping or faulting the engine closes the gate again.
+    """
 
     def __init__(self, exchange):
         if exchange.demo:
-            raise legacy_engine.Halt("LiveReadOnlyExchange 只能包装 OKX 实盘连接")
+            raise legacy_engine.Halt("LIVE Guard 只能包装 OKX 实盘连接")
         self._x = exchange
         self.demo = False
         self.host = exchange.host
+        self._writes_enabled = False
+        self._write_lock = threading.RLock()
 
     def __getattr__(self, name):
         return getattr(self._x, name)
 
-    def post(self, path, body):
-        raise APIError(
-            "V1.9.0 LIVE 为只读/方案审核环境：禁止自动写入真实账户",
-            deterministic=True,
-            method="POST",
-            path=path,
-        )
+    @property
+    def writes_enabled(self):
+        with self._write_lock:
+            return bool(self._writes_enabled)
 
-    def request(self, method, path, data=None, private=False):
-        if str(method).upper() == "POST":
+    def set_writes_enabled(self, enabled):
+        with self._write_lock:
+            self._writes_enabled = bool(enabled)
+
+    def _require_write_gate(self, path):
+        if not self.writes_enabled:
             raise APIError(
-                "V1.9.0 LIVE 为只读/方案审核环境：禁止自动写入真实账户",
+                "LIVE写入锁关闭：请先在KAYTRADE界面明确开启LIVE AI自动执行通道",
                 deterministic=True,
                 method="POST",
                 path=path,
             )
+
+    def post(self, path, body):
+        self._require_write_gate(path)
+        return self._x.post(path, body)
+
+    def request(self, method, path, data=None, private=False):
+        if str(method).upper() == "POST":
+            self._require_write_gate(path)
         return self._x.request(method, path, data, private)
 
 
@@ -130,6 +146,8 @@ class DemoEngineV190(v183.OKXDemoEngineV183):
 
     def publish_ai_plan(self, plan):
         self._assert_env(plan)
+        if self.enabled:
+            self._preflight_account()
         result = super().publish_ai_plan(plan)
         if isinstance(result, dict):
             result = dict(result)
@@ -180,305 +198,274 @@ class DemoEngineV190(v183.OKXDemoEngineV183):
         return state
 
 
-class LiveReviewEngineV190(v180.AIOnlyEngineV180):
-    """Read-only real-account engine with local AI plan validation/staging."""
+class LiveReviewEngineV190(v183.OKXDemoEngineV183):
+    """V1.9.1 guarded OKX real-account AI execution engine.
+
+    The class name is retained for compatibility with the V1.9.0 worker/UI.
+    State, credentials, bridge and token remain isolated from DEMO.
+    """
 
     environment = "live"
 
-    def connect(self):
-        v180.AIOnlyEngineV180.connect(self)
-        self._ensure_review_state()
-        self.emit(
-            "log",
-            "V1.9.0 OKX实盘只读连接成功：允许AI方案审核，不允许自动写入真实账户。",
-        )
+    def _assert_env(self, payload):
+        requested = str((payload or {}).get("environment") or "").lower()
+        if requested != "live":
+            raise legacy_engine.Halt(
+                f"Environment Match Gate：请求={requested or 'missing'}，Engine=live"
+            )
 
-    def _ensure_review_state(self):
+    def _ensure_demo_state(self):
         if not self.store:
             return None
-        state = self.store.data.setdefault("live_review", {})
-        state.setdefault("channel_enabled", False)
+        # One-way V1.9.0 migration: review-only state is not promoted into orders.
+        self.store.data.pop("live_review", None)
+        self.store.data.pop("okx_demo_execution", None)
+        self.store.data.pop("paper_execution", None)
+        state = self.store.data.setdefault("okx_live_execution", {})
         state.setdefault("tiers", {"1": None, "2": None})
-        state.setdefault("history", [])
+        state.setdefault("close_orders", [])
+        state.setdefault("events", [])
+        state.setdefault("results", {})
+        state.setdefault("auto_execute_plans", False)
+        state.setdefault("channel_enabled", False)
         state.setdefault("updated_at", time.time())
         if set(state["tiers"].keys()) != {"1", "2"}:
             state["tiers"] = {
                 "1": state["tiers"].get("1"),
                 "2": state["tiers"].get("2"),
             }
-        # Never retain demo execution state in the live store.
-        self.store.data.pop("okx_demo_execution", None)
-        self.store.data.pop("paper_execution", None)
         self.store.save()
         return state
 
-    def _review_state(self):
+    def _demo_state(self):
         if not self.store:
-            raise legacy_engine.Halt("先连接OKX实盘")
-        return self._ensure_review_state()
+            raise legacy_engine.Halt("KAYTRADE尚未连接OKX实盘")
+        return self._ensure_demo_state()
 
-    def _preflight_readonly(self):
+    def _review_state(self):
+        # Compatibility for the V1.9.0 dashboard.
+        return self._demo_state()
+
+    def _event(self, name, payload):
+        state = self._demo_state()
+        clean = dict(payload)
+        if clean.get("detail"):
+            clean["detail"] = str(clean["detail"]).replace("OKX模拟盘", "OKX实盘")
+        row = {"time": time.time(), "event": name, **clean}
+        state["events"].append(row)
+        del state["events"][:-120]
+        state["updated_at"] = time.time()
+        self.store.save()
+        self.emit(
+            "log",
+            f"OKX LIVE · {name} · {clean.get('detail') or clean.get('tier') or ''}",
+        )
+        return row
+
+    def _preflight_account(self):
         if not self.store:
             raise legacy_engine.Halt("先连接OKX实盘")
-        if self.x.demo:
+        if getattr(self.x, "demo", True):
             raise legacy_engine.Halt("Environment Match Gate：LIVE Engine 收到 Demo Exchange")
+        if self.store.data.get("halt"):
+            reason = legacy_engine.normalize_halt_reason(self.store.data.get("halt"))
+            raise legacy_engine.Halt(
+                legacy_engine.HALT_PREFIX + reason + legacy_engine.HALT_SUFFIX
+            )
         account = self.x.account()
         if account.get("uid") != self.connection_id:
             raise legacy_engine.Halt("实盘账户标识发生变化")
         if account.get("posMode") != "long_short_mode":
-            raise legacy_engine.Halt("V1.9.0 LIVE 要求 OKX 双向持仓模式")
+            raise legacy_engine.Halt("V1.9.1 LIVE 要求 OKX 双向持仓模式")
         perms = set(str(account.get("perm") or "").split(","))
-        if "withdraw" in perms:
-            raise legacy_engine.Halt("LIVE API不得包含提币权限")
+        if "trade" not in perms or "withdraw" in perms:
+            raise legacy_engine.Halt("LIVE API必须有交易权限且不得有提币权限")
         return account
 
-    def _validate_plan(self, plan):
-        if str(plan.get("environment") or "").lower() != "live":
-            raise legacy_engine.Halt("Environment Match Gate：LIVE方案必须 environment=live")
-        if str(plan.get("order_type") or "limit").lower() != "limit":
-            raise legacy_engine.Halt("LIMIT ONLY：LIVE方案只允许 limit")
-        direction = str(plan.get("direction") or "").lower()
-        if direction not in ("long", "short"):
-            raise legacy_engine.Halt("direction 必须为 long 或 short")
-        tier = str(int(plan.get("tier") or 1))
-        if tier not in ("1", "2"):
-            raise legacy_engine.Halt("tier 仅支持 1 或 2")
-
-        size = v172._decimal(plan.get("size"), "size")
-        leverage = v172._decimal(plan.get("leverage"), "leverage")
-        if leverage > v183.AI_MAX_LEVERAGE:
+    def _foreign_state_check(self):
+        try:
+            return super()._foreign_state_check()
+        except legacy_engine.Halt as exc:
             raise legacy_engine.Halt(
-                f"leverage 必须≤{v183.AI_MAX_LEVERAGE}x"
-            )
+                str(exc).replace("OKX模拟盘", "OKX实盘").replace("模拟盘", "实盘")
+            ) from None
 
-        meta = self.x.instrument()
-        tick = v172._decimal(meta.get("tickSz"), "tickSz")
-        lot = v172._decimal(meta.get("lotSz"), "lotSz")
-        minimum = v172._decimal(meta.get("minSz"), "minSz")
-        if size < minimum or size % lot != 0:
-            raise legacy_engine.Halt(
-                f"size 必须≥{minimum} 且按 lotSz={lot} 递增"
-            )
-
-        entry_value = plan.get("limit_price")
-        if entry_value in (None, ""):
-            entry_value = plan.get("suggested_entry")
-        entry = v172._decimal(entry_value, "limit_price")
-        tp = v172._decimal(plan.get("take_profit"), "take_profit")
-        sl = v172._decimal(plan.get("stop_loss"), "stop_loss")
-        tp_limit = v183._limit_protection_price(
-            plan.get("tp_limit_price"), tp, "tp_limit_price"
+    def connect(self):
+        v180.AIOnlyEngineV180.connect(self)
+        self._purge_removed_paper_state()
+        self._ensure_demo_state()
+        self.x.set_writes_enabled(False)
+        self.enabled = False
+        self.stopped = True
+        self.emit(
+            "log",
+            "V1.9.1 OKX实盘连接成功：默认写入锁关闭；需人工开启LIVE AI自动执行通道。",
         )
-        sl_limit = v183._limit_protection_price(
-            plan.get("sl_limit_price"), sl, "sl_limit_price"
-        )
-        for name, value in (
-            ("limit_price", entry),
-            ("take_profit", tp),
-            ("stop_loss", sl),
-            ("tp_limit_price", tp_limit),
-            ("sl_limit_price", sl_limit),
-        ):
-            if value % tick != 0:
-                raise legacy_engine.Halt(f"{name} 必须按 tickSz={tick} 递增")
-
-        if direction == "long" and not (sl < entry < tp):
-            raise legacy_engine.Halt("LONG 必须满足 SL < 入场 < TP")
-        if direction == "short" and not (tp < entry < sl):
-            raise legacy_engine.Halt("SHORT 必须满足 TP < 入场 < SL")
-
-        unit = (
-            v172._decimal(meta.get("ctVal"), "ctVal")
-            * v172._decimal(meta.get("ctMult") or "1", "ctMult")
-        )
-        notional = size * unit * entry
-        estimated_loss = (
-            size * unit * abs(entry - sl)
-            + notional * Decimal("0.0012")
-        )
-        if notional > v183.AI_MAX_NOTIONAL_USDT:
-            raise legacy_engine.Halt(
-                f"LIVE方案名义仓位 {notional:.4f} USDT 超过 {v183.AI_MAX_NOTIONAL_USDT} USDT"
-            )
-        if estimated_loss > v183.AI_MAX_ESTIMATED_STOP_LOSS_USDT:
-            raise legacy_engine.Halt(
-                f"LIVE方案估算止损 {estimated_loss:.4f} USDT 超过 {v183.AI_MAX_ESTIMATED_STOP_LOSS_USDT} USDT"
-            )
-
-        state = self._review_state()
-        other_key = "2" if tier == "1" else "1"
-        other = state["tiers"].get(other_key)
-        if isinstance(other, dict) and str(other.get("status") or "") == "READY_FOR_MANUAL_EXECUTION":
-            if other.get("direction") != direction:
-                raise legacy_engine.Halt("LIVE双档审核方案必须同方向")
-            if Decimal(str(other.get("leverage"))) != leverage:
-                raise legacy_engine.Halt("LIVE双档审核方案必须使用相同杠杆")
-            combined_notional = Decimal(str(other.get("notional_usdt") or 0)) + notional
-            combined_loss = Decimal(str(other.get("estimated_stop_loss_usdt") or 0)) + estimated_loss
-            if combined_notional > v183.AI_MAX_NOTIONAL_USDT:
-                raise legacy_engine.Halt("LIVE两档合计名义仓位超过3500 USDT")
-            if combined_loss > v183.AI_MAX_ESTIMATED_STOP_LOSS_USDT:
-                raise legacy_engine.Halt("LIVE两档合计估算最大止损超过100 USDT")
-
-        return {
-            "tier": int(tier),
-            "direction": direction,
-            "order_type": "limit",
-            "limit_price": float(entry),
-            "size": float(size),
-            "leverage": float(leverage),
-            "take_profit": float(tp),
-            "stop_loss": float(sl),
-            "tp_limit_price": float(tp_limit),
-            "sl_limit_price": float(sl_limit),
-            "notional_usdt": float(notional),
-            "estimated_stop_loss_usdt": float(estimated_loss),
-            "reason": str(plan.get("reason") or "")[:1000],
-            "operation_advice": str(
-                plan.get("operation_advice") or plan.get("advice") or ""
-            )[:1000],
-            "plan_id": str(plan.get("plan_id") or ""),
-            "environment": "live",
-        }
-
-    def publish_ai_plan(self, plan):
-        with self._ai_lock:
-            self._preflight_readonly()
-            normalized = self._validate_plan(plan)
-            state = self._review_state()
-            enabled = bool(state.get("channel_enabled"))
-            normalized["time"] = time.time()
-            normalized["status"] = (
-                "READY_FOR_MANUAL_EXECUTION"
-                if enabled
-                else "RECOMMENDED_ONLY"
-            )
-            normalized["detail"] = (
-                "已通过LIVE只读风控；请在OKX实盘人工确认/执行"
-                if enabled
-                else "LIVE AI执行通道关闭；仅展示方案"
-            )
-            state["history"].append(dict(normalized))
-            del state["history"][:-50]
-            if enabled:
-                state["tiers"][str(normalized["tier"])] = dict(normalized)
-            state["updated_at"] = time.time()
-            self.store.save()
-            self.emit(
-                "log",
-                f"LIVE AI方案：T{normalized['tier']} {normalized['direction'].upper()} "
-                f"@ {normalized['limit_price']:.2f} · {normalized['status']}",
-            )
-            return {
-                "version": VERSION,
-                "build": BUILD,
-                "mode": ENV_META["live"]["mode"],
-                "environment": "live",
-                "status": normalized["status"],
-                "live_ai_writes": False,
-                "manual_execution_required": True,
-                "plan": normalized,
-            }
-
-    def submit_ai_trade(self, _proposal):
-        raise legacy_engine.Halt(
-            "V1.9.0 LIVE 不提供自动实盘写入；请使用 publish_trade_plan 生成审核方案"
-        )
-
-    def set_review_enabled(self, enabled):
-        with self._ai_lock:
-            self._preflight_readonly()
-            state = self._review_state()
-            state["channel_enabled"] = bool(enabled)
-            state["updated_at"] = time.time()
-            self.store.save()
-            self.enabled = bool(enabled)
-            self.stopped = not bool(enabled)
-            self.emit(
-                "log",
-                "LIVE AI执行通道已"
-                + ("开启：自动接收/校验方案，真实订单仍需人工在OKX执行" if enabled else "关闭"),
-            )
-            return {
-                "version": VERSION,
-                "build": BUILD,
-                "mode": ENV_META["live"]["mode"],
-                "environment": "live",
-                "channel_enabled": bool(enabled),
-                "live_ai_writes": False,
-                "manual_execution_required": True,
-            }
 
     def arm(self, _settings=None):
-        self.set_review_enabled(True)
-
-    def stop(self):
-        if self.store:
-            self.set_review_enabled(False)
-        else:
-            self.enabled = False
-            self.stopped = True
-
-    def cycle(self):
         with self._ai_lock:
-            self.poll_at = time.monotonic()
-            if not self.store:
-                return
-            # Read-only reconciliation only.
-            snapshot = {
-                "time": time.time(),
-                "positions": self.x.positions(),
-                "orders": self.x.orders(),
-            }
-            state = self._review_state()
-            state["account_snapshot"] = snapshot
+            self.x.set_writes_enabled(False)
+            self._preflight_account()
+            self._sync_all(cancel_expired=False)
+            self._foreign_state_check()
+            state = self._demo_state()
+            state["auto_execute_plans"] = True
+            state["channel_enabled"] = True
             state["updated_at"] = time.time()
             self.store.save()
+            self.x.set_writes_enabled(True)
+            self.enabled = True
+            self.stopped = False
+            self.poll_at = time.monotonic()
+            self.emit(
+                "log",
+                "LIVE AI自动执行已开启：AI完整方案可提交OKX实盘LIMIT入场；TP/SL为触发后市价保护。",
+            )
 
-    def ai_state(self):
-        if not self.store:
-            return {
-                "version": VERSION,
-                "build": BUILD,
-                "mode": ENV_META["live"]["mode"],
-                "environment": "live",
-                "connected": False,
-                "ai_enabled": False,
-                "live_ai_writes": False,
-                "manual_execution_required": True,
-                "paper_runtime_present": False,
-                "limit_only": True,
-            }
-        state = self._review_state()
-        ticker = self.x.ticker()
-        equity, available = self.x.balance()
+    def stop(self):
+        with self._ai_lock:
+            state = self._demo_state() if self.store else None
+            if state is not None:
+                state["auto_execute_plans"] = False
+                state["channel_enabled"] = False
+                state["updated_at"] = time.time()
+                self.store.save()
+            self.enabled = False
+            self.stopped = True
+            self.x.set_writes_enabled(False)
+            self.emit(
+                "log",
+                "LIVE AI自动执行已关闭：禁止新的实盘写入；交易所已生效保护单继续由OKX执行。",
+            )
+
+    def set_review_enabled(self, enabled):
+        # Compatibility hook for the V1.9.0 UI button.
+        if enabled:
+            self.arm(None)
+        else:
+            self.stop()
         return {
             "version": VERSION,
             "build": BUILD,
             "mode": ENV_META["live"]["mode"],
             "environment": "live",
-            "environment_label": ENV_META["live"]["label"],
-            "connected": True,
-            "ai_enabled": bool(state.get("channel_enabled")),
-            "live_ai_writes": False,
-            "demo_exchange_writes": False,
-            "live_plan_review": True,
-            "manual_execution_required": True,
-            "paper_runtime_present": False,
-            "limit_only": True,
-            "ticker": ticker,
-            "balance": {"equity": equity, "available": available},
-            "positions": self.x.positions(),
-            "pending_orders": self.x.orders(),
-            "review_state": state,
-            "limits": {
-                "max_leverage": str(v183.AI_MAX_LEVERAGE),
-                "max_notional_usdt": str(v183.AI_MAX_NOTIONAL_USDT),
-                "max_estimated_stop_loss_usdt": str(
-                    v183.AI_MAX_ESTIMATED_STOP_LOSS_USDT
-                ),
-            },
+            "channel_enabled": bool(self.enabled),
+            "live_ai_writes": True,
+            "live_write_enabled": bool(self.enabled and self.x.writes_enabled),
+            "manual_execution_required": False,
+            "market_protection": True,
         }
+
+    def set_auto_execute_plans(self, enabled):
+        with self._ai_lock:
+            if not self.enabled:
+                raise legacy_engine.Halt("先启用LIVE AI自动执行通道")
+            if enabled:
+                self._preflight_account()
+            state = self._demo_state()
+            state["auto_execute_plans"] = bool(enabled)
+            state["channel_enabled"] = bool(enabled)
+            state["updated_at"] = time.time()
+            self.store.save()
+            self.x.set_writes_enabled(bool(enabled))
+            self.emit(
+                "log",
+                "LIVE AI方案自动执行已" + (
+                    "开启：完整AI方案到达即提交OKX实盘LIMIT入场" if enabled else "关闭"
+                ),
+            )
+            return {
+                "version": VERSION,
+                "build": BUILD,
+                "mode": ENV_META["live"]["mode"],
+                "environment": "live",
+                "auto_execute_plans": bool(enabled),
+                "live_write_enabled": bool(enabled),
+                "market_protection": True,
+            }
+
+    @staticmethod
+    def _live_result(value):
+        if isinstance(value, dict):
+            out = {}
+            for key, item in value.items():
+                out[key] = LiveReviewEngineV190._live_result(item)
+            if out.get("mode") in ("OKX_DEMO_EXECUTION", "AI_ONLY"):
+                out["mode"] = ENV_META["live"]["mode"]
+            if out.get("environment") in ("OKX_DEMO", "demo"):
+                out["environment"] = "live"
+            return out
+        if isinstance(value, list):
+            return [LiveReviewEngineV190._live_result(item) for item in value]
+        return value
+
+    def publish_ai_plan(self, plan):
+        self._assert_env(plan)
+        result = super().publish_ai_plan(plan)
+        result = self._live_result(result)
+        result.update(
+            version=VERSION,
+            build=BUILD,
+            mode=ENV_META["live"]["mode"],
+            environment="live",
+            live_ai_writes=True,
+            live_write_enabled=bool(self.enabled and self.x.writes_enabled),
+            manual_execution_required=False,
+            market_protection=True,
+        )
+        return result
+
+    def submit_ai_trade(self, proposal):
+        self._assert_env(proposal)
+        result = super().submit_ai_trade(proposal)
+        return self._live_result(result)
+
+    def cancel_demo_entry(self, payload):
+        self._assert_env(payload)
+        return self._live_result(super().cancel_demo_entry(payload))
+
+    def amend_demo_entry(self, payload):
+        self._assert_env(payload)
+        return self._live_result(super().amend_demo_entry(payload))
+
+    def amend_demo_protection(self, payload):
+        self._assert_env(payload)
+        return self._live_result(super().amend_demo_protection(payload))
+
+    def close_demo_position(self, payload):
+        self._assert_env(payload)
+        return self._live_result(super().close_demo_position(payload))
+
+    def ai_state(self):
+        state = super().ai_state()
+        live_state = state.pop("okx_demo_execution", None)
+        if live_state is None and self.store:
+            live_state = self._demo_state()
+        state.update(
+            {
+                "version": VERSION,
+                "build": BUILD,
+                "mode": ENV_META["live"]["mode"],
+                "environment": "live",
+                "environment_label": ENV_META["live"]["label"],
+                "demo_exchange_writes": False,
+                "live_ai_writes": True,
+                "live_write_enabled": bool(self.enabled and self.x.writes_enabled),
+                "manual_execution_required": False,
+                "live_plan_review": False,
+                "limit_only": False,
+                "limit_entry_only": True,
+                "market_protection": True,
+                "supported_entry_order_types": ["limit"],
+                "supported_close_order_types": ["limit"],
+                "supported_protection_exit_order_types": ["trigger_market"],
+                "okx_live_execution": live_state,
+                "auto_execute_plans": bool(
+                    (live_state or {}).get("auto_execute_plans", False)
+                ),
+            }
+        )
+        return state
 
 
 class _DisabledLegacyBridge:
@@ -515,7 +502,7 @@ class DualBridgeServer:
         bridge = self
 
         class Handler(v172.BaseHTTPRequestHandler):
-            server_version = "KayTradeDual/1.9.0"
+            server_version = "KayTradeDual/1.9.1"
 
             def log_message(self, _format, *_args):
                 return
@@ -556,11 +543,14 @@ class DualBridgeServer:
                             "connected": engine is not None,
                             "ai_enabled": bool(engine and engine.enabled),
                             "demo_exchange_writes": environment == "demo",
-                            "live_ai_writes": False,
-                            "live_plan_review": environment == "live",
-                            "manual_execution_required": environment == "live",
+                            "live_ai_writes": environment == "live",
+                            "live_write_enabled": bool(engine and engine.enabled) if environment == "live" else False,
+                            "live_plan_review": False,
+                            "manual_execution_required": False,
                             "paper_runtime_present": False,
-                            "limit_only": True,
+                            "limit_only": False,
+                            "limit_entry_only": True,
+                            "market_protection": True,
                         },
                     )
                     return
@@ -588,19 +578,6 @@ class DualBridgeServer:
                             f"Environment Match Gate：请求={requested or 'missing'}，Bridge={environment}"
                         )
                     engine = bridge._engine()
-
-                    if environment == "live":
-                        if self.path != "/v1/plan":
-                            self._json(
-                                403,
-                                {
-                                    "error": "LIVE_WRITE_DISABLED",
-                                    "detail": "LIVE环境仅接受AI方案审核，不提供自动实盘写入",
-                                },
-                            )
-                            return
-                        self._json(200, engine.publish_ai_plan(payload))
-                        return
 
                     routes = {
                         "/v1/plan": engine.publish_ai_plan,
@@ -644,11 +621,13 @@ class DualBridgeServer:
             "port": port,
             "token": self.token,
             "demo_exchange_writes": environment == "demo",
-            "live_ai_writes": False,
-            "live_plan_review": environment == "live",
-            "manual_execution_required": environment == "live",
+            "live_ai_writes": environment == "live",
+            "live_plan_review": False,
+            "manual_execution_required": False,
             "paper_runtime_present": False,
-            "limit_only": True,
+            "limit_only": False,
+            "limit_entry_only": True,
+            "market_protection": True,
         }
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         fd = os.open(
@@ -771,7 +750,7 @@ def _worker_v190(owner):
                     )
                 ):
                     x.account()
-                    _emit_for_env(owner, env, "log", "账户只读认证通过")
+                    _emit_for_env(owner, env, "log", "账户认证通过（未执行写入）")
 
             elif kind == "v190_connect":
                 env, profile = data
@@ -828,7 +807,18 @@ def _worker_v190(owner):
                 try:
                     engine.cycle()
                 except Exception as exc:
-                    engine.enabled = False
+                    try:
+                        if env == "live":
+                            engine.stop()
+                        else:
+                            engine.enabled = False
+                    except Exception:
+                        engine.enabled = False
+                        try:
+                            if env == "live" and hasattr(engine.x, "set_writes_enabled"):
+                                engine.x.set_writes_enabled(False)
+                        except Exception:
+                            pass
                     _emit_for_env(
                         owner, env, "alarm", f"执行循环停止：{exc}"
                     )
@@ -888,12 +878,13 @@ def _toggle_selected(owner):
         else:
             typed = app.simpledialog.askstring(
                 "启用LIVE AI执行通道",
-                "OKX实盘：开启后AI方案会自动校验并进入“待人工执行”。\n"
-                "本版本不会自动向真实账户发送订单。\n\n"
-                "确认请输入 LIVE REVIEW",
+                "OKX实盘：开启后完整AI方案可自动提交真实账户。\n"
+                "入场/减仓仅限LIMIT；TP/SL触发后按市价执行。\n"
+                "请确认API仅有读取+交易权限且无提币权限。\n\n"
+                "确认请输入 LIVE AUTO",
                 parent=owner.root,
             )
-            if typed and typed.strip().upper() == "LIVE REVIEW":
+            if typed and typed.strip().upper() == "LIVE AUTO":
                 engine.set_review_enabled(True)
 
     owner.update_trade_button()
@@ -987,9 +978,9 @@ def _update_environment_card(owner):
         if engine is None:
             state = "未连接"
         elif engine.enabled:
-            state = "AI ON" if env == "demo" else "REVIEW ON"
+            state = "AI ON" if env == "demo" else "AUTO ON"
         else:
-            state = "AI OFF" if env == "demo" else "REVIEW OFF"
+            state = "AI OFF" if env == "demo" else "AUTO OFF"
         parts.append(f"{ENV_META[env]['short']} {state}")
     if getattr(owner, "_v190_env_summary", None) is not None:
         owner._v190_env_summary.set("   |   ".join(parts))
@@ -1032,7 +1023,7 @@ def _refresh_v190_dashboard(owner):
                 else "已关闭 · AI推荐仅展示"
             )
             auto_note = (
-                "DEMO：完整策略立即提交LIMIT挂单；TP/SL均为限价保护。"
+                "DEMO：完整策略立即提交LIMIT挂单；TP/SL触发后市价保护。"
             )
         elif env == "live" and engine and engine.store:
             state = engine._review_state()
@@ -1043,12 +1034,12 @@ def _refresh_v190_dashboard(owner):
                 engine.enabled and state.get("channel_enabled")
             )
             auto_status = (
-                "已开启 · AI方案自动校验并进入待人工执行"
+                "已开启 · AI方案自动提交OKX实盘"
                 if channel_on
-                else "已关闭 · LIVE AI推荐仅展示"
+                else "已关闭 · 禁止LIVE实盘写入"
             )
             auto_note = (
-                "LIVE：真实账户只读；AI方案通过风控后等待你在OKX实盘人工执行。"
+                "LIVE：开关开启后AI方案自动提交实盘LIMIT入场；TP/SL触发后市价保护。"
             )
         else:
             channel_on = False
@@ -1056,7 +1047,7 @@ def _refresh_v190_dashboard(owner):
                 f"等待连接 · {_env_label(env)}"
             )
             auto_note = (
-                "DEMO支持自动执行；LIVE为只读方案审核环境。"
+                "DEMO与LIVE均支持独立自动执行；LIVE实盘默认写入锁关闭，TP/SL触发后市价保护。"
             )
 
         if hasattr(owner, "_v183_auto_exec_status_var"):
@@ -1081,9 +1072,9 @@ def _refresh_v190_dashboard(owner):
                 if env == "demo" and channel_on
                 else "DEMO · AUTO OFF"
                 if env == "demo"
-                else "LIVE · REVIEW ON"
+                else "LIVE · AUTO ON"
                 if channel_on
-                else "LIVE · REVIEW OFF"
+                else "LIVE · AUTO OFF"
             )
 
         if latest:
@@ -1229,7 +1220,7 @@ def _refresh_v190_dashboard(owner):
                 if not isinstance(item, dict):
                     return "等待 AI 方案"
                 return (
-                    f"LIVE审核 · {item.get('status','—')}\n"
+                    f"LIVE实盘 · {item.get('status','—')}\n"
                     f"方向：{str(item.get('direction') or '').upper()}   "
                     f"入场：{v180._fmt_px(item.get('limit_price'))}   "
                     f"数量：{float(item.get('size') or 0):g}张\n"
@@ -1250,7 +1241,7 @@ def _refresh_v190_dashboard(owner):
                     if item.get("status") == "READY_FOR_MANUAL_EXECUTION"
                     else "方案展示"
                 )
-                owner._v180_order_type_var.set("LIVE限价方案")
+                owner._v180_order_type_var.set("LIVE限价入场")
                 owner._v180_order_px_var.set(
                     v180._fmt_px(item.get("limit_price"))
                 )
@@ -1268,11 +1259,11 @@ def _refresh_v190_dashboard(owner):
                     str(item.get("plan_id") or "—")[:22]
                 )
                 owner._v180_position_badge_var.set(
-                    "LIVE 待人工执行"
+                    "LIVE 自动执行"
                 )
             else:
                 owner._v180_order_state_var.set("等待LIVE方案")
-                owner._v180_order_type_var.set("LIVE限价方案")
+                owner._v180_order_type_var.set("LIVE限价入场")
                 owner._v180_order_px_var.set("—")
                 owner._v180_fill_px_var.set("—")
                 owner._v180_size_var.set("—")
@@ -1280,7 +1271,7 @@ def _refresh_v190_dashboard(owner):
                 owner._v180_position_sl_var.set("—")
                 owner._v180_proposal_var.set("—")
                 owner._v180_position_badge_var.set(
-                    "LIVE 只读"
+                    "LIVE 实盘"
                 )
 
         _update_environment_card(owner)
@@ -1356,10 +1347,10 @@ def _app_init_v190(owner, *args, **kwargs):
         pass
 
     owner.root.title(
-        "KAYTRADE 1.9.0 · DUAL ENVIRONMENT · Build 1900"
+        "KAYTRADE 1.9.1 · LIVE EXECUTION · Build 1910"
     )
     owner.signal.set(
-        "V1.9.0 Build1900｜DEMO自动执行 + LIVE实盘只读审核｜双环境隔离｜LIMIT ONLY"
+        "V1.9.1 Build1910｜DEMO/LIVE独立自动执行｜LIMIT入场 + 触发市价TP/SL"
     )
     owner._v190_dual_ready = True
     _select_environment(owner, owner._v190_selected)
@@ -1403,7 +1394,7 @@ def apply():
 
     ui166.BUILD = BUILD
     ui166.WINDOW_TITLE = (
-        "KAYTRADE 1.9.0 · DUAL ENVIRONMENT · Build 1900"
+        "KAYTRADE 1.9.1 · LIVE EXECUTION · Build 1910"
     )
 
     v172.AIBridgeServer = _DisabledLegacyBridge
@@ -1426,7 +1417,9 @@ def apply():
     v184._refresh_v184 = _refresh_v190_dashboard
 
     model._kaytrade_v190_applied = True
+    model._kaytrade_v191_applied = True
     app.App._kaytrade_v190_applied = True
+    app.App._kaytrade_v191_applied = True
 
 
 apply()

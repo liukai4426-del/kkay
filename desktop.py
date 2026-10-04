@@ -70,7 +70,7 @@ apply_v190_dual_env_patch()
 
 
 def smoke_test():
-    """Exercise packaged V1.9.0 dual-environment UI without credentials/writes."""
+    """Exercise packaged V1.9.1 dual-environment execution UI without credentials/writes."""
     import ssl
     import tkinter as tk
     from unittest.mock import patch
@@ -81,8 +81,8 @@ def smoke_test():
     import v190_dual_env_patch as v190
 
     assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
-    assert v190.VERSION == '1.9.0' and v190.BUILD == '1900'
-    assert model.VERSION == '1.9.0' and model.BUILD == '1900'
+    assert v190.VERSION == '1.9.1' and v190.BUILD == '1910'
+    assert model.VERSION == '1.9.1' and model.BUILD == '1910'
     assert model.STRATEGY_ENABLED is False
     assert getattr(model, '_kaytrade_v190_applied', False)
     assert getattr(app.App, '_kaytrade_v190_applied', False)
@@ -90,7 +90,7 @@ def smoke_test():
     assert 'v181_paper_patch' not in sys.modules
     assert 'v182_ui_patch' not in sys.modules
 
-    with tempfile.TemporaryDirectory(prefix='kaytrade-v190-ui-check-') as folder:
+    with tempfile.TemporaryDirectory(prefix='kaytrade-v191-ui-check-') as folder:
         root = tk.Tk()
         try:
             with (
@@ -102,9 +102,9 @@ def smoke_test():
                 ui = app.App(root, Path(folder))
                 root.update()
                 assert 'KAYTRADE' in root.title()
-                assert '1.9.0' in root.title()
-                assert 'DUAL ENVIRONMENT' in root.title()
-                assert '1900' in root.title()
+                assert '1.9.1' in root.title()
+                assert 'LIVE EXECUTION' in root.title()
+                assert '1910' in root.title()
                 assert getattr(ui, '_v190_dual_ready', False)
                 assert set(ui._v190_engines) == {'demo','live'}
                 assert set(ui._v190_bridges) == {'demo','live'}
@@ -122,7 +122,7 @@ def smoke_test():
                 v190._refresh_v190_dashboard(ui)
                 root.update()
                 assert 'LIVE' in ui._v180_mode_var.get()
-                assert '只读' in ui._v183_auto_exec_note_var.get()
+                assert '实盘' in ui._v183_auto_exec_note_var.get() and '市价' in ui._v183_auto_exec_note_var.get()
                 ui.finished.set()
                 ui.thread.join(timeout=2)
                 ui.lock.close()
@@ -130,9 +130,9 @@ def smoke_test():
             root.destroy()
 
     Path(sys.argv[2]).write_text(
-        'PASS: KAYTRADE V1.9.0 Build1900 DUAL ENVIRONMENT SAFE; '
-        'DEMO supports isolated AI auto execution, LIVE is isolated read-only AI review, '
-        'both bridges/tokens/states are separate, LIMIT ONLY remains enforced, and no Paper runtime is loaded.\n'
+        'PASS: KAYTRADE V1.9.1 Build1910 LIVE EXECUTION; '
+        'DEMO and LIVE use isolated AI execution channels, credentials/bridges/tokens/states stay separate, '
+        'parent entries/reductions remain LIMIT, TP/SL are trigger-market protections, and no Paper runtime is loaded.\n'
     )
 
 
