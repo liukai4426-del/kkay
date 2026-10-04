@@ -1383,19 +1383,33 @@ def _refresh_v183_dashboard(owner):
 
 
 def _replace_widget_text(widget):
+    def rewrite(value):
+        return (
+            str(value or "")
+            .replace("本地Paper", "OKX模拟盘")
+            .replace("Paper", "OKX模拟盘")
+            .replace("PAPER", "OKX DEMO")
+        )
+
     try:
         text = str(widget.cget("text") or "")
-        if text:
-            new = (
-                text.replace("Paper", "OKX模拟盘")
-                .replace("PAPER", "OKX DEMO")
-                .replace("本地Paper", "OKX模拟盘")
-                .replace("双档OKX模拟盘订单", "双档OKX模拟盘订单")
-            )
-            if new != text:
-                widget.configure(text=new)
+        new = rewrite(text)
+        if text and new != text:
+            widget.configure(text=new)
     except Exception:
         pass
+
+    # visual.RoundedButton stores its caption in .text rather than Tk's
+    # text option, so normalize that too (including hidden legacy buttons).
+    try:
+        text_attr = getattr(widget, "text", None)
+        if isinstance(text_attr, str):
+            new_attr = rewrite(text_attr)
+            if new_attr != text_attr:
+                widget.configure(text=new_attr)
+    except Exception:
+        pass
+
     try:
         for child in widget.winfo_children():
             _replace_widget_text(child)
