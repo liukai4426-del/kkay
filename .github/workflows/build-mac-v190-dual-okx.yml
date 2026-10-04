@@ -4,7 +4,7 @@ on:
   push:
     branches: [feature/v190-dual-okx]
   pull_request:
-    branches: [release/v2.0.0-dual-okx]
+    branches: [release/v1.9.0-dual-okx]
   workflow_dispatch:
 
 permissions:
