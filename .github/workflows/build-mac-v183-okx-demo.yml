@@ -2,9 +2,9 @@ name: Build KAYTRADE Intel Mac 1.8.3 OKX Demo Build1831
 
 on:
   push:
-    branches: [feature/v183-okx-demo-execution]
+    branches: [feature/v1831-remove-paper-runtime]
   pull_request:
-    branches: [release/v1.8.3-okx-demo]
+    branches: [release/v1.8.3-clean]
   workflow_dispatch:
 
 permissions:
@@ -98,7 +98,7 @@ jobs:
           TMPDIR_CHECK="$(mktemp -d)"
           dist/KAYTRADE.app/Contents/MacOS/KAYTRADE --smoke-test "$TMPDIR_CHECK/smoke.txt"
           cat "$TMPDIR_CHECK/smoke.txt"
-          grep 'V1.8.3 Build1831 OKX DEMO LIMIT ONLY' "$TMPDIR_CHECK/smoke.txt"
+          grep 'V1.8.3 Build1831 OKX DEMO CLEAN LIMIT ONLY' "$TMPDIR_CHECK/smoke.txt"
           grep 'AI plans submit exchange limit orders immediately' "$TMPDIR_CHECK/smoke.txt"
           grep 'Paper runtime modules are not imported or packaged' "$TMPDIR_CHECK/smoke.txt"
       - name: Create installer
