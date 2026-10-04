@@ -1617,7 +1617,7 @@ def _app_arm_v183(self):
 
 def _app_init_v183(self, *args, **kwargs):
     _PREVIOUS_APP_INIT(self, *args, **kwargs)
-    self.root.title("KAYTRADE 1.8.3 · OKX DEMO CLEAN · Build 1840")
+    self.root.title("KAYTRADE 1.8.4 · OKX DEMO CLEAN · Build 1840")
     try:
         self.signal.set(
             "V1.8.4 Build1840 CLEAN｜OKX DEMO ONLY｜AI策略即刻提交LIMIT挂单｜无本地Paper Runtime"
@@ -1785,7 +1785,7 @@ def apply():
         module.BUILD = BUILD
 
     ui166.BUILD = BUILD
-    ui166.WINDOW_TITLE = "KAYTRADE 1.8.3 · OKX DEMO CLEAN · Build 1840"
+    ui166.WINDOW_TITLE = "KAYTRADE 1.8.4 · OKX DEMO CLEAN · Build 1840"
     model.STRATEGY_ENABLED = False
     model.AI_ONLY = True
 
