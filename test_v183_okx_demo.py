@@ -179,10 +179,22 @@ class V183OKXDemoTests(unittest.TestCase):
 
     def test_identity(self):
         self.assertEqual(v183.VERSION, "1.8.3")
-        self.assertEqual(v183.BUILD, "1830")
+        self.assertEqual(v183.BUILD, "1831")
         self.assertTrue(v183.DEMO_EXECUTION)
         self.assertTrue(v183.LIMIT_ONLY)
         self.assertIs(v183.app.Engine, v183.OKXDemoEngineV183)
+
+    def test_clean_runtime_has_no_paper_engine_alias_or_state(self):
+        e, _x = self.make_engine()
+        self.assertIs(v183.app.Engine, v183.OKXDemoEngineV183)
+        self.assertIs(v183.v172.AIOnlyEngine, v183.OKXDemoEngineV183)
+        e.store.data["paper_execution"] = {"tiers": {"1": {"status": "live"}}}
+        e.store.save()
+        e.connect()
+        self.assertNotIn("paper_execution", e.store.data)
+        state = e.ai_state()
+        self.assertFalse(state["paper_runtime_present"])
+        self.assertEqual(state["mode"], "OKX_DEMO_EXECUTION")
 
     def test_live_account_is_hard_blocked(self):
         e, _x = self.make_engine(demo=False)
