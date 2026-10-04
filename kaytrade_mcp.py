@@ -1,8 +1,9 @@
-"""Codex MCP adapter for KAYTRADE V1.9.0 Dual Environment Safe.
+"""Codex MCP adapter for KAYTRADE V1.9.1 Dual Environment Execution.
 
 DEMO: AI auto execution on OKX simulated trading.
-LIVE: real-account read-only + AI plan validation/review; no automated live writes.
+LIVE: guarded AI auto execution on the real OKX account when the UI switch is ON.
 
+Both environments use LIMIT parent entries/reductions and trigger-market TP/SL.
 Every tool call must explicitly specify environment='demo' or 'live'.
 """
 from __future__ import annotations
@@ -21,13 +22,13 @@ BRIDGES = {
 }
 
 mcp = FastMCP(
-    "kaytrade-v190-dual-env-safe",
+    "kaytrade-v191-live-execution",
     instructions=(
-        "KAYTRADE V1.9.0 Build1900 has two isolated environments. "
+        "KAYTRADE V1.9.1 Build1910 has two isolated environments. "
         "Always pass environment='demo' or environment='live' explicitly. "
-        "DEMO supports AI auto execution. LIVE is read-only and accepts AI plans for review only; "
-        "LIVE never exposes an automated trade-write tool. "
-        "Both environments are LIMIT ONLY. Never propose market orders or OKX -1 TP/SL sentinels. "
+        "DEMO and LIVE support AI auto execution only when that environment's UI channel is enabled. "
+        "Parent entry and explicit reduction orders must be LIMIT. "
+        "TP/SL are exchange-attached trigger-market protections using OKX order-price -1. "
         "Inspect get_kaytrade_state(environment) before publishing a plan. "
         "Never request, read, print or expose OKX credentials."
     ),
@@ -47,32 +48,30 @@ def _descriptor(environment: str) -> dict:
     if not path.exists():
         raise RuntimeError(f"KAYTRADE {environment} bridge is not running")
     data = json.loads(path.read_text())
-    if data.get("version") != "1.9.0" or str(data.get("build")) != "1900":
-        raise RuntimeError("KAYTRADE bridge must be V1.9.0 Build1900")
-    expected_mode = "OKX_DEMO_EXECUTION" if environment == "demo" else "OKX_LIVE_REVIEW"
+    if data.get("version") != "1.9.1" or str(data.get("build")) != "1910":
+        raise RuntimeError("KAYTRADE bridge must be V1.9.1 Build1910")
+    expected_mode = "OKX_DEMO_EXECUTION" if environment == "demo" else "OKX_LIVE_EXECUTION"
     if data.get("environment") != environment or data.get("mode") != expected_mode:
         raise RuntimeError("Environment Match Gate: bridge descriptor mismatch")
     if data.get("paper_runtime_present") is not False:
         raise RuntimeError("Paper runtime must be absent")
-    if data.get("limit_only") is not True:
-        raise RuntimeError("LIMIT ONLY marker missing")
-    if environment == "live" and data.get("live_ai_writes") is not False:
-        raise RuntimeError("LIVE bridge unexpectedly exposes automated writes")
+    if data.get("limit_entry_only") is not True:
+        raise RuntimeError("LIMIT parent-entry marker missing")
+    if data.get("market_protection") is not True:
+        raise RuntimeError("trigger-market TP/SL marker missing")
+    if environment == "live" and data.get("live_ai_writes") is not True:
+        raise RuntimeError("LIVE execution bridge capability missing")
     return data
 
 
-def _normalize_limit_exit(value, trigger, name):
-    if value is None:
-        return trigger
+def _market_exit_sentinel(trigger, name):
     try:
-        numeric = float(value)
+        numeric = float(trigger)
     except Exception as exc:
-        raise RuntimeError(f"{name} must be numeric") from exc
+        raise RuntimeError(f"{name} trigger must be numeric") from exc
     if numeric <= 0:
-        if trigger is None or float(trigger) <= 0:
-            raise RuntimeError(f"{name} requires a positive trigger price")
-        return trigger
-    return value
+        raise RuntimeError(f"{name} trigger must be positive")
+    return -1
 
 
 def _request(environment: str, method: str, path: str, payload=None):
@@ -134,10 +133,10 @@ def publish_trade_plan(
     tp_limit_price: float | None = None,
     sl_limit_price: float | None = None,
 ) -> dict:
-    """Publish an environment-scoped LIMIT plan.
+    """Publish an environment-scoped execution plan.
 
-    DEMO: if the DEMO auto channel is ON, the plan may be submitted to OKX simulated trading.
-    LIVE: the plan is validated/staged for manual execution only and never writes to OKX.
+    If that environment's AI channel is ON, a complete plan is submitted to OKX.
+    Entry is LIMIT; attached TP/SL execute at market after their trigger prices.
     """
     environment = _env(environment)
     if str(order_type).lower() != "limit":
@@ -148,8 +147,8 @@ def publish_trade_plan(
         raise RuntimeError("take_profit and stop_loss are required")
     if size is None or leverage is None:
         raise RuntimeError("size and leverage are required")
-    tp_limit_price = _normalize_limit_exit(tp_limit_price, take_profit, "tp_limit_price")
-    sl_limit_price = _normalize_limit_exit(sl_limit_price, stop_loss, "sl_limit_price")
+    tp_limit_price = _market_exit_sentinel(take_profit, "take_profit")
+    sl_limit_price = _market_exit_sentinel(stop_loss, "stop_loss")
 
     payload = {
         "environment": environment,
@@ -165,9 +164,9 @@ def publish_trade_plan(
         "size": size,
         "leverage": leverage,
         "plan_id": plan_id,
-        "tp_exit_type": "limit",
+        "tp_exit_type": "market",
         "tp_limit_price": tp_limit_price,
-        "sl_exit_type": "limit",
+        "sl_exit_type": "market",
         "sl_limit_price": sl_limit_price,
     }
     return _request(environment, "POST", "/v1/plan", payload)
@@ -189,13 +188,13 @@ def submit_demo_trade_proposal(
     tp_limit_price: float | None = None,
     sl_limit_price: float | None = None,
 ) -> dict:
-    """Submit a DEMO-only structured LIMIT trade request."""
+    """Submit a DEMO-only LIMIT entry with trigger-market TP/SL."""
     if limit_price is None:
         raise RuntimeError("limit_price is required")
     if action == "open" and (size is None or take_profit is None or stop_loss is None):
         raise RuntimeError("open requires size, take_profit and stop_loss")
-    tp_limit_price = _normalize_limit_exit(tp_limit_price, take_profit, "tp_limit_price")
-    sl_limit_price = _normalize_limit_exit(sl_limit_price, stop_loss, "sl_limit_price")
+    tp_limit_price = _market_exit_sentinel(take_profit, "take_profit")
+    sl_limit_price = _market_exit_sentinel(stop_loss, "stop_loss")
     payload = {
         "environment": "demo",
         "action": action,
@@ -252,14 +251,14 @@ def amend_demo_protection(
     tp_limit_price: float | None = None,
     sl_limit_price: float | None = None,
 ) -> dict:
-    """Amend DEMO LIMIT TP/SL. No LIVE equivalent is exposed."""
-    tp_limit_price = _normalize_limit_exit(tp_limit_price, take_profit, "tp_limit_price")
-    sl_limit_price = _normalize_limit_exit(sl_limit_price, stop_loss, "sl_limit_price")
+    """Amend DEMO trigger-market TP/SL. No LIVE equivalent is exposed."""
+    tp_limit_price = _market_exit_sentinel(take_profit, "take_profit") if take_profit is not None else None
+    sl_limit_price = _market_exit_sentinel(stop_loss, "stop_loss") if stop_loss is not None else None
     payload = {
         "environment": "demo",
         "tier": tier,
-        "tp_exit_type": "limit",
-        "sl_exit_type": "limit",
+        "tp_exit_type": "market",
+        "sl_exit_type": "market",
     }
     for key, value in {
         "take_profit": take_profit,
