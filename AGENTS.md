@@ -12,6 +12,7 @@ Before any paper action:
 When get_kaytrade_state reports auto_execute_plans=true, publish_trade_plan may immediately create a local Paper entry. For every executable open plan, always provide direction, size, leverage, order_type, take_profit and stop_loss. Limit plans also need limit_price or suggested_entry. Never omit TP or SL.
 
 The auto-execution switch is user-controlled in KAYTRADE; Codex must not enable it on the user's behalf.
+When a Tier has an identical unfilled Paper order, keep it instead of duplicating it. When a newer plan changes an unfilled order in that Tier, KAYTRADE replaces the pending Paper order with the latest plan. Never overwrite a filled position with a new entry recommendation.
 
 Supported paper actions:
 - market/limit entry via submit_trade_proposal;
