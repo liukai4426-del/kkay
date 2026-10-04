@@ -74,9 +74,9 @@ def smoke_test():
     import v180_ai_only_patch as v180
 
     assert ssl.create_default_context().cert_store_stats()['x509_ca'] > 0
-    assert v180.VERSION == '1.8.0' and v180.BUILD == '1800'
+    assert v180.VERSION == '1.8.0' and v180.BUILD == '1801'
     assert v180.AI_ONLY is True
-    assert model.VERSION == '1.8.0' and model.BUILD == '1800'
+    assert model.VERSION == '1.8.0' and model.BUILD == '1801'
     assert model.STRATEGY_ENABLED is False
     assert getattr(model, '_kaytrade_v180_ai_only_applied', False)
     assert getattr(app.App, '_kaytrade_v180_ai_only_applied', False)
@@ -99,7 +99,7 @@ def smoke_test():
                 assert 'KAYTRADE' in root.title()
                 assert '1.8.0' in root.title()
                 assert 'AI ONLY' in root.title()
-                assert '1800' in root.title()
+                assert '1801' in root.title()
                 assert ui.mode.get() == 'OKX模拟盘'
                 assert ui.engine is None
                 assert not ui.key.get() and not ui.secret.get() and not ui.phrase.get()
@@ -108,10 +108,10 @@ def smoke_test():
                 assert '市价 / 限价' in ui.signal.get()
                 assert getattr(ui, '_v180_plan_card', None) is not None
                 assert getattr(ui, '_v180_execution_card', None) is not None
-                assert 'AI 交易方案' in v172._widget_text(ui._v180_plan_card)
-                assert '订单 / 持仓' in v172._widget_text(ui._v180_execution_card)
-                assert '第一档 / TIER 1' in v172._widget_text(ui._v180_execution_card)
-                assert '第二档 / TIER 2' in v172._widget_text(ui._v180_execution_card)
+                assert 'AI 交易方案看板' in v172._widget_text(ui._v180_plan_card)
+                assert '订单 / 持仓执行' in v172._widget_text(ui._v180_execution_card)
+                assert '第一档执行方案' in v172._widget_text(ui._v180_execution_card)
+                assert '第二档执行方案' in v172._widget_text(ui._v180_execution_card)
                 assert '启用AI交易通道' in str(getattr(ui.trade_button, 'text', ''))
                 visible = [
                     str(button.text)
@@ -129,8 +129,8 @@ def smoke_test():
             root.destroy()
 
     Path(sys.argv[2]).write_text(
-        'PASS: KAYTRADE V1.8.0 Build1800 AI ONLY packaged runtime; '
-        'market and limit entry orders are supported, the OKX-inspired AI/order dashboard is present, '
+        'PASS: KAYTRADE V1.8.0 Build1801 AI ONLY packaged runtime; '
+        'market and limit entry orders are supported, the redesigned KAYTRADE AI-plan and order/position dashboards are present, '
         'legacy strategy entry is disabled, and autonomous AI writes remain restricted to OKX Demo Trading.\n'
     )
 
