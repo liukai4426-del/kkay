@@ -1,4 +1,4 @@
-# KAYTRADE V1.9.1 Live Execution · Build1910
+# KAYTRADE V1.9.1 Live Execution · Build1911
 
 V1.9.1 upgrades the isolated LIVE environment from review-only to guarded real-account AI execution.
 
@@ -29,3 +29,10 @@ V1.9.1 upgrades the isolated LIVE environment from review-only to guarded real-a
 - Existing V1.9.0 review-only LIVE state is not promoted into real orders.
 - LIVE starts disabled again after reconnect/restart and requires explicit user arming.
 - Trigger-market TP/SL can experience market slippage after the trigger; the trigger price is not a guaranteed fill price.
+
+## Build1911 hotfix
+
+- LIVE activation failures are now shown to the user instead of disappearing in a packaged Tk callback.
+- The UI performs a read-only activation preflight before opening the write gate.
+- Engine / state / write-gate status is verified after activation.
+- Any activation error explicitly leaves the LIVE write gate closed.
