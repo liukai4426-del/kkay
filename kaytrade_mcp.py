@@ -1,4 +1,4 @@
-"""Codex MCP adapter for KAYTRADE V1.8.3 OKX Demo Execution.
+"""Codex MCP adapter for KAYTRADE V1.8.4 OKX Demo Execution.
 
 The adapter never receives OKX credentials. It reads the short-lived local
 bridge descriptor created by the KAYTRADE app and talks only to 127.0.0.1.
@@ -15,9 +15,9 @@ from mcp.server.fastmcp import FastMCP
 BRIDGE_FILE = Path.home() / "Library" / "Application Support" / "OKXLocal" / "ai_bridge.json"
 
 mcp = FastMCP(
-    "kaytrade-v183-okx-demo",
+    "kaytrade-v184-okx-demo",
     instructions=(
-        "KAYTRADE V1.8.3 Build1831 Clean executes LIMIT orders directly on OKX Demo Trading. Entry, reductions, take-profit and stop-loss exits are LIMIT only. "
+        "KAYTRADE V1.8.4 Build1840 Clean executes LIMIT orders directly on OKX Demo Trading. Entry, reductions, take-profit and stop-loss exits are LIMIT only. "
         "Inspect get_kaytrade_state before proposing a trade. "
         "Trade-management tools submit writes to OKX Demo Trading only; live-account writes remain disabled. "
         "KAYTRADE must be connected to OKX Demo and the user must enable the OKX Demo AI channel. "
@@ -32,8 +32,8 @@ def _descriptor():
     if not BRIDGE_FILE.exists():
         raise RuntimeError("KAYTRADE AI Bridge is not running")
     data = json.loads(BRIDGE_FILE.read_text())
-    if data.get("version") != "1.8.3" or str(data.get("build")) != "1831":
-        raise RuntimeError("KAYTRADE bridge must be V1.8.3 Build1831 Clean")
+    if data.get("version") != "1.8.4" or str(data.get("build")) != "1840":
+        raise RuntimeError("KAYTRADE bridge must be V1.8.4 Build1840 Clean")
     if data.get("mode") != "OKX_DEMO_EXECUTION":
         raise RuntimeError("KAYTRADE bridge is not in OKX Demo execution mode")
     if data.get("paper_runtime_present") is not False:
@@ -41,6 +41,22 @@ def _descriptor():
     if data.get("demo_exchange_writes") is not True or data.get("live_ai_writes") is not False:
         raise RuntimeError("Unexpected bridge safety state")
     return data
+
+
+def _normalize_limit_exit(value, trigger, name):
+    if value is None:
+        return trigger
+    try:
+        numeric = float(value)
+    except Exception as exc:
+        raise RuntimeError(f"KAYTRADE LIMIT ONLY: {name} must be numeric") from exc
+    if numeric <= 0:
+        if trigger is None:
+            raise RuntimeError(
+                f"KAYTRADE LIMIT ONLY: {name} <= 0 requires a positive trigger price"
+            )
+        return trigger
+    return value
 
 
 def _request(method, path, payload=None):
@@ -111,10 +127,12 @@ def publish_trade_plan(
         raise RuntimeError("KAYTRADE LIMIT ONLY: limit_price or suggested_entry is required")
     if tp_exit_type.lower() != "limit" or sl_exit_type.lower() != "limit":
         raise RuntimeError("KAYTRADE LIMIT ONLY: TP/SL exit type must be limit")
-    if tp_limit_price is None and take_profit is not None:
-        tp_limit_price = take_profit
-    if sl_limit_price is None and stop_loss is not None:
-        sl_limit_price = stop_loss
+    tp_limit_price = _normalize_limit_exit(
+        tp_limit_price, take_profit, "tp_limit_price"
+    )
+    sl_limit_price = _normalize_limit_exit(
+        sl_limit_price, stop_loss, "sl_limit_price"
+    )
 
     payload = {
         "tier": tier,
@@ -156,7 +174,7 @@ def submit_trade_proposal(
     sl_exit_type: str = "limit",
     sl_limit_price: float | None = None,
 ) -> dict:
-    """Submit a structured AI trade request to KAYTRADE V1.8.3 OKX Demo.
+    """Submit a structured AI trade request to KAYTRADE V1.8.4 OKX Demo.
 
     action: open or close.
     direction: long or short.
@@ -170,10 +188,12 @@ def submit_trade_proposal(
         raise RuntimeError("KAYTRADE LIMIT ONLY: limit_price is required")
     if tp_exit_type.lower() != "limit" or sl_exit_type.lower() != "limit":
         raise RuntimeError("KAYTRADE LIMIT ONLY: TP/SL exit type must be limit")
-    if tp_limit_price is None and take_profit is not None:
-        tp_limit_price = take_profit
-    if sl_limit_price is None and stop_loss is not None:
-        sl_limit_price = stop_loss
+    tp_limit_price = _normalize_limit_exit(
+        tp_limit_price, take_profit, "tp_limit_price"
+    )
+    sl_limit_price = _normalize_limit_exit(
+        sl_limit_price, stop_loss, "sl_limit_price"
+    )
 
     payload = {
         "action": action,
@@ -237,10 +257,12 @@ def amend_demo_protection(
     """Amend TP/SL trigger prices. Protection exits are always LIMIT."""
     if tp_exit_type not in (None, "limit") or sl_exit_type not in (None, "limit"):
         raise RuntimeError("KAYTRADE LIMIT ONLY: TP/SL exit type must be limit")
-    if tp_limit_price is None and take_profit is not None:
-        tp_limit_price = take_profit
-    if sl_limit_price is None and stop_loss is not None:
-        sl_limit_price = stop_loss
+    tp_limit_price = _normalize_limit_exit(
+        tp_limit_price, take_profit, "tp_limit_price"
+    )
+    sl_limit_price = _normalize_limit_exit(
+        sl_limit_price, stop_loss, "sl_limit_price"
+    )
     payload = {"tier": tier, "tp_exit_type": "limit", "sl_exit_type": "limit"}
     for key, value in {
         "take_profit": take_profit,
