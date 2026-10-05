@@ -255,6 +255,46 @@ class OKXDualExecutionEngineV190(v183.OKXDemoEngineV183):
             return
         state = self._demo_state()
         tiers = [item for item in state.get("tiers", {}).values() if isinstance(item, dict)]
+
+        # Build2000 compatibility: orders created before equity_before tracking
+        # can remain locally "filled" after OKX has already closed them via
+        # attached TP/SL. Reconcile those stale legacy tiers only when the
+        # exchange independently confirms that the account is completely flat
+        # for this instrument and has no remaining ordinary/algo orders.
+        legacy_open = [
+            item for item in tiers
+            if float(item.get("filled_size") or 0) > float(item.get("closed_size") or 0)
+            and float(item.get("equity_before") or 0) <= 0
+        ]
+        if legacy_open:
+            positions = self.x.positions()
+            orders = self.x.orders()
+            algos = self.x.algos()
+            pending_states = {
+                "submitting", "submitted", "live", "partially_filled",
+                "cancel_requested", "amend_requested",
+            }
+            has_incomplete_entry = any(
+                str(item.get("status") or "") in pending_states
+                and float(item.get("filled_size") or 0) < float(item.get("size") or 0)
+                for item in legacy_open
+            )
+            if not positions and not orders and not algos and not has_incomplete_entry:
+                closed_at = time.time()
+                for item in legacy_open:
+                    item["closed_size"] = float(item.get("filled_size") or 0)
+                    item["position_size"] = 0.0
+                    item["status"] = "closed"
+                    item["closed_at"] = closed_at
+                    item["legacy_flat_reconciled"] = True
+                state["updated_at"] = closed_at
+                self.store.save()
+                self.emit(
+                    "log",
+                    f"[{_env_code(self)}] OKX确认空仓且无挂单：已同步 {len(legacy_open)} 个旧档为已平仓；"
+                    "旧档缺少开仓权益，因此仅修正持仓状态，不补算历史收益。",
+                )
+
         tracked_filled = [
             item for item in tiers
             if float(item.get("filled_size") or 0) > 0
