@@ -282,11 +282,16 @@ class OKXDualExecutionEngineV190(v183.OKXDemoEngineV183):
             if not positions and not orders and not algos and not has_incomplete_entry:
                 closed_at = time.time()
                 for item in legacy_open:
+                    item["legacy_client_order_id"] = str(item.get("client_order_id") or "")
+                    item["legacy_order_id"] = str(item.get("order_id") or "")
                     item["closed_size"] = float(item.get("filled_size") or 0)
                     item["position_size"] = 0.0
                     item["status"] = "closed"
+                    item["order_state"] = "closed"
                     item["closed_at"] = closed_at
                     item["legacy_flat_reconciled"] = True
+                    item["client_order_id"] = ""
+                    item["order_id"] = ""
                 state["updated_at"] = closed_at
                 self.store.save()
                 self.emit(
