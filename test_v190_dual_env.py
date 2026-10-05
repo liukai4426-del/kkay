@@ -1,10 +1,12 @@
 import json
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 
 from engine import Store
+from history import summarize
 from test_v183_okx_demo import DemoExchange
 import v190_dual_env_patch as v190
 
@@ -101,6 +103,62 @@ class V190DualEnvironmentTests(unittest.TestCase):
             state["execution_state"]["events"].append({"event": "local-copy-only"})
             current = live._demo_state()
             self.assertFalse(any(row.get("event") == "local-copy-only" for row in current["events"]))
+
+    def test_current_environment_emits_live_balance_refresh(self):
+        with tempfile.TemporaryDirectory() as folder:
+            events = []
+            x = DemoExchange(demo=True)
+            e = v190.OKXDualExecutionEngineV190(
+                x, Path(folder), lambda kind, data: events.append((kind, data))
+            )
+            e.connect()
+            events.clear()
+            e._v200_balance_emit_at = 0.0
+            e.cycle()
+
+            balances = [data for kind, data in events if kind == "balance"]
+            self.assertEqual(len(balances), 1)
+            self.assertEqual(balances[0]["equity"], 20000.0)
+            self.assertEqual(balances[0]["available"], 20000.0)
+
+            e.cycle()
+            balances = [data for kind, data in events if kind == "balance"]
+            self.assertEqual(len(balances), 1)
+
+    def test_live_closed_round_writes_history_and_clears_managed_position(self):
+        with tempfile.TemporaryDirectory() as folder:
+            live, x = self.make_engine(folder, False)
+            funds = {"equity": 20000.0, "available": 20000.0}
+            x.balance = lambda: (funds["equity"], funds["available"])
+
+            live.authorize_live_session("LIVE")
+            live.arm()
+            live.set_auto_execute_plans(True)
+            result = live.publish_ai_plan(self.plan(price=95100))
+            self.assertEqual(result["status"], "OKX_SUBMITTED")
+
+            tier = live._demo_state()["tiers"]["1"]
+            self.assertEqual(tier["equity_before"], 20000.0)
+            x.fill_order(tier["order_id"], price=95100, size=1)
+            x._positions = [{"posSide": "long", "pos": "1"}]
+            live.cycle()
+
+            tier = live._demo_state()["tiers"]["1"]
+            self.assertIsInstance(live._demo_state()["history_round"], dict)
+            tier["filled_at"] = time.time() - 10
+
+            funds["equity"] = 20012.5
+            funds["available"] = 20012.5
+            x._positions = []
+            live.cycle()
+
+            summary = summarize(live.store.path.with_suffix(".history.jsonl"))
+            self.assertEqual(summary["count"], 1)
+            self.assertAlmostEqual(summary["total"], 12.5, places=6)
+            self.assertEqual(summary["rows"][0]["side"], "做多")
+            self.assertIsNone(live._demo_state()["history_round"])
+            self.assertEqual(live._demo_state()["tiers"]["1"]["status"], "closed")
+            self.assertEqual(live._demo_state()["tiers"]["1"]["position_size"], 0.0)
 
     def test_demo_and_live_use_different_store_files(self):
         with tempfile.TemporaryDirectory() as folder:
