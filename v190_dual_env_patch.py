@@ -105,6 +105,7 @@ class OKXDualExecutionEngineV190(v183.OKXDemoEngineV183):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._live_session_authorized = False
+        self._v200_balance_emit_at = 0.0
 
     def connect(self):
         # Skip the V1.8.4 Demo-only connect message, but preserve its clean
@@ -139,6 +140,7 @@ class OKXDualExecutionEngineV190(v183.OKXDemoEngineV183):
         state.setdefault("results", {})
         state.setdefault("auto_execute_plans", True if self.x.demo else False)
         state.setdefault("risk_limits", dict(DEFAULT_RISK_LIMITS))
+        state.setdefault("history_round", None)
         state.setdefault("updated_at", time.time())
         if set(state["tiers"].keys()) != {"1", "2"}:
             state["tiers"] = {
@@ -212,7 +214,9 @@ class OKXDualExecutionEngineV190(v183.OKXDemoEngineV183):
         leverage = v183._d(proposal.get("leverage", limits["max_leverage"]), "leverage")
         if leverage > limits["max_leverage"]:
             raise legacy_engine.Halt(f"{_env_code(self)} leverage 必须≤{limits['max_leverage']}x")
-        return super()._validate_demo_open(proposal, replace_tier=replace_tier)
+        checked = super()._validate_demo_open(proposal, replace_tier=replace_tier)
+        self._v200_validated_equity = float(checked.get("equity") or 0.0)
+        return checked
 
     def _risk_totals(self, candidate=None, replace_tier=None):
         notional = Decimal("0")
@@ -242,8 +246,108 @@ class OKXDualExecutionEngineV190(v183.OKXDemoEngineV183):
         item["okx_demo"] = bool(self.x.demo)
         item["environment"] = "OKX_DEMO" if self.x.demo else "OKX_LIVE"
         item["version"] = VERSION
+        item["equity_before"] = float(getattr(self, "_v200_validated_equity", 0.0) or 0.0)
         self.store.save()
         return _rewrite_result(self, result)
+
+    def _sync_v200_history_round(self):
+        if not self.store:
+            return
+        state = self._demo_state()
+        tiers = [item for item in state.get("tiers", {}).values() if isinstance(item, dict)]
+        tracked_filled = [
+            item for item in tiers
+            if float(item.get("filled_size") or 0) > 0
+            and float(item.get("equity_before") or 0) > 0
+        ]
+        round_state = state.get("history_round")
+
+        if not isinstance(round_state, dict) and tracked_filled:
+            first = min(tracked_filled, key=lambda item: float(item.get("accepted_at") or time.time()))
+            round_state = {
+                "client_id": str(first.get("client_order_id") or first.get("proposal_id") or ""),
+                "equity_before": float(first["equity_before"]),
+                "side": str(first.get("side") or first.get("direction") or "旧记录"),
+                "px": first.get("entry_price") or first.get("limit_price") or "—",
+                "sz": sum(float(item.get("filled_size") or 0) for item in tracked_filled),
+                "started_at": float(first.get("accepted_at") or time.time()),
+            }
+            if round_state["client_id"]:
+                state["history_round"] = round_state
+                state["updated_at"] = time.time()
+                self.store.save()
+
+        round_state = state.get("history_round")
+        if not isinstance(round_state, dict):
+            return
+
+        pending_states = {
+            "submitting", "submitted", "live", "partially_filled",
+            "cancel_requested", "amend_requested",
+        }
+        if any(
+            str(item.get("status") or "") in pending_states
+            and float(item.get("filled_size") or 0) < float(item.get("size") or 0)
+            for item in tiers
+        ):
+            return
+
+        if self.x.positions():
+            return
+
+        last_fill_at = max(
+            (
+                float(item.get("filled_at") or item.get("accepted_at") or 0)
+                for item in tracked_filled
+            ),
+            default=0.0,
+        )
+        if last_fill_at and time.time() - last_fill_at < 5.0:
+            return
+
+        equity_after, _available = self.x.balance()
+        pnl = float(equity_after) - float(round_state["equity_before"])
+        self.store.record(
+            f"{VERSION}仓位归零",
+            {
+                "client_id": round_state["client_id"],
+                "equity_change": pnl,
+                "side": round_state.get("side") or "旧记录",
+                "px": round_state.get("px", "—"),
+                "sz": round_state.get("sz", "—"),
+                "environment": "OKX_DEMO" if self.x.demo else "OKX_LIVE",
+            },
+        )
+
+        closed_at = time.time()
+        for item in tracked_filled:
+            item["closed_size"] = float(item.get("filled_size") or 0)
+            item["position_size"] = 0.0
+            item["status"] = "closed"
+            item["closed_at"] = closed_at
+        state["history_round"] = None
+        state["updated_at"] = closed_at
+        self.store.save()
+        self.emit(
+            "log",
+            f"[{_env_code(self)}] 仓位已归零；本轮USDT净权益变化 {pnl:+.4f}，已写入历史收益。",
+        )
+
+    def _sync_all(self, cancel_expired=True):
+        super()._sync_all(cancel_expired=cancel_expired)
+        self._sync_v200_history_round()
+
+    def cycle(self):
+        with self._ai_lock:
+            super().cycle()
+            now = time.monotonic()
+            if now - self._v200_balance_emit_at >= 5.0:
+                equity, available = self.x.balance()
+                self._v200_balance_emit_at = now
+                self.emit(
+                    "balance",
+                    {"equity": float(equity), "available": float(available)},
+                )
 
     def _amend_pending_from_plan(self, current, proposal):
         return _rewrite_result(self, super()._amend_pending_from_plan(current, proposal))
