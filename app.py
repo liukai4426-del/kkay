@@ -476,6 +476,12 @@ class App:
                         self.history_table.insert('','end',text=row['time'][:19].replace('T',' '),values=(row['side'],f"{row['pnl']:+.4f}",f"{row['cumulative']:+.4f}",row['client_id']),tags=(tag,))
                     if data['skipped']: self.emit('log',f"历史记录有 {data['skipped']} 行损坏，已跳过；统计可能不完整")
                 elif kind=='network': self.network.set('网络：'+data)
+                elif kind=='balance':
+                    equity=float(data['equity'])
+                    available=float(data['available'])
+                    self._v200_equity_value=equity
+                    self._v200_available_value=available
+                    self.equity.set(f"实时USDT权益：{equity:,.2f} · 可用 {available:,.2f}")
                 elif kind=='status': self.status.set(data); self.update_trade_button()
                 elif kind=='candle_wait': self.signal.set(str(data))
                 elif kind=='ticker':
