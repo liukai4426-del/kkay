@@ -1,10 +1,12 @@
 """Single-position, fail-closed automatic engine. Demo by default in GUI."""
+import copy
 import hashlib
 import json
 import math
 import os
 import time
 import uuid
+import threading
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -133,6 +135,7 @@ def make_plan(s,side,ticker,meta,atr,available,daily_remaining,position_multipli
 class Store:
     def __init__(self,path):
         self.path=Path(path)
+        self._write_lock=threading.RLock()
         self.data={'active':None,'last_bar':0,'last_close':0,'streak':0,'streak_day':'','streak_notice_day':'','day':'','peak':0,'halt':''}
         if self.path.exists():
             try:
@@ -145,14 +148,51 @@ class Store:
                 self.data['halt']=clean
                 self.save()
 
+    def _snapshot_unlocked(self):
+        last_error=None
+        for _ in range(50):
+            try:
+                return copy.deepcopy(self.data)
+            except RuntimeError as exc:
+                message=str(exc)
+                if 'dictionary changed size during iteration' not in message and 'dictionary keys changed during iteration' not in message:
+                    raise
+                last_error=exc
+                time.sleep(0.001)
+        raise last_error
+
+    def snapshot(self):
+        with self._write_lock:
+            return self._snapshot_unlocked()
+
     def save(self):
-        self.path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
-        temp=self.path.with_suffix('.tmp')
-        fd=os.open(temp,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
-        with os.fdopen(fd,'w') as f:
-            json.dump(self.data,f,ensure_ascii=False,indent=2)
-            f.flush(); os.fsync(f.fileno())
-        os.replace(temp,self.path)
+        with self._write_lock:
+            snapshot=self._snapshot_unlocked()
+            self.path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+            temp=self.path.with_name(f'.{self.path.name}.{os.getpid()}.{threading.get_ident()}.{uuid.uuid4().hex}.tmp')
+            fd=None
+            try:
+                fd=os.open(temp,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+                with os.fdopen(fd,'w') as f:
+                    fd=None
+                    json.dump(snapshot,f,ensure_ascii=False,indent=2)
+                    f.flush(); os.fsync(f.fileno())
+                os.replace(temp,self.path)
+                dir_flags=os.O_RDONLY
+                if hasattr(os,'O_DIRECTORY'):
+                    dir_flags|=os.O_DIRECTORY
+                dir_fd=os.open(self.path.parent,dir_flags)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
+            finally:
+                if fd is not None:
+                    os.close(fd)
+                try:
+                    temp.unlink()
+                except FileNotFoundError:
+                    pass
 
     def record(self,event,data):
         path=self.path.with_suffix('.history.jsonl')
