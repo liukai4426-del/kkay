@@ -126,9 +126,11 @@ def _runtime_daily(owner):
     if state.get("halt"):
         return False
     try:
-        text = str(owner.equity.get())
-        nums = re.findall(r"[-+]?\d+(?:\.\d+)?", text.replace(",", ""))
-        equity = float(nums[-1]) if nums else None
+        equity = getattr(owner, "_v200_equity_value", None)
+        if equity is None:
+            text = str(owner.equity.get())
+            nums = re.findall(r"[-+]?\d+(?:\.\d+)?", text.replace(",", ""))
+            equity = float(nums[0]) if nums else None
         peak = float(state.get("peak") or 0.0)
         limit = float(settings.daily_loss)
     except Exception:
