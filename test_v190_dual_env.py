@@ -160,6 +160,82 @@ class V190DualEnvironmentTests(unittest.TestCase):
             self.assertEqual(live._demo_state()["tiers"]["1"]["status"], "closed")
             self.assertEqual(live._demo_state()["tiers"]["1"]["position_size"], 0.0)
 
+    def test_legacy_filled_tiers_reconcile_closed_when_okx_is_flat(self):
+        with tempfile.TemporaryDirectory() as folder:
+            demo, x = self.make_engine(folder, True)
+            state = demo._demo_state()
+            state["tiers"] = {
+                "1": {
+                    "tier": 1,
+                    "direction": "short",
+                    "side": "做空",
+                    "size": 1.15,
+                    "filled_size": 1.15,
+                    "closed_size": 0.0,
+                    "status": "filled",
+                    "accepted_at": time.time() - 3600,
+                    "client_order_id": "legacy-short-1",
+                    "proposal_id": "legacy-short-plan-1",
+                },
+                "2": {
+                    "tier": 2,
+                    "direction": "short",
+                    "side": "做空",
+                    "size": 1.15,
+                    "filled_size": 1.15,
+                    "closed_size": 0.0,
+                    "status": "filled",
+                    "accepted_at": time.time() - 3500,
+                    "client_order_id": "legacy-short-2",
+                    "proposal_id": "legacy-short-plan-2",
+                },
+            }
+            demo.store.save()
+
+            self.assertEqual(x.positions(), [])
+            self.assertEqual(x.orders(), [])
+            self.assertEqual(x.algos(), [])
+
+            demo._sync_v200_history_round()
+
+            for item in demo._demo_state()["tiers"].values():
+                self.assertEqual(item["closed_size"], 1.15)
+                self.assertEqual(item["position_size"], 0.0)
+                self.assertEqual(item["status"], "closed")
+                self.assertTrue(item["legacy_flat_reconciled"])
+
+            summary = summarize(demo.store.path.with_suffix(".history.jsonl"))
+            self.assertEqual(summary["count"], 0)
+
+            demo.arm()
+            result = demo.publish_ai_plan(self.plan(price=96000, tier=1))
+            self.assertEqual(result["status"], "OKX_SUBMITTED")
+
+    def test_legacy_filled_tier_is_not_closed_while_okx_position_exists(self):
+        with tempfile.TemporaryDirectory() as folder:
+            demo, x = self.make_engine(folder, True)
+            state = demo._demo_state()
+            state["tiers"]["1"] = {
+                "tier": 1,
+                "direction": "short",
+                "side": "做空",
+                "size": 1.15,
+                "filled_size": 1.15,
+                "closed_size": 0.0,
+                "status": "filled",
+                "accepted_at": time.time() - 3600,
+                "client_order_id": "legacy-short-live",
+            }
+            demo.store.save()
+            x._positions = [{"posSide": "short", "pos": "1.15"}]
+
+            demo._sync_v200_history_round()
+
+            item = demo._demo_state()["tiers"]["1"]
+            self.assertEqual(item["closed_size"], 0.0)
+            self.assertEqual(item["status"], "filled")
+            self.assertNotIn("legacy_flat_reconciled", item)
+
     def test_demo_and_live_use_different_store_files(self):
         with tempfile.TemporaryDirectory() as folder:
             demo, _ = self.make_engine(folder, True)
